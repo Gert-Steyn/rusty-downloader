@@ -1,5 +1,5 @@
 <script lang="ts">
-	import AddLinksDialog, { extractLinks } from '#lib/components/AddLinksDialog.svelte';
+	import AddLinksDialog from '#lib/components/AddLinksDialog.svelte';
 	import DetailsPanel from '#lib/components/DetailsPanel.svelte';
 	import DownloadsTable, { type Selection } from '#lib/components/DownloadsTable.svelte';
 	import EmptyState from '#lib/components/EmptyState.svelte';
@@ -73,24 +73,15 @@
 		e.preventDefault();
 	}
 
-	// Ctrl+V anywhere on the page opens the dialog with the pasted links.
-	function onpaste(e: ClipboardEvent) {
-		if (adding || removing || inTextField(e.target)) return;
-		const text = e.clipboardData?.getData('text') ?? '';
-		if (extractLinks(text).length) {
-			e.preventDefault();
-			openAdd(text);
-		}
-	}
 </script>
 
-<svelte:window {onkeydown} {onpaste} />
+<svelte:window {onkeydown} />
 
 <div class="page">
 	<header class="toolbar">
 		<h1>Downloads</h1>
 		<span class="spacer"></span>
-		<button class="btn accent" onclick={() => openAdd()} title="Add links (Ctrl+N, or paste anywhere)">
+		<button class="btn accent" onclick={() => openAdd()} title="Add and start links (Ctrl+N)">
 			<Icon name="plus" /> Add links
 		</button>
 		<button class="btn" onclick={downloads.resumeAll} disabled={!hasAny}><Icon name="play" /> Resume all</button>
@@ -116,7 +107,7 @@
 			<EmptyState
 				icon="downloads"
 				title="No downloads yet"
-				body="Click Add links, or just press Ctrl+V anywhere in this window to paste links."
+				body="Click Add links to start right away, or paste (Ctrl+V) or drop links anywhere to review them in the LinkGrabber first."
 			/>
 		</div>
 	{/if}

@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rdl_core::http::filename;
+use rdl_core::linkgrabber::default_package_name;
 use rdl_core::manager::{
     DEFAULT_QUEUE, Download, DownloadId, NewDownload, NewPackage, Package, PackageId, Status,
 };
@@ -16,7 +16,7 @@ use crate::state::AppState;
 
 /// Errors cross the IPC boundary as plain messages.
 #[derive(Debug, Serialize, Type)]
-pub struct CommandError(String);
+pub struct CommandError(pub(crate) String);
 
 impl From<rdl_core::Error> for CommandError {
     fn from(err: rdl_core::Error) -> Self {
@@ -31,7 +31,7 @@ impl From<String> for CommandError {
     }
 }
 
-type CommandResult<T> = Result<T, CommandError>;
+pub(crate) type CommandResult<T> = Result<T, CommandError>;
 
 #[derive(Debug, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -255,23 +255,6 @@ fn parse_links(inputs: &[String]) -> (Vec<Url>, Vec<String>) {
     (urls, rejected)
 }
 
-/// One link: its filename without extension. Several: the host they share,
-/// or the first link's host.
-fn default_package_name(urls: &[Url]) -> String {
-    if let [url] = urls
-        && let Some(name) = filename::from_url(url)
-    {
-        return match name.rsplit_once('.') {
-            Some((stem, _)) if !stem.is_empty() => stem.to_owned(),
-            _ => name,
-        };
-    }
-    urls.first()
-        .and_then(|u| u.host_str())
-        .map(|h| h.trim_start_matches("www.").to_owned())
-        .unwrap_or_else(|| "Links".to_owned())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,16 +271,5 @@ mod tests {
         let (urls, rejected) = parse_links(&inputs);
         assert_eq!(urls.len(), 2);
         assert_eq!(rejected, ["ftp://example.com/b", "not a url"]);
-    }
-
-    #[test]
-    fn package_names_come_from_the_links() {
-        let one = [Url::parse("https://example.com/files/Big%20Video.mp4").unwrap()];
-        assert_eq!(default_package_name(&one), "Big Video");
-        let many = [
-            Url::parse("https://www.example.com/a.zip").unwrap(),
-            Url::parse("https://www.example.com/b.zip").unwrap(),
-        ];
-        assert_eq!(default_package_name(&many), "example.com");
     }
 }

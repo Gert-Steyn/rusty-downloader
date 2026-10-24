@@ -1,6 +1,6 @@
 // Sample data for previewing the UI in a plain browser (`pnpm ui:dev`).
 // Never loaded inside the app.
-import type { Download, Package, Status } from './api.js';
+import type { Availability, Download, GrabbedLink, Package, Status } from './api.js';
 import type { Live } from './downloads.svelte.js';
 
 const MB = 1024 * 1024;
@@ -50,6 +50,35 @@ export function packages(): Package[] {
 			dl(3, null, null, 0, 'queued')
 		]),
 		pkg(4, 'Drivers', [dl(4, 'gpu-driver-setup.exe', 742 * MB, 1, 'completed')])
+	];
+}
+
+export function grabbedLinks(): GrabbedLink[] {
+	let id = 100;
+	const link = (
+		path: string,
+		pkg: string,
+		availability: Availability,
+		size: number | null,
+		error: string | null = null
+	): GrabbedLink => ({
+		id: id++,
+		url: `https://files.example.net/${path}`,
+		host: 'files.example.net',
+		filename: availability === 'checking' || availability === 'unknown' ? null : path.split('/').pop()!,
+		size,
+		availability,
+		error,
+		package: pkg,
+		destDir: null
+	});
+	return [
+		link('movie.part1.rar', 'movie', 'online', 1024 * MB),
+		link('movie.part2.rar', 'movie', 'online', 1024 * MB),
+		link('movie.part3.rar', 'movie', 'checking', null),
+		link('notes.pdf', 'files.example.net', 'online', 2 * MB),
+		link('old/archive.zip', 'files.example.net', 'offline', null, 'server returned HTTP 404'),
+		link('slow/report.docx', 'files.example.net', 'error', null, 'operation timed out')
 	];
 }
 

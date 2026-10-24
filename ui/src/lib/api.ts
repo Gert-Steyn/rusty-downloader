@@ -5,11 +5,13 @@ import type {
 	Download_Serialize,
 	DownloadEvents_Serialize,
 	Event_Serialize,
+	GrabbedLink_Serialize,
+	GrabberEvents_Serialize,
 	Package_Serialize
 } from './bindings.js';
 
 export { commands, events } from './bindings.js';
-export type { AppInfo, Status } from './bindings.js';
+export type { AppInfo, Availability, LinkSource, Status } from './bindings.js';
 export { isTauri };
 
 // The backend serialises these; the UI only ever receives them.
@@ -17,6 +19,8 @@ export type Package = Package_Serialize;
 export type Download = Download_Serialize;
 export type DownloadEvent = Event_Serialize;
 export type DownloadEventBatch = DownloadEvents_Serialize;
+export type GrabbedLink = GrabbedLink_Serialize;
+export type GrabberEventBatch = GrabberEvents_Serialize;
 
 type CommandResult<T> = { status: 'ok'; data: T } | { status: 'error'; error: CommandError };
 

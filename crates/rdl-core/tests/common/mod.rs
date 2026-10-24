@@ -47,9 +47,11 @@ enum Mode {
     Slow,
     /// The first three responses die after 300 KiB.
     Flaky,
+    /// No filename in Content-Disposition, so clients name it from the URL.
+    Named,
 }
 
-/// Routes: `/file` `/slow` `/flaky` (ranged, same bytes and ETag), `/plain`
+/// Routes: `/file` `/slow` `/flaky` `/named/{name}` (ranged, same bytes and ETag), `/plain`
 /// (ignores Range), `/chunked` (no length), `/redirect` → `/file`, `/gone` (410).
 pub async fn spawn_server() -> (Url, Arc<Server>) {
     let mut data = vec![0u8; SIZE];
@@ -65,6 +67,7 @@ pub async fn spawn_server() -> (Url, Arc<Server>) {
         .route("/file", get(|s, h| ranged(s, h, Mode::Normal)))
         .route("/slow", get(|s, h| ranged(s, h, Mode::Slow)))
         .route("/flaky", get(|s, h| ranged(s, h, Mode::Flaky)))
+        .route("/named/{name}", get(|s, h| ranged(s, h, Mode::Named)))
         .route("/plain", get(plain))
         .route("/chunked", get(chunked))
         .route("/redirect", get(|| async { Redirect::temporary("/file") }))
@@ -143,7 +146,10 @@ async fn ranged(State(server): State<Arc<Server>>, headers: HeaderMap, mode: Mod
         (header::ACCEPT_RANGES, "bytes".into()),
         (
             header::CONTENT_DISPOSITION,
-            r#"attachment; filename="test.bin""#.into(),
+            match mode {
+                Mode::Named => "inline".into(),
+                _ => r#"attachment; filename="test.bin""#.into(),
+            },
         ),
     ];
     match parse_range(&headers, len).filter(|_| if_range_ok) {

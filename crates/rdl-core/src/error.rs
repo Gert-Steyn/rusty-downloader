@@ -18,6 +18,9 @@ pub enum Error {
     #[error("logging setup failed: {0}")]
     Logging(String),
 
+    #[error("invalid stored setting: {0}")]
+    Json(#[from] serde_json::Error),
+
     #[error("HTTP request failed: {0}")]
     Http(#[from] reqwest::Error),
 
@@ -44,6 +47,9 @@ pub enum Error {
 
     #[error("invalid URL: {0}")]
     InvalidUrl(String),
+
+    #[error("{0}")]
+    InvalidInput(String),
 
     #[error("{0} not found")]
     NotFound(String),

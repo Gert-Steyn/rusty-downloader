@@ -2,10 +2,14 @@
 	import '#lib/styles/theme.css';
 	import favicon from '#lib/assets/favicon.svg';
 	import Icon from '#lib/components/Icon.svelte';
+	import Toast from '#lib/components/Toast.svelte';
 	import { mainNav, footerNav, type NavItem } from '#lib/nav.js';
-	import { commands, isTauri, unwrap } from '#lib/api.js';
+	import { commands, isTauri, unwrap, type LinkSource } from '#lib/api.js';
 	import { downloads } from '#lib/downloads.svelte.js';
+	import { isLinkDrag, textFromDrop } from '#lib/drop.js';
 	import { formatSpeed } from '#lib/format.js';
+	import { grabber } from '#lib/linkgrabber.svelte.js';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import type { LayoutProps } from './$types';
 
@@ -19,12 +23,61 @@
 			.then((info) => (version = info.version))
 			.catch((e) => console.error('app_info failed', e));
 	}
-	// Owned by the layout so the status bar is live on every page.
+	// Owned by the layout so the status bar and badges are live on every page.
 	downloads.start();
+	grabber.start();
 
 	const isActive = (item: NavItem) =>
 		item.href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(item.href);
+
+	/** Links go to the LinkGrabber first, wherever they come from. */
+	async function grab(text: string, source: LinkSource) {
+		if ((await grabber.add(text, source)) && page.url.pathname !== '/linkgrabber') goto('/linkgrabber');
+	}
+
+	function busyElsewhere(target: EventTarget | null): boolean {
+		const inField = target instanceof HTMLElement && target.closest('input, textarea, [contenteditable]');
+		return Boolean(inField) || document.querySelector('dialog[open]') !== null;
+	}
+
+	// Ctrl+V anywhere outside a text field stages the pasted links.
+	function onpaste(e: ClipboardEvent) {
+		if (busyElsewhere(e.target)) return;
+		const text = e.clipboardData?.getData('text') ?? '';
+		if (!/https?:\/\//i.test(text)) return;
+		e.preventDefault();
+		grab(text, 'manual');
+	}
+
+	// Count enter/leave pairs: dragleave also fires when crossing child elements.
+	let dragDepth = $state(0);
+	const dropping = $derived(dragDepth > 0);
+
+	function ondragenter(e: DragEvent) {
+		if (!isLinkDrag(e.dataTransfer) || document.querySelector('dialog[open]')) return;
+		e.preventDefault();
+		dragDepth++;
+	}
+	function ondragover(e: DragEvent) {
+		if (dragDepth > 0) {
+			e.preventDefault();
+			if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+		}
+	}
+	function ondragleave() {
+		if (dragDepth > 0) dragDepth--;
+	}
+	async function ondrop(e: DragEvent) {
+		if (dragDepth === 0 || !e.dataTransfer) return;
+		e.preventDefault();
+		dragDepth = 0;
+		const text = await textFromDrop(e.dataTransfer);
+		if (/https?:\/\//i.test(text)) grab(text, 'drop');
+		else grabber.say('No links found in what was dropped');
+	}
 </script>
+
+<svelte:window {onpaste} {ondragenter} {ondragover} {ondragleave} {ondrop} />
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
@@ -34,6 +87,9 @@
 	<a href={item.href} class="nav-item" class:active={isActive(item)} aria-current={isActive(item) ? 'page' : undefined}>
 		<Icon name={item.icon} size={18} />
 		<span>{item.label}</span>
+		{#if item.href === '/linkgrabber' && grabber.links.length}
+			<span class="badge" aria-label="{grabber.links.length} links waiting">{grabber.links.length}</span>
+		{/if}
 	</a>
 {/snippet}
 
@@ -63,6 +119,22 @@
 		<span>No speed limit</span>
 	</footer>
 </div>
+
+{#if dropping}
+	<div class="drop-overlay" aria-hidden="true">
+		<div class="drop-card">
+			<Icon name="link" size={28} />
+			<strong>Drop to add links</strong>
+			<span>Links, selected text and link-list files go to the LinkGrabber</span>
+		</div>
+	</div>
+{/if}
+
+<Toast
+	message={grabber.notice}
+	action={grabber.notice?.review && page.url.pathname !== '/linkgrabber' ? 'Review' : undefined}
+	onaction={() => goto('/linkgrabber')}
+/>
 
 <style>
 	.shell {
@@ -151,5 +223,43 @@
 	}
 	.statusbar .spacer {
 		flex: 1;
+	}
+
+	.badge {
+		margin-left: auto;
+		min-width: 20px;
+		padding: 0 6px;
+		border-radius: 10px;
+		font-size: 11px;
+		line-height: 18px;
+		text-align: center;
+		color: var(--accent-text);
+		background: var(--accent);
+	}
+
+	.drop-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 20;
+		display: grid;
+		place-items: center;
+		background: color-mix(in srgb, var(--accent) 14%, transparent);
+		border: 2px dashed var(--accent);
+		pointer-events: none;
+	}
+	.drop-card {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 6px;
+		padding: 24px 32px;
+		border-radius: var(--radius-overlay);
+		background: var(--page-fallback);
+		color: var(--text-secondary);
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+	}
+	.drop-card strong {
+		color: var(--text-primary);
+		font: 600 16px/22px var(--font-display);
 	}
 </style>

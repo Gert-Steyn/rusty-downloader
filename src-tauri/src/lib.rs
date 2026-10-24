@@ -1,5 +1,7 @@
+mod clipboard;
 mod commands;
 mod events;
+mod grabber_commands;
 mod state;
 
 use specta_typescript::Typescript;
@@ -27,8 +29,22 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::open_download,
             commands::reveal_download,
             commands::open_package_folder,
+            grabber_commands::grabber_list,
+            grabber_commands::grabber_add,
+            grabber_commands::grabber_remove,
+            grabber_commands::grabber_clear,
+            grabber_commands::grabber_rename,
+            grabber_commands::grabber_set_package,
+            grabber_commands::grabber_set_folder,
+            grabber_commands::grabber_recheck,
+            grabber_commands::grabber_confirm,
+            grabber_commands::get_clipboard_watch,
+            grabber_commands::set_clipboard_watch,
         ])
-        .events(collect_events![events::DownloadEvents])
+        .events(collect_events![
+            events::DownloadEvents,
+            events::GrabberEvents
+        ])
         // Sizes and ids are far below 2^53, so plain numbers are safe in JS.
         .dangerously_cast_bigints_to_number()
 }
@@ -59,9 +75,19 @@ pub fn run() {
         .setup(move |app| {
             specta.mount_events(app);
             let state = tauri::async_runtime::block_on(AppState::init())?;
-            let events = state.downloads.subscribe();
+            let download_events = state.downloads.subscribe();
+            let grabber_events = state.grabber.subscribe();
             app.manage(state);
-            tauri::async_runtime::spawn(events::forward(app.handle().clone(), events));
+            let handle = app.handle();
+            tauri::async_runtime::spawn(events::forward::<_, events::DownloadBatch>(
+                handle.clone(),
+                download_events,
+            ));
+            tauri::async_runtime::spawn(events::forward::<_, events::GrabberBatch>(
+                handle.clone(),
+                grabber_events,
+            ));
+            tauri::async_runtime::spawn(clipboard::watch(handle.clone()));
             Ok(())
         })
         .build(tauri::generate_context!())

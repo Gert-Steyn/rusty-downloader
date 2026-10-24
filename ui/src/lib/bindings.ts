@@ -24,11 +24,26 @@ export const commands = {
 	 */
 	revealDownload: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("reveal_download", { id })),
 	openPackageFolder: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("open_package_folder", { id })),
+	grabberList: () => typedError<GrabbedLink_Serialize[], CommandError>(__TAURI_INVOKE("grabber_list")),
+	/**  Find links in `text` and stage them. */
+	grabberAdd: (text: string, source: LinkSource) => typedError<GrabResult, CommandError>(__TAURI_INVOKE("grabber_add", { text, source })),
+	grabberRemove: (ids: number[]) => typedError<null, CommandError>(__TAURI_INVOKE("grabber_remove", { ids })),
+	grabberClear: () => typedError<null, CommandError>(__TAURI_INVOKE("grabber_clear")),
+	grabberRename: (id: number, filename: string) => typedError<null, CommandError>(__TAURI_INVOKE("grabber_rename", { id, filename })),
+	grabberSetPackage: (ids: number[], name: string) => typedError<null, CommandError>(__TAURI_INVOKE("grabber_set_package", { ids, name })),
+	/**  `dir` of `None` (or empty) means the default Downloads folder. */
+	grabberSetFolder: (ids: number[], dir: string | null) => typedError<null, CommandError>(__TAURI_INVOKE("grabber_set_folder", { ids, dir })),
+	grabberRecheck: (ids: number[]) => typedError<null, CommandError>(__TAURI_INVOKE("grabber_recheck", { ids })),
+	/**  Queue the links as downloads; returns the new package ids. */
+	grabberConfirm: (ids: number[]) => typedError<number[], CommandError>(__TAURI_INVOKE("grabber_confirm", { ids })),
+	getClipboardWatch: () => __TAURI_INVOKE<boolean>("get_clipboard_watch"),
+	setClipboardWatch: (enabled: boolean) => typedError<null, CommandError>(__TAURI_INVOKE("set_clipboard_watch", { enabled })),
 };
 
 /** Events */
 export const events = {
 	downloadEvents: makeEvent<DownloadEvents_Serialize, DownloadEvents_Deserialize>("download-events"),
+	grabberEvents: makeEvent<GrabberEvents_Serialize, GrabberEvents_Deserialize>("grabber-events"),
 };
 
 /* Types */
@@ -65,6 +80,12 @@ export type AppInfo = {
 	logsDir: string,
 	schemaVersion: number,
 };
+
+export type Availability = "unknown" | "checking" | "online" | 
+/**  The server says the file is gone (404, 410) or refuses access. */
+"offline" | 
+/**  The check itself failed (network, timeout, server error); may be temporary. */
+"error";
 
 /**  Errors cross the IPC boundary as plain messages. */
 export type CommandError = string;
@@ -135,6 +156,63 @@ export type Event_Deserialize = { type: "packageAdded"; packageId: number } | { 
 export type Event_Serialize = { type: "packageAdded"; packageId: number } | { type: "packageRemoved"; packageId: number } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error: string | null } | 
 /**  Name, size and destination are known after the first probe. */
 { type: "resolved"; downloadId: number; filename: string; size: number | null } | { type: "progress"; downloadId: number; downloaded: number; total: number | null; speedBps: number; connections: number };
+
+export type GrabResult = {
+	added: number,
+	/**  Links that were already in the LinkGrabber. */
+	duplicates: number,
+};
+
+export type GrabbedLink = GrabbedLink_Serialize | GrabbedLink_Deserialize;
+
+export type GrabbedLink_Deserialize = {
+	id: number,
+	url: string,
+	host: string,
+	filename?: string | null,
+	size?: number | null,
+	availability: Availability,
+	error?: string | null,
+	package: string,
+	/**  `None` means the default download folder. */
+	destDir?: string | null,
+};
+
+export type GrabbedLink_Serialize = {
+	id: number,
+	url: string,
+	host: string,
+	filename: string | null,
+	size: number | null,
+	availability: Availability,
+	error: string | null,
+	package: string,
+	/**  `None` means the default download folder. */
+	destDir: string | null,
+};
+
+export type GrabberEvent = GrabberEvent_Serialize | GrabberEvent_Deserialize;
+
+export type GrabberEvent_Deserialize = { type: "added"; links: GrabbedLink_Deserialize[]; source: LinkSource } | { type: "updated"; link: GrabbedLink_Deserialize } | { type: "removed"; ids: number[] };
+
+export type GrabberEvent_Serialize = { type: "added"; links: GrabbedLink_Serialize[]; source: LinkSource } | { type: "updated"; link: GrabbedLink_Serialize } | { type: "removed"; ids: number[] };
+
+export type GrabberEvents = GrabberEvents_Serialize | GrabberEvents_Deserialize;
+
+export type GrabberEvents_Deserialize = {
+	events: GrabberEvent_Deserialize[],
+	/**  Events were dropped because the UI fell behind; reload the full list. */
+	resync: boolean,
+};
+
+export type GrabberEvents_Serialize = {
+	events: GrabberEvent_Serialize[],
+	/**  Events were dropped because the UI fell behind; reload the full list. */
+	resync: boolean,
+};
+
+/**  Where links came from, so the UI can say "3 links from the clipboard". */
+export type LinkSource = "manual" | "clipboard" | "drop";
 
 export type Package = Package_Serialize | Package_Deserialize;
 

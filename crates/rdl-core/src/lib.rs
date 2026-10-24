@@ -5,9 +5,11 @@
 pub mod db;
 pub mod error;
 pub mod http;
+pub mod linkgrabber;
 pub mod logging;
 pub mod manager;
 pub mod paths;
+pub mod settings;
 
 pub use error::{Error, Result};
 

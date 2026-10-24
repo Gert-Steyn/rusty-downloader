@@ -223,7 +223,7 @@ enum JobKind { Http, Ftp, Sftp, Torrent, YtDlp, GalleryDl }
   - Context menus: *Download with Rusty Downloader*, *Send all links on page to LinkGrabber*, *Send selection links*, *Send page to gallery-dl / yt-dlp*.
   - A popup shows connection status and lets you pause interception.
 - **Native messaging host** (`rdl-native-host.exe`): registered under `HKCU\Software\Google\Chrome\NativeMessagingHosts`, `...\Microsoft\Edge\...` and `...\Mozilla\NativeMessagingHosts` by the installer. Relays JSON over a named pipe to the app and starts the app if it isn't running.
-- **Clipboard monitoring**: `AddClipboardFormatListener` on a hidden window. Detects URLs with configurable patterns and ignores the app's own copies. Off, ask (toast), or straight to LinkGrabber.
+- **Clipboard monitoring** (built in 1d): polls `GetClipboardSequenceNumber` every 400 ms, a cheap counter read, and only reads the clipboard when it changes. This needs no hidden window or message loop. Whatever is on the clipboard at startup is ignored. Links go straight to the LinkGrabber with a toast, and there's an on/off switch (default on). Still to come: configurable URL patterns, and an "ask first" mode.
 - Note: Chrome's app-bound cookie encryption (Chrome 127+) makes reading Chrome cookies from disk unreliable. The extension is the main way to get cookies. `--cookies-from-browser` is offered mainly for Firefox.
 
 ---
