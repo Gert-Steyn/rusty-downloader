@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use rdl_core::linkgrabber::GrabberEvent;
 use rdl_core::manager::{DownloadId, Event};
+use rdl_core::tools::{ToolEvent, ToolInfo, ToolName};
 use serde::Serialize;
 use specta::Type;
 use tauri::AppHandle;
@@ -30,6 +31,16 @@ pub struct DownloadEvents {
 #[serde(rename_all = "camelCase")]
 pub struct GrabberEvents {
     pub events: Vec<GrabberEvent>,
+    /// Events were dropped because the UI fell behind; reload the full list.
+    pub resync: bool,
+}
+
+/// Tool state changes. Each carries the tool's full state, so only the newest
+/// per tool is sent.
+#[derive(Debug, Clone, Default, Serialize, Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolEvents {
+    pub tools: Vec<ToolInfo>,
     /// Events were dropped because the UI fell behind; reload the full list.
     pub resync: bool,
 }
@@ -101,6 +112,37 @@ impl Batch<GrabberEvent> for GrabberBatch {
 
     fn take(&mut self) -> GrabberEvents {
         std::mem::take(&mut self.0)
+    }
+}
+
+#[derive(Default)]
+pub struct ToolBatch {
+    latest: HashMap<ToolName, ToolInfo>,
+    resync: bool,
+}
+
+impl Batch<ToolEvent> for ToolBatch {
+    type Payload = ToolEvents;
+
+    fn push(&mut self, event: ToolEvent) {
+        let ToolEvent::Changed { tool } = event;
+        self.latest.insert(tool.name, tool);
+    }
+
+    fn lagged(&mut self) {
+        self.resync = true;
+    }
+
+    fn is_empty(&self) -> bool {
+        self.latest.is_empty() && !self.resync
+    }
+
+    fn take(&mut self) -> ToolEvents {
+        let batch = std::mem::take(self);
+        ToolEvents {
+            tools: batch.latest.into_values().collect(),
+            resync: batch.resync,
+        }
     }
 }
 

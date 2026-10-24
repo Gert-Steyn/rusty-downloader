@@ -17,6 +17,8 @@ pub struct AppPaths {
     pub data_dir: PathBuf,
     pub logs_dir: PathBuf,
     pub plugins_dir: PathBuf,
+    /// yt-dlp, ffmpeg and friends, managed by [`crate::tools`].
+    pub tools_dir: PathBuf,
     pub db_file: PathBuf,
 }
 
@@ -45,13 +47,19 @@ impl AppPaths {
             portable,
             logs_dir: data_dir.join("logs"),
             plugins_dir: data_dir.join("plugins"),
+            tools_dir: data_dir.join("tools"),
             db_file: data_dir.join(DB_FILE_NAME),
             data_dir,
         }
     }
 
     pub fn ensure_dirs(&self) -> Result<()> {
-        for dir in [&self.data_dir, &self.logs_dir, &self.plugins_dir] {
+        for dir in [
+            &self.data_dir,
+            &self.logs_dir,
+            &self.plugins_dir,
+            &self.tools_dir,
+        ] {
             std::fs::create_dir_all(dir)?;
         }
         Ok(())
@@ -103,5 +111,6 @@ mod tests {
 
         assert!(paths.logs_dir.is_dir());
         assert!(paths.plugins_dir.is_dir());
+        assert!(paths.tools_dir.is_dir());
     }
 }

@@ -36,6 +36,21 @@ export function percent(done: number, total: number | null | undefined): number 
 	return Math.min(100, (done / total) * 100);
 }
 
+/** `3:07` or `1:02:03`. */
+export function formatDuration(seconds: number | null | undefined): string {
+	if (seconds == null || !Number.isFinite(seconds)) return '';
+	const total = Math.round(seconds);
+	const h = Math.floor(total / 3600);
+	const m = Math.floor((total % 3600) / 60);
+	const s = String(total % 60).padStart(2, '0');
+	return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+}
+
+export function formatDate(ms: number | null | undefined): string {
+	if (ms == null) return '—';
+	return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 export const STATUS_LABELS: Record<Status, string> = {
 	queued: 'Queued',
 	active: 'Downloading',
@@ -47,6 +62,10 @@ export const STATUS_LABELS: Record<Status, string> = {
 
 export function displayName(d: Download): string {
 	if (d.filename) return d.filename;
+	// yt-dlp picks the name itself: show the planned file, else the title.
+	const planned = d.destPath?.split(/[\\/]/).pop();
+	if (planned) return planned;
+	if (d.title) return d.title;
 	try {
 		const url = new URL(d.sourceUrl);
 		return decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() ?? '') || url.host;

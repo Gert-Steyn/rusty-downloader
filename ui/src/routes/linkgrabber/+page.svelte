@@ -5,9 +5,10 @@
 	import Dialog from '#lib/components/Dialog.svelte';
 	import EditableText from '#lib/components/EditableText.svelte';
 	import EmptyState from '#lib/components/EmptyState.svelte';
+	import FormatPicker from '#lib/components/FormatPicker.svelte';
 	import Icon from '#lib/components/Icon.svelte';
-	import { isTauri } from '#lib/api.js';
-	import { formatBytes } from '#lib/format.js';
+	import { isTauri, type GrabbedLink, type YtDlpOptions } from '#lib/api.js';
+	import { formatBytes, formatDuration } from '#lib/format.js';
 	import { grabber, type LinkGroup } from '#lib/linkgrabber.svelte.js';
 
 	let adding = $state(false);
@@ -27,6 +28,28 @@
 			total += l.size;
 		}
 		return total;
+	}
+
+	const DEFAULT_OPTIONS: YtDlpOptions = { preset: 'best', customFormat: null };
+
+	function mediaLinks(group: LinkGroup): GrabbedLink[] {
+		return group.links.filter((l) => l.kind === 'ytdlp');
+	}
+
+	/** The group's shared choice, or `mixed` when its videos differ. */
+	function groupFormat(links: GrabbedLink[]) {
+		const first = links[0]?.ytdlp ?? DEFAULT_OPTIONS;
+		const mixed = links.some(
+			(l) => (l.ytdlp?.preset ?? 'best') !== first.preset || (l.ytdlp?.customFormat ?? null) !== first.customFormat
+		);
+		const heights = [...new Set(links.flatMap((l) => l.media?.heights ?? []))];
+		return { options: first, mixed, heights };
+	}
+
+	function mediaLine(link: GrabbedLink): string {
+		const m = link.media;
+		if (!m) return '';
+		return [formatDuration(m.duration), m.uploader, m.isLive ? 'Live' : null].filter(Boolean).join(' · ');
 	}
 
 	async function changeFolder(group: LinkGroup) {
@@ -96,6 +119,7 @@
 				<span></span>
 				<span>Name</span>
 				<span>Host</span>
+				<span>Format</span>
 				<span class="num">Size</span>
 				<span>Availability</span>
 			</div>
@@ -122,6 +146,19 @@
 						<span class="folder" title={group.destDir ?? 'Downloads folder'}>
 							{group.destDir ?? 'Downloads folder'}
 						</span>
+						<span class="format">
+							{#if mediaLinks(group).length > 1}
+								{@const media = mediaLinks(group)}
+								{@const f = groupFormat(media)}
+								<FormatPicker
+									label="Format for all videos in {group.name}"
+									options={f.options}
+									mixed={f.mixed}
+									heights={f.heights}
+									onchange={(o) => grabber.setFormat(media.map((l) => l.id), o)}
+								/>
+							{/if}
+						</span>
 						<span class="num">{formatBytes(groupSize(group))}</span>
 						<span>
 							<button class="btn small" onclick={() => changeFolder(group)} disabled={!isTauri()}>
@@ -138,15 +175,32 @@
 								onchange={(e) => grabber.setChecked([link.id], e.currentTarget.checked)}
 							/>
 							<span class="name" title={link.url}>
-								<Icon name="file" />
-								{#if link.filename}
-									<EditableText value={link.filename} label="File name" onsave={(n) => grabber.rename(link.id, n)} />
-								{:else}
-									<span class="pending">{link.url}</span>
+								<Icon name={link.kind === 'ytdlp' ? 'video' : 'file'} />
+								<span class="label">
+									{#if link.filename}
+										<EditableText value={link.filename} label="File name" onsave={(n) => grabber.rename(link.id, n)} />
+									{:else}
+										<span class="pending">{link.url}</span>
+									{/if}
+									{#if mediaLine(link)}<span class="meta">{mediaLine(link)}</span>{/if}
+								</span>
+							</span>
+							<span class="host" title={link.media?.extractor ? `${link.host} · ${link.media.extractor} (yt-dlp)` : link.host}>
+								{link.host}
+							</span>
+							<span class="format">
+								{#if link.kind === 'ytdlp'}
+									<FormatPicker
+										label="Format for {link.filename ?? link.url}"
+										options={link.ytdlp ?? DEFAULT_OPTIONS}
+										heights={link.media?.heights ?? []}
+										onchange={(o) => grabber.setFormat([link.id], o)}
+									/>
 								{/if}
 							</span>
-							<span class="host">{link.host}</span>
-							<span class="num">{formatBytes(link.size)}</span>
+							<span class="num" title={link.kind === 'ytdlp' && link.size != null ? 'Estimated from the formats on offer' : undefined}>
+								{link.kind === 'ytdlp' && link.size != null ? '~' : ''}{formatBytes(link.size)}
+							</span>
 							<span><AvailabilityBadge value={link.availability} error={link.error} /></span>
 						</div>
 					{/each}
@@ -213,7 +267,7 @@
 	}
 	.row {
 		display: grid;
-		grid-template-columns: 28px minmax(220px, 1fr) minmax(120px, 220px) 88px 150px;
+		grid-template-columns: 28px minmax(220px, 1fr) minmax(100px, 200px) 170px 88px 150px;
 		align-items: center;
 		gap: 12px;
 		min-height: 32px;
@@ -258,6 +312,21 @@
 		align-items: center;
 		gap: 8px;
 		min-width: 0;
+	}
+	.label {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		min-width: 0;
+	}
+	.meta {
+		font-size: 12px;
+		font-weight: 400;
+		color: var(--text-secondary);
+	}
+	.format {
+		min-width: 0;
+		font-weight: 400;
 	}
 	.count {
 		flex-shrink: 0;

@@ -30,6 +30,7 @@ fn config() -> ManagerConfig {
         save_interval: Duration::from_millis(30),
         rescan_interval: Duration::from_millis(200),
         user_agent: None,
+        tools: None,
     }
 }
 

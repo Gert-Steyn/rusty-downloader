@@ -34,16 +34,27 @@ export const commands = {
 	/**  `dir` of `None` (or empty) means the default Downloads folder. */
 	grabberSetFolder: (ids: number[], dir: string | null) => typedError<null, CommandError>(__TAURI_INVOKE("grabber_set_folder", { ids, dir })),
 	grabberRecheck: (ids: number[]) => typedError<null, CommandError>(__TAURI_INVOKE("grabber_recheck", { ids })),
+	/**  Choose the yt-dlp format for links (plain links are skipped). */
+	grabberSetFormat: (ids: number[], options: YtDlpOptions_Deserialize) => typedError<null, CommandError>(__TAURI_INVOKE("grabber_set_format", { ids, options })),
 	/**  Queue the links as downloads; returns the new package ids. */
 	grabberConfirm: (ids: number[]) => typedError<number[], CommandError>(__TAURI_INVOKE("grabber_confirm", { ids })),
 	getClipboardWatch: () => __TAURI_INVOKE<boolean>("get_clipboard_watch"),
 	setClipboardWatch: (enabled: boolean) => typedError<null, CommandError>(__TAURI_INVOKE("set_clipboard_watch", { enabled })),
+	toolsList: () => typedError<ToolInfo_Serialize[], CommandError>(__TAURI_INVOKE("tools_list")),
+	/**  Install the tool, or update it to the newest release. */
+	toolInstall: (name: ToolName) => typedError<ToolInfo_Serialize, CommandError>(__TAURI_INVOKE("tool_install", { name })),
+	/**  Look for a newer release without installing it. */
+	toolCheck: (name: ToolName) => typedError<ToolInfo_Serialize, CommandError>(__TAURI_INVOKE("tool_check", { name })),
+	toolRollback: (name: ToolName) => typedError<ToolInfo_Serialize, CommandError>(__TAURI_INVOKE("tool_rollback", { name })),
+	toolSetChannel: (name: ToolName, channel: ToolChannel) => typedError<ToolInfo_Serialize, CommandError>(__TAURI_INVOKE("tool_set_channel", { name, channel })),
+	openToolsFolder: () => typedError<null, CommandError>(__TAURI_INVOKE("open_tools_folder")),
 };
 
 /** Events */
 export const events = {
 	downloadEvents: makeEvent<DownloadEvents_Serialize, DownloadEvents_Deserialize>("download-events"),
 	grabberEvents: makeEvent<GrabberEvents_Serialize, GrabberEvents_Deserialize>("grabber-events"),
+	toolEvents: makeEvent<ToolEvents_Serialize, ToolEvents_Deserialize>("tool-events"),
 };
 
 /* Types */
@@ -106,6 +117,9 @@ export type DownloadEvents_Serialize = {
 	resync: boolean,
 };
 
+/**  Which handler runs a download. Stored as the `downloads.kind` text. */
+export type DownloadKind = "http" | "ytdlp";
+
 export type Download_Deserialize = {
 	id: number,
 	packageId: number,
@@ -117,6 +131,9 @@ export type Download_Deserialize = {
 	downloaded: number,
 	status: Status,
 	error?: string | null,
+	/**  Format choice, for yt-dlp downloads. */
+	ytdlp?: YtDlpOptions_Deserialize | null,
+	title?: string | null,
 };
 
 export type Download_Serialize = {
@@ -130,6 +147,9 @@ export type Download_Serialize = {
 	downloaded: number,
 	status: Status,
 	error: string | null,
+	/**  Format choice, for yt-dlp downloads. */
+	ytdlp: YtDlpOptions_Serialize | null,
+	title: string | null,
 };
 
 /**
@@ -157,6 +177,12 @@ export type Event_Serialize = { type: "packageAdded"; packageId: number } | { ty
 /**  Name, size and destination are known after the first probe. */
 { type: "resolved"; downloadId: number; filename: string; size: number | null } | { type: "progress"; downloadId: number; downloaded: number; total: number | null; speedBps: number; connections: number };
 
+export type FormatPreset = 
+/**  Best video and best audio, merged. */
+"best" | "max2160" | "max1080" | "max720" | "max480" | "audioMp3" | "audioM4a" | 
+/**  The `custom_format` string as `-f`. */
+"custom";
+
 export type GrabResult = {
 	added: number,
 	/**  Links that were already in the LinkGrabber. */
@@ -176,6 +202,11 @@ export type GrabbedLink_Deserialize = {
 	package: string,
 	/**  `None` means the default download folder. */
 	destDir?: string | null,
+	kind: DownloadKind,
+	/**  What yt-dlp found, for `Ytdlp` links. */
+	media?: MediaSummary_Deserialize | null,
+	/**  Format choice, for `Ytdlp` links. */
+	ytdlp?: YtDlpOptions_Deserialize | null,
 };
 
 export type GrabbedLink_Serialize = {
@@ -189,6 +220,11 @@ export type GrabbedLink_Serialize = {
 	package: string,
 	/**  `None` means the default download folder. */
 	destDir: string | null,
+	kind: DownloadKind,
+	/**  What yt-dlp found, for `Ytdlp` links. */
+	media: MediaSummary_Serialize | null,
+	/**  Format choice, for `Ytdlp` links. */
+	ytdlp: YtDlpOptions_Serialize | null,
 };
 
 export type GrabberEvent = GrabberEvent_Serialize | GrabberEvent_Deserialize;
@@ -212,7 +248,44 @@ export type GrabberEvents_Serialize = {
 };
 
 /**  Where links came from, so the UI can say "3 links from the clipboard". */
-export type LinkSource = "manual" | "clipboard" | "drop";
+export type LinkSource = "manual" | "clipboard" | "drop" | 
+/**  Expanded from a playlist link already in the LinkGrabber. */
+"playlist";
+
+/**  What the LinkGrabber shows about a video. */
+export type MediaSummary = MediaSummary_Serialize | MediaSummary_Deserialize;
+
+/**  What the LinkGrabber shows about a video. */
+export type MediaSummary_Deserialize = {
+	title?: string | null,
+	uploader?: string | null,
+	/**  Seconds. */
+	duration?: number | null,
+	thumbnail?: string | null,
+	extractor?: string | null,
+	/**
+	 *  Video heights on offer, highest first; empty for audio-only or flat
+	 *  playlist entries (formats are only known once downloaded).
+	 */
+	heights: number[],
+	isLive: boolean,
+};
+
+/**  What the LinkGrabber shows about a video. */
+export type MediaSummary_Serialize = {
+	title: string | null,
+	uploader: string | null,
+	/**  Seconds. */
+	duration: number | null,
+	thumbnail: string | null,
+	extractor: string | null,
+	/**
+	 *  Video heights on offer, highest first; empty for audio-only or flat
+	 *  playlist entries (formats are only known once downloaded).
+	 */
+	heights: number[],
+	isLive: boolean,
+};
 
 export type Package = Package_Serialize | Package_Deserialize;
 
@@ -235,6 +308,106 @@ export type Package_Serialize = {
 };
 
 export type Status = "queued" | "active" | "paused" | "completed" | "failed" | "canceled";
+
+export type ToolChannel = "stable" | "nightly";
+
+/**
+ *  Tool state changes. Each carries the tool's full state, so only the newest
+ *  per tool is sent.
+ */
+export type ToolEvents = ToolEvents_Serialize | ToolEvents_Deserialize;
+
+/**
+ *  Tool state changes. Each carries the tool's full state, so only the newest
+ *  per tool is sent.
+ */
+export type ToolEvents_Deserialize = {
+	tools: ToolInfo_Deserialize[],
+	/**  Events were dropped because the UI fell behind; reload the full list. */
+	resync: boolean,
+};
+
+/**
+ *  Tool state changes. Each carries the tool's full state, so only the newest
+ *  per tool is sent.
+ */
+export type ToolEvents_Serialize = {
+	tools: ToolInfo_Serialize[],
+	/**  Events were dropped because the UI fell behind; reload the full list. */
+	resync: boolean,
+};
+
+export type ToolInfo = ToolInfo_Serialize | ToolInfo_Deserialize;
+
+export type ToolInfo_Deserialize = {
+	name: ToolName,
+	channel: ToolChannel,
+	/**  Path of the active executable, when installed. */
+	path?: string | null,
+	/**  What the binary reports (`yt-dlp --version`). */
+	version?: string | null,
+	/**  The upstream release it was installed from. */
+	release?: string | null,
+	installedAt?: number | null,
+	/**  Newest release seen at the last check. */
+	latestRelease?: string | null,
+	updateAvailable: boolean,
+	lastCheck?: number | null,
+	/**  Version a rollback would return to. */
+	previousVersion?: string | null,
+	task?: ToolTask_Deserialize | null,
+	/**  Why the last check or install failed. */
+	error?: string | null,
+};
+
+export type ToolInfo_Serialize = {
+	name: ToolName,
+	channel: ToolChannel,
+	/**  Path of the active executable, when installed. */
+	path: string | null,
+	/**  What the binary reports (`yt-dlp --version`). */
+	version: string | null,
+	/**  The upstream release it was installed from. */
+	release: string | null,
+	installedAt: number | null,
+	/**  Newest release seen at the last check. */
+	latestRelease: string | null,
+	updateAvailable: boolean,
+	lastCheck: number | null,
+	/**  Version a rollback would return to. */
+	previousVersion: string | null,
+	task: ToolTask_Serialize | null,
+	/**  Why the last check or install failed. */
+	error: string | null,
+};
+
+export type ToolName = "ytdlp" | "ffmpeg";
+
+/**  What a tool is busy with right now. */
+export type ToolTask = ToolTask_Serialize | ToolTask_Deserialize;
+
+/**  What a tool is busy with right now. */
+export type ToolTask_Deserialize = { type: "checking" } | { type: "downloading"; downloaded: number; total?: number | null } | { type: "installing" };
+
+/**  What a tool is busy with right now. */
+export type ToolTask_Serialize = { type: "checking" } | { type: "downloading"; downloaded: number; total: number | null } | { type: "installing" };
+
+/**  Per-download yt-dlp settings, stored as `handler_opts_json`. */
+export type YtDlpOptions = YtDlpOptions_Serialize | YtDlpOptions_Deserialize;
+
+/**  Per-download yt-dlp settings, stored as `handler_opts_json`. */
+export type YtDlpOptions_Deserialize = {
+	preset?: FormatPreset,
+	/**  Used when `preset` is `Custom`. */
+	customFormat?: string | null,
+};
+
+/**  Per-download yt-dlp settings, stored as `handler_opts_json`. */
+export type YtDlpOptions_Serialize = {
+	preset: FormatPreset,
+	/**  Used when `preset` is `Custom`. */
+	customFormat: string | null,
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

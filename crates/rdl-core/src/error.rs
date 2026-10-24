@@ -56,6 +56,19 @@ pub enum Error {
 
     #[error("not supported yet: {0}")]
     Unsupported(String),
+
+    #[error("{0}")]
+    Tool(String),
+
+    #[error("checksum mismatch for {file}: expected {expected}, got {actual}")]
+    ChecksumMismatch {
+        file: String,
+        expected: String,
+        actual: String,
+    },
+
+    #[error("canceled")]
+    Canceled,
 }
 
 impl Error {

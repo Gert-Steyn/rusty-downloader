@@ -3,6 +3,7 @@ mod commands;
 mod events;
 mod grabber_commands;
 mod state;
+mod tool_commands;
 
 use specta_typescript::Typescript;
 use tauri::Manager;
@@ -37,13 +38,21 @@ fn specta_builder() -> Builder<tauri::Wry> {
             grabber_commands::grabber_set_package,
             grabber_commands::grabber_set_folder,
             grabber_commands::grabber_recheck,
+            grabber_commands::grabber_set_format,
             grabber_commands::grabber_confirm,
             grabber_commands::get_clipboard_watch,
             grabber_commands::set_clipboard_watch,
+            tool_commands::tools_list,
+            tool_commands::tool_install,
+            tool_commands::tool_check,
+            tool_commands::tool_rollback,
+            tool_commands::tool_set_channel,
+            tool_commands::open_tools_folder,
         ])
         .events(collect_events![
             events::DownloadEvents,
-            events::GrabberEvents
+            events::GrabberEvents,
+            events::ToolEvents
         ])
         // Sizes and ids are far below 2^53, so plain numbers are safe in JS.
         .dangerously_cast_bigints_to_number()
@@ -77,6 +86,7 @@ pub fn run() {
             let state = tauri::async_runtime::block_on(AppState::init())?;
             let download_events = state.downloads.subscribe();
             let grabber_events = state.grabber.subscribe();
+            let tool_events = state.tools.subscribe();
             app.manage(state);
             let handle = app.handle();
             tauri::async_runtime::spawn(events::forward::<_, events::DownloadBatch>(
@@ -86,6 +96,10 @@ pub fn run() {
             tauri::async_runtime::spawn(events::forward::<_, events::GrabberBatch>(
                 handle.clone(),
                 grabber_events,
+            ));
+            tauri::async_runtime::spawn(events::forward::<_, events::ToolBatch>(
+                handle.clone(),
+                tool_events,
             ));
             tauri::async_runtime::spawn(clipboard::watch(handle.clone()));
             Ok(())
@@ -97,6 +111,7 @@ pub fn run() {
                 && let Some(state) = app.try_state::<AppState>()
             {
                 // Stop transfers cleanly so they pick up where they left off next launch.
+                state.shutdown.cancel();
                 tauri::async_runtime::block_on(state.downloads.shutdown());
             }
         });

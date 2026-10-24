@@ -3,7 +3,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use rdl_core::linkgrabber::LinkGrabber;
 use rdl_core::logging::{self, WorkerGuard};
 use rdl_core::manager::{Manager as DownloadManager, ManagerConfig};
+use rdl_core::tools::{Tools, ToolsConfig};
 use rdl_core::{db, paths::AppPaths, settings};
+use tokio_util::sync::CancellationToken;
 
 /// Long-lived services shared by all commands.
 pub struct AppState {
@@ -11,6 +13,9 @@ pub struct AppState {
     pub db: db::Pool,
     pub downloads: DownloadManager,
     pub grabber: LinkGrabber,
+    pub tools: Tools,
+    /// Stops background work (tool update checks) on exit.
+    pub shutdown: CancellationToken,
     /// Mirrors the `linkgrabber.clipboard_watch` setting for the watcher loop.
     clipboard_watch: AtomicBool,
     _log_guard: WorkerGuard,
@@ -32,8 +37,19 @@ impl AppState {
         let db = db::open(&paths.db_file).await?;
         tracing::info!(schema = db::schema_version(&db).await?, "database ready");
 
-        let downloads = DownloadManager::start(db.clone(), ManagerConfig::default()).await?;
-        let grabber = LinkGrabber::start(db.clone(), None).await?;
+        let tools =
+            Tools::start(db.clone(), paths.tools_dir.clone(), ToolsConfig::default()).await?;
+        let shutdown = CancellationToken::new();
+        tools.spawn_background_checks(shutdown.clone());
+        let downloads = DownloadManager::start(
+            db.clone(),
+            ManagerConfig {
+                tools: Some(tools.clone()),
+                ..ManagerConfig::default()
+            },
+        )
+        .await?;
+        let grabber = LinkGrabber::start(db.clone(), None, Some(tools.clone())).await?;
         let clipboard_watch = settings::get(&db, settings::CLIPBOARD_WATCH)
             .await?
             .unwrap_or(true);
@@ -43,6 +59,8 @@ impl AppState {
             db,
             downloads,
             grabber,
+            tools,
+            shutdown,
             clipboard_watch: AtomicBool::new(clipboard_watch),
             _log_guard: log_guard,
         })

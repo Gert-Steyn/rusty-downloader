@@ -9,6 +9,7 @@
 		percent,
 		summarize
 	} from '#lib/format.js';
+	import { presetLabel } from '#lib/media.js';
 	import Icon from './Icon.svelte';
 	import type { Selection } from './DownloadsTable.svelte';
 
@@ -74,6 +75,10 @@
 			</dd>
 			<dt>Package</dt>
 			<dd>{pkg.name}</dd>
+			{#if download.ytdlp}
+				<dt>Format</dt>
+				<dd>{presetLabel(download.ytdlp)} · yt-dlp</dd>
+			{/if}
 			<dt>Source</dt>
 			<dd class="wide mono selectable">{download.sourceUrl}</dd>
 			<dt>Saved to</dt>

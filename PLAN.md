@@ -8,9 +8,9 @@ A full-featured download manager for Windows, modeled on **JDownloader**. It has
 
 ## 0. Current Status (updated 2026-10-24)
 
-**Where we are:** Phase 0 is done. Phase 1 milestones **1a–1d are done**. **Next up: 1e (tool manager + yt-dlp).**
+**Where we are:** Phase 0 is done. Phase 1 milestones **1a–1e are done**. **Next up: 1f (gallery-dl).**
 
-The app works today as a plain HTTP(S) download manager. You can paste, drop or copy links into the LinkGrabber, review and rename them, and start them. Downloads are segmented and resumable, with pause, resume and remove, and they survive an app restart.
+The app works today as an HTTP(S) and video download manager. You can paste, drop or copy links into the LinkGrabber, review and rename them, pick a video format, and start them. Plain files download segmented and resumable. Pages from sites yt-dlp supports are recognised automatically, playlists expand into one link per video, and yt-dlp and ffmpeg install themselves on first use. Pause, resume and remove work for both kinds, and everything survives an app restart.
 
 ### Done so far
 
@@ -22,27 +22,24 @@ The app works today as a plain HTTP(S) download manager. You can paste, drop or 
 | 1b – Download manager | `f2f4992` | SQLite-backed packages/downloads/queues, scheduler with per-queue limits, segment saves every ~2 s, crash recovery, event stream |
 | 1c – Downloads UI | `bea4e42` | tauri-specta typed IPC, batched events, virtualised treegrid, details panel, add/remove dialogs |
 | 1d – LinkGrabber | `adba9eb` | Background probing + availability, archive-set grouping, inline renames, clipboard watcher, drag-drop, global paste |
+| 1e – Tools + yt-dlp | (this commit) | Tool manager (install on first use, SHA-256 verified, versioned folders, rollback, daily yt-dlp auto-update), job-object subprocess runner, yt-dlp resolve/download, playlist expansion, format presets, Tools page |
 
-Tests: 64 Rust tests (unit tests, plus engine, manager and LinkGrabber suites against a local misbehaving HTTP server, plus app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. `svelte-check` passes with 0 errors or warnings. Each milestone was also verified end to end in the running app (see "How to test in the real app" below).
+Tests: 90 Rust tests (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against a fake GitHub API; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Three opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools and pause/resume a real yt-dlp download (`RDL_LIVE_DIR=<folder> cargo test -p rdl-core --test tools_live -- --ignored`). `svelte-check` passes with 0 errors or warnings. Each milestone was also verified end to end in the running app (see "How to test in the real app" below).
 
-### Next: 1e – tool manager + yt-dlp (suggested order)
+### How 1e works (for picking up 1f)
 
-1. `rdl-core::tools`:
-   - Tool layout under `<data>/tools/` (or next to the exe when portable).
-   - Version detection (`yt-dlp --version`).
-   - Update from GitHub releases with `SHA2-256SUMS` verification, an atomic swap and rollback.
-   - Uses the existing `tools` table.
-2. Subprocess runner:
-   - `CREATE_NO_WINDOW`, plus a Windows job object so children die with the app.
-   - UTF-8 output, cancellation.
-3. yt-dlp resolver: `-J --flat-playlist` → title, formats, playlist entries. The LinkGrabber should pick it for sites yt-dlp supports, falling back to the HTTP probe.
-4. Downloader:
-   - `--newline --progress-template "download:%(progress)j"`, parsed into the existing `Progress` events.
-   - Pause = kill, resume = re-run with `--continue`.
-   - `ffmpeg` location passed explicitly.
-5. Manager: run `kind = 'ytdlp'` downloads (currently rejected as "not supported yet").
-6. UI: Tools page (versions, update button), and a format picker / preset in the LinkGrabber.
-7. Decide how ffmpeg is obtained (bundled vs downloaded on first use) before writing the updater.
+- **Tools** (`rdl-core::tools`): yt-dlp from `yt-dlp/yt-dlp` (or `yt-dlp-nightly-builds`), ffmpeg from `yt-dlp/FFmpeg-Builds` (the *shared* win64 GPL build, ~90 MB, `bin/` unpacked). **Decision: tools are downloaded on demand, not bundled.** yt-dlp installs the first time the LinkGrabber meets a web page; ffmpeg the first time a yt-dlp download starts.
+  - Each install lives in `<data>/tools/<tool>/<release>-<sha8>/`. The `tools` row points at the active exe and keeps the previous one, so update and rollback are row updates and never touch files a running download holds. Older folders are pruned.
+  - Downloads are checked against the release's checksum file before unpacking, and the new binary must answer `--version` before it's switched to (5 min timeout: Defender scans a never-seen PyInstaller exe on first launch, which took over 60 s here).
+  - Updates are detected by asset SHA-256, not tag, because FFmpeg-Builds republishes under `latest`. Background check runs 10 s after start and hourly, at most daily per tool. Only yt-dlp auto-updates.
+- **Processes** (`rdl-core::process`): `CREATE_NO_WINDOW`, UTF-8 env, and one job object per process with kill-on-close. Dropping the job kills the whole tree (yt-dlp.exe is a PyInstaller bootloader plus a child, plus ffmpeg).
+- **yt-dlp** (`rdl-core::ytdlp`): always `--ignore-config --no-playlist --encoding utf-8`. Resolve is `-J --flat-playlist`. Downloads print tagged lines: `RDLINFO` (planned path and size), `RDLPROG` (progress JSON, throttled to 4 Hz) and `RDLDONE` (final path after post-processing). Streams of one item are summed for progress. Pause kills; resume re-runs with `--continue`, so the output name must be deterministic: either the user's rename or `%(title).180B [%(id)s].%(ext)s`.
+- **LinkGrabber:** a link whose probe returns HTML, or fails, is offered to yt-dlp. "Unsupported URL" falls back to the plain HTTP result. Playlists replace their link with one link per entry (untitled entries use the URL slug). Format presets: best, ≤4K/1080/720/480, MP3, M4A, custom `-f`. A size estimate comes from the `-J` formats.
+- **Test sites:** YouTube and Vimeo ask automated clients to sign in from this machine. Use `https://archive.org/details/BigBuckBunny_124` (video, format `0` = 46,935,223 bytes) and `https://soundcloud.com/forss/sets/soulhack` (11-track playlist).
+
+### Next: 1f – gallery-dl
+
+Same shape as 1e: add gallery-dl to `tools` (GitHub `mikf/gallery-dl`, check how its release publishes checksums), resolve with `-j --simulate`, run downloads natively with stdout progress, and add the flag schema with a `--help` self-check (§5.3). The process runner, tool manager and LinkGrabber hand-off (`linkgrabber/media.rs`) are meant to be reused.
 
 ### Deferred / known gaps (pick up in the milestone noted)
 
@@ -60,7 +57,14 @@ Tests: 64 Rust tests (unit tests, plus engine, manager and LinkGrabber suites ag
   - Expired links (`LinkExpired`) need plugin refresh (Phase 6).
 - **Per-download headers and cookies:** not stored yet. Needed for browser hand-off (Phase 2).
 - **Windows 10:** the transparent window shows the desktop through it, because Mica is Windows 11 only. A fallback is needed if Windows 10 ever matters.
-- **Tool and plugin kinds:** only `kind = 'http'` downloads run so far.
+- **Tool and plugin kinds:** `http` and `ytdlp` downloads run; `gallerydl` is next (1f), the rest later.
+- **yt-dlp (1e follow-ups):**
+  - No cookies or accounts yet, so sites that demand sign-in (YouTube from some IPs, Vimeo) fail with yt-dlp's message. Needs Phase 2/4 cookie hand-off.
+  - No subtitles, thumbnails, SponsorBlock, rate-limit or raw-args options yet (§5.2). The `YtDlpOptions` struct is where they go.
+  - No progress during post-processing (merge or audio conversion). The row sits at 100% until it finishes.
+  - No "use my own yt-dlp.exe" override.
+  - Downloads table "Saved to" for a running yt-dlp row says "name not known yet" until the list reloads, because the UI store only gets the filename from the `resolved` event (also true for HTTP).
+  - Playlists expand flat: entries have no formats, so they get every preset and no size estimate until downloaded.
 
 ### Implementation notes & gotchas
 
@@ -110,7 +114,7 @@ The native window can't be clicked from automation, but WebView2 exposes Chrome 
 | UI | Tauri 2 + SvelteKit + TypeScript, modern Windows 11 (Fluent) look |
 | Distribution | NSIS installer + portable zip, signed auto-updates from GitHub Releases |
 | Source | Private GitHub repo, MIT license |
-| External tools | Bundled `yt-dlp.exe`, `gallery-dl.exe`, `ffmpeg.exe`, `7z.exe`, auto-updated by the app |
+| External tools | `yt-dlp.exe`, `gallery-dl.exe`, `ffmpeg.exe`, `7z.exe`, downloaded on first use and auto-updated by the app |
 
 ### Non-goals (for now)
 - macOS/Linux builds. The core crate stays platform-neutral where cheap, but this isn't a target.
@@ -263,9 +267,9 @@ enum JobKind { Http, Ftp, Sftp, Torrent, YtDlp, GalleryDl }
 ## 5. yt-dlp & gallery-dl Integration
 
 ### 5.1 Tool management
-- Bundled under `<app>/tools/` (installed) or `<portable>/tools/`.
+- Downloaded on first use into `<data>/tools/` (so `<portable>/data/tools/` for portable builds). The installer may later seed the same folder.
 - **Tool updater**: checks the GitHub releases of `yt-dlp/yt-dlp` and `mikf/gallery-dl` on startup (at most daily) and on demand. Downloads into a temp folder, verifies the published checksums (yt-dlp `SHA2-256SUMS`), and swaps atomically. Keeps the previous version for rollback. Channel per tool: stable / nightly.
-- `ffmpeg.exe` is bundled for yt-dlp merges and gallery-dl ugoira conversion. Its path is passed explicitly (`--ffmpeg-location`).
+- `ffmpeg.exe` (downloaded on demand, see §0) is used for yt-dlp merges and gallery-dl ugoira conversion. Its folder is passed explicitly (`--ffmpeg-location`).
 - Every tool runs with `CREATE_NO_WINDOW`, a job object (so children die with the app), and UTF-8 forced (`PYTHONIOENCODING=utf-8`).
 
 ### 5.2 yt-dlp
@@ -378,7 +382,7 @@ Locations: installed builds use `%APPDATA%\rusty-downloader\` (db, logs, plugins
 | Phase | Scope | Exit criteria | Status |
 |---|---|---|---|
 | **0. Scaffold** | Workspace, Tauri + SvelteKit shell, SQLite migrations, tracing logs, CI, Fluent theme base | App launches, CI green | ✅ Done (CI never checked) |
-| **1. MVP** | Segmented HTTP engine (resume, retries, dynamic splitting, headers/cookies/auth), queues + concurrency, packages, LinkGrabber (paste/clipboard/drag-drop), yt-dlp + gallery-dl (resolve, download, progress, common flags, impersonation, archives) + tool updater, tray, toasts, history/duplicate detection, single instance, settings | Used as daily driver for HTTP, video and galleries | 🚧 1a–1d done, 1e next |
+| **1. MVP** | Segmented HTTP engine (resume, retries, dynamic splitting, headers/cookies/auth), queues + concurrency, packages, LinkGrabber (paste/clipboard/drag-drop), yt-dlp + gallery-dl (resolve, download, progress, common flags, impersonation, archives) + tool updater, tray, toasts, history/duplicate detection, single instance, settings | Used as daily driver for HTTP, video and galleries | 🚧 1a–1e done, 1f next |
 | **2. Browser** | MV3 extension (Chromium + Firefox), native host, download interception, context menus, cookie hand-off | Browser downloads flow into the app with cookies | ⏳ |
 | **3. Control** | Scheduler, speed limiting + profiles, keep-awake, on-complete actions, checksum verification | Overnight queue then shutdown works | ⏳ |
 | **4. Network & protocols** | Proxies + rules, interface binding + kill-switch, accounts in the keyring, FTP/FTPS, SFTP | Downloads via SOCKS5/VPN interface, FTP/SFTP resume | ⏳ |
@@ -396,8 +400,8 @@ Each milestone is a commit or series of commits that leaves the app working.
 | 1b | Download manager | Packages, downloads and queues persisted in SQLite. Per-queue concurrency, start/pause/remove, segment state saved every ~2 s, resume after restart, event stream. | ✅ `f2f4992` |
 | 1c | Downloads UI | Typed IPC (tauri-specta), batched progress events, virtualised downloads table with package rows, add-links dialog, details panel. | ✅ `bea4e42` |
 | 1d | LinkGrabber | Paste / clipboard watcher / drag-drop, background probing, availability badges, package grouping, confirm to queue. | ✅ `adba9eb` |
-| 1e | Tool manager + yt-dlp | Bundled tool layout, version check/update with checksum verification, yt-dlp resolve (`-J`), format picker, JSON progress parsing. | ▶️ Next |
-| 1f | gallery-dl | Resolve with `-j --simulate`, native download with stdout progress, flag schema + `--help` self-check, managed download archives, impersonation options. | ⏳ |
+| 1e | Tool manager + yt-dlp | Tool layout, version check/update with checksum verification, yt-dlp resolve (`-J`), format picker, JSON progress parsing. | ✅ |
+| 1f | gallery-dl | Resolve with `-j --simulate`, native download with stdout progress, flag schema + `--help` self-check, managed download archives, impersonation options. | ▶️ Next |
 | 1g | Desktop polish | Tray icon/menu, toasts, history + duplicate warnings, settings page (folders, connections, clipboard, startup). Toasts already exist for the LinkGrabber. | ⏳ |
 
 ---

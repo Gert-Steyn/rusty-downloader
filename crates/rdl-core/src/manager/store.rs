@@ -25,9 +25,21 @@ pub(crate) struct DownloadRow {
     pub error: Option<String>,
     pub etag: Option<String>,
     pub last_modified: Option<String>,
+    pub handler_opts_json: Option<String>,
+    pub title: Option<String>,
 }
 
 impl DownloadRow {
+    /// yt-dlp options; a row with unreadable options gets the defaults.
+    pub fn ytdlp_options(&self) -> Option<crate::ytdlp::YtDlpOptions> {
+        (self.kind == "ytdlp").then(|| {
+            self.handler_opts_json
+                .as_deref()
+                .and_then(|json| serde_json::from_str(json).ok())
+                .unwrap_or_default()
+        })
+    }
+
     pub fn status(&self) -> Status {
         // The CHECK constraint guarantees a known value.
         Status::parse(&self.status).unwrap_or(Status::Failed)
@@ -45,6 +57,8 @@ impl DownloadRow {
             downloaded: self.downloaded as u64,
             status: self.status(),
             error: self.error.clone(),
+            ytdlp: self.ytdlp_options(),
+            title: self.title.clone(),
         }
     }
 }
@@ -98,13 +112,21 @@ pub(crate) async fn insert_package(pool: &Pool, new: &NewPackage) -> Result<Pack
     .await?;
 
     for (position, download) in new.downloads.iter().enumerate() {
+        let opts = download
+            .ytdlp
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
         sqlx::query(
-            "INSERT INTO downloads (package_id, kind, source_url, filename, position)
-             VALUES (?, 'http', ?, ?, ?)",
+            "INSERT INTO downloads (package_id, kind, source_url, filename, handler_opts_json, title, position)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id)
+        .bind(download.kind.as_str())
         .bind(download.url.as_str())
         .bind(download.filename.as_deref())
+        .bind(opts)
+        .bind(download.title.as_deref())
         .bind(position as i64)
         .execute(&mut *tx)
         .await?;
@@ -282,6 +304,32 @@ pub(crate) async fn set_resolved(pool: &Pool, id: DownloadId, r: &Resolved<'_>) 
     .bind(id)
     .execute(pool)
     .await?;
+    Ok(())
+}
+
+/// Where yt-dlp said it will write. `filename` is not touched: it holds the
+/// name the user chose, which must survive into the next run.
+pub(crate) async fn set_planned(
+    pool: &Pool,
+    id: DownloadId,
+    dest_path: &Path,
+    size: Option<u64>,
+) -> Result<()> {
+    sqlx::query("UPDATE downloads SET dest_path = ?, size = COALESCE(?, size) WHERE id = ?")
+        .bind(dest_path.to_string_lossy().into_owned())
+        .bind(size.map(|s| s as i64))
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn set_downloaded(pool: &Pool, id: DownloadId, downloaded: u64) -> Result<()> {
+    sqlx::query("UPDATE downloads SET downloaded = ? WHERE id = ?")
+        .bind(downloaded as i64)
+        .bind(id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

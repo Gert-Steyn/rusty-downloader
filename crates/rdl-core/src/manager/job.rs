@@ -71,8 +71,10 @@ async fn execute(
     cancel: &CancellationToken,
     last: &mut Option<Progress>,
 ) -> Result<Outcome> {
-    if row.kind != "http" {
-        return Err(Error::Unsupported(format!("{} downloads", row.kind)));
+    match row.kind.as_str() {
+        "http" => {}
+        "ytdlp" => return super::ytdlp_job::execute(inner, row, cancel).await,
+        other => return Err(Error::Unsupported(format!("{other} downloads"))),
     }
     let pool = &inner.pool;
     let package = store::get_package(pool, row.package_id)

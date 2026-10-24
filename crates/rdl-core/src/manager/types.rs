@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use serde::Serialize;
 use url::Url;
 
+use crate::ytdlp::YtDlpOptions;
+
 pub type PackageId = i64;
 pub type DownloadId = i64;
 pub type QueueId = i64;
@@ -47,11 +49,36 @@ impl Status {
     }
 }
 
+/// Which handler runs a download. Stored as the `downloads.kind` text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "lowercase")]
+pub enum DownloadKind {
+    #[default]
+    Http,
+    Ytdlp,
+}
+
+impl DownloadKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DownloadKind::Http => "http",
+            DownloadKind::Ytdlp => "ytdlp",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct NewDownload {
     pub url: Url,
-    /// Overrides the server-provided name. Sanitised on insert.
+    /// Overrides the server-provided name. Sanitised on insert. For yt-dlp
+    /// this is the name without extension (yt-dlp picks the extension).
     pub filename: Option<String>,
+    pub kind: DownloadKind,
+    /// Format choice for `Ytdlp` downloads.
+    pub ytdlp: Option<YtDlpOptions>,
+    /// Media title, shown until the file name is known.
+    pub title: Option<String>,
 }
 
 impl NewDownload {
@@ -59,6 +86,9 @@ impl NewDownload {
         Self {
             url,
             filename: None,
+            kind: DownloadKind::Http,
+            ytdlp: None,
+            title: None,
         }
     }
 }
@@ -85,6 +115,9 @@ pub struct Download {
     pub downloaded: u64,
     pub status: Status,
     pub error: Option<String>,
+    /// Format choice, for yt-dlp downloads.
+    pub ytdlp: Option<YtDlpOptions>,
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

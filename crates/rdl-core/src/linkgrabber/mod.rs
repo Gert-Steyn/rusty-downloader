@@ -3,11 +3,14 @@
 //!
 //! Links come from paste, the clipboard watcher, drag-drop or (later) the
 //! browser. Each is stored at once and probed in the background with bounded
-//! concurrency. User edits (file and package names, folders) always win over
+//! concurrency. A link that turns out to be a web page (or can't be probed)
+//! is handed to yt-dlp, which recognises video sites; playlists expand into
+//! one link per video (see `media`). User edits (file and package names, folders) always win over
 //! what a probe finishes with later. Confirming hands links to the
 //! [`Manager`] as packages and removes them from here.
 
 mod links;
+mod media;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -19,10 +22,13 @@ use url::Url;
 
 use crate::db::Pool;
 use crate::http::{self, DownloadSpec, filename};
-use crate::manager::{DEFAULT_QUEUE, Manager, NewDownload, NewPackage, PackageId};
+use crate::manager::{DEFAULT_QUEUE, DownloadKind, Manager, NewDownload, NewPackage, PackageId};
+use crate::tools::Tools;
+use crate::ytdlp::{MediaInfo, YtDlpOptions};
 use crate::{Error, Result};
 
 pub use links::{archive_set_name, default_package_name, extract_links};
+pub use media::MediaSummary;
 
 pub type LinkId = i64;
 
@@ -72,9 +78,11 @@ pub enum LinkSource {
     Manual,
     Clipboard,
     Drop,
+    /// Expanded from a playlist link already in the LinkGrabber.
+    Playlist,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct GrabbedLink {
@@ -88,6 +96,11 @@ pub struct GrabbedLink {
     pub package: String,
     /// `None` means the default download folder.
     pub dest_dir: Option<PathBuf>,
+    pub kind: DownloadKind,
+    /// What yt-dlp found, for `Ytdlp` links.
+    pub media: Option<MediaSummary>,
+    /// Format choice, for `Ytdlp` links.
+    pub ytdlp: Option<YtDlpOptions>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -103,14 +116,14 @@ pub enum GrabberEvent {
         source: LinkSource,
     },
     Updated {
-        link: GrabbedLink,
+        link: Box<GrabbedLink>,
     },
     Removed {
         ids: Vec<LinkId>,
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AddOutcome {
     pub added: Vec<GrabbedLink>,
     /// Links skipped because they are already in the LinkGrabber.
@@ -127,22 +140,51 @@ struct Inner {
     client: reqwest::Client,
     events: broadcast::Sender<GrabberEvent>,
     probes: Arc<Semaphore>,
+    tools: Option<Tools>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
 struct LinkRow {
     id: i64,
     source_url: String,
+    kind: Option<String>,
     filename: Option<String>,
     size: Option<i64>,
     availability: String,
     error: Option<String>,
     proposed_package: Option<String>,
     dest_dir: Option<String>,
+    handler_opts_json: Option<String>,
+    info_json: Option<String>,
 }
 
 impl LinkRow {
+    fn kind(&self) -> DownloadKind {
+        match self.kind.as_deref() {
+            Some("ytdlp") => DownloadKind::Ytdlp,
+            _ => DownloadKind::Http,
+        }
+    }
+
+    fn media_info(&self) -> Option<MediaInfo> {
+        (self.kind() == DownloadKind::Ytdlp)
+            .then(|| serde_json::from_str(self.info_json.as_deref()?).ok())
+            .flatten()
+    }
+
+    fn ytdlp_options(&self) -> Option<YtDlpOptions> {
+        (self.kind() == DownloadKind::Ytdlp).then(|| {
+            self.handler_opts_json
+                .as_deref()
+                .and_then(|json| serde_json::from_str(json).ok())
+                .unwrap_or_default()
+        })
+    }
+
     fn into_link(self) -> GrabbedLink {
+        let kind = self.kind();
+        let media = self.media_info().map(|info| MediaSummary::from_info(&info));
+        let ytdlp = self.ytdlp_options();
         let host = Url::parse(&self.source_url)
             .ok()
             .and_then(|u| u.host_str().map(str::to_owned))
@@ -157,13 +199,17 @@ impl LinkRow {
             error: self.error,
             package: self.proposed_package.unwrap_or_else(|| "Links".to_owned()),
             dest_dir: self.dest_dir.map(PathBuf::from),
+            kind,
+            media,
+            ytdlp,
         }
     }
 }
 
 impl LinkGrabber {
     /// Load the grabber and re-check links whose probe didn't finish last run.
-    pub async fn start(pool: Pool, user_agent: Option<&str>) -> Result<Self> {
+    /// Without `tools`, every link is checked as a plain file.
+    pub async fn start(pool: Pool, user_agent: Option<&str>, tools: Option<Tools>) -> Result<Self> {
         let (events, _) = broadcast::channel(256);
         let grabber = Self {
             inner: Arc::new(Inner {
@@ -171,6 +217,7 @@ impl LinkGrabber {
                 pool,
                 events,
                 probes: Arc::new(Semaphore::new(PROBE_CONCURRENCY)),
+                tools,
             }),
         };
         let pending: Vec<LinkRow> = sqlx::query_as(
@@ -303,6 +350,31 @@ impl LinkGrabber {
         Ok(())
     }
 
+    /// Choose the yt-dlp format for links; plain links are left alone. The
+    /// size estimate follows the new choice.
+    pub async fn set_format(&self, ids: &[LinkId], options: &YtDlpOptions) -> Result<()> {
+        let json = serde_json::to_string(options)?;
+        for id in ids {
+            let Some(row) = self.row(*id).await? else {
+                continue;
+            };
+            if row.kind() != DownloadKind::Ytdlp {
+                continue;
+            }
+            let size = row
+                .media_info()
+                .and_then(|info| options.estimate_size(&info.formats));
+            sqlx::query("UPDATE link_grabber SET handler_opts_json = ?, size = ? WHERE id = ?")
+                .bind(&json)
+                .bind(size.map(|s| s as i64))
+                .bind(id)
+                .execute(&self.inner.pool)
+                .await?;
+            self.updated(*id).await?;
+        }
+        Ok(())
+    }
+
     /// Probe links again (after an error, or to refresh).
     pub async fn recheck(&self, ids: &[LinkId]) -> Result<()> {
         for id in ids {
@@ -347,15 +419,7 @@ impl LinkGrabber {
 
         let mut packages = Vec::with_capacity(groups.len());
         for ((name, dest_dir), members) in groups {
-            let downloads = members
-                .iter()
-                .filter_map(|l| {
-                    Url::parse(&l.url).ok().map(|url| NewDownload {
-                        url,
-                        filename: l.filename.clone(),
-                    })
-                })
-                .collect();
+            let downloads = members.iter().filter_map(new_download).collect();
             let package = manager
                 .add_package(NewPackage {
                     name,
@@ -413,6 +477,30 @@ impl LinkGrabber {
     }
 }
 
+fn new_download(link: &GrabbedLink) -> Option<NewDownload> {
+    let url = Url::parse(&link.url).ok()?;
+    if link.kind != DownloadKind::Ytdlp {
+        return Some(NewDownload {
+            filename: link.filename.clone(),
+            ..NewDownload::new(url)
+        });
+    }
+    let title = link.media.as_ref().and_then(|m| m.title.clone());
+    // The name only overrides yt-dlp's own `title [id]` when the user changed
+    // it; otherwise two videos with the same title would collide.
+    let renamed = link
+        .filename
+        .clone()
+        .filter(|name| Some(name) != title.as_ref().map(|t| filename::sanitize(t)).as_ref());
+    Some(NewDownload {
+        url,
+        filename: renamed,
+        kind: DownloadKind::Ytdlp,
+        ytdlp: Some(link.ytdlp.clone().unwrap_or_default()),
+        title,
+    })
+}
+
 async fn updated(inner: &Inner, id: LinkId) -> Result<()> {
     let row: Option<LinkRow> = sqlx::query_as("SELECT * FROM link_grabber WHERE id = ?")
         .bind(id)
@@ -423,7 +511,7 @@ async fn updated(inner: &Inner, id: LinkId) -> Result<()> {
         inner
             .events
             .send(GrabberEvent::Updated {
-                link: row.into_link(),
+                link: Box::new(row.into_link()),
             })
             .ok();
     }
@@ -451,16 +539,26 @@ async fn probe_link(
     }
     updated(inner, id).await?;
 
-    let result = match Url::parse(url) {
-        Ok(parsed) => http::probe(&inner.client, &DownloadSpec::new(parsed)).await,
+    let parsed = Url::parse(url).map_err(|e| Error::InvalidUrl(e.to_string()));
+    let result = match &parsed {
+        Ok(parsed) => http::probe(&inner.client, &DownloadSpec::new(parsed.clone())).await,
         Err(e) => Err(Error::InvalidUrl(e.to_string())),
     };
+    if let Ok(parsed) = &parsed
+        && media::worth_asking(&result)
+    {
+        match media::resolve_link(inner, id, parsed, default_package).await {
+            Ok(media::Verdict::Handled) => return updated(inner, id).await,
+            Ok(media::Verdict::NotMedia) => {}
+            Err(e) => tracing::warn!(link = id, error = %e, "yt-dlp check failed"),
+        }
+    }
     match result {
         Ok(probe) => {
             // COALESCE keeps a name the user typed while the probe ran.
             sqlx::query(
-                "UPDATE link_grabber SET availability = 'online', error = NULL,
-                     filename = COALESCE(filename, ?), size = ?
+                "UPDATE link_grabber SET kind = 'http', info_json = NULL, availability = 'online',
+                     error = NULL, filename = COALESCE(filename, ?), size = ?
                  WHERE id = ?",
             )
             .bind(&probe.filename)

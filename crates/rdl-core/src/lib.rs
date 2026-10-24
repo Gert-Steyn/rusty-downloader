@@ -9,7 +9,10 @@ pub mod linkgrabber;
 pub mod logging;
 pub mod manager;
 pub mod paths;
+pub mod process;
 pub mod settings;
+pub mod tools;
+pub mod ytdlp;
 
 pub use error::{Error, Result};
 

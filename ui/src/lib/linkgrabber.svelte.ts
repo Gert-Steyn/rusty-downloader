@@ -9,7 +9,8 @@ import {
 	unwrap,
 	type GrabbedLink,
 	type GrabberEventBatch,
-	type LinkSource
+	type LinkSource,
+	type YtDlpOptions
 } from './api.js';
 
 export interface LinkGroup {
@@ -22,7 +23,8 @@ export interface LinkGroup {
 const SOURCE_LABEL: Record<LinkSource, string> = {
 	manual: '',
 	clipboard: ' from the clipboard',
-	drop: ' from the drop'
+	drop: ' from the drop',
+	playlist: ' from the playlist'
 };
 
 function plural(n: number, word: string) {
@@ -131,6 +133,8 @@ class GrabberStore {
 	setFolder = (ids: number[], dir: string | null) =>
 		this.run(() => unwrap(commands.grabberSetFolder(ids, dir)));
 	recheck = (ids: number[]) => this.run(() => unwrap(commands.grabberRecheck(ids)));
+	setFormat = (ids: number[], options: YtDlpOptions) =>
+		this.run(() => unwrap(commands.grabberSetFormat(ids, options)));
 
 	/** Queue the ticked links. Returns the number of packages created. */
 	async confirm(): Promise<number> {

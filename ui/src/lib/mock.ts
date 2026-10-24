@@ -1,6 +1,6 @@
 // Sample data for previewing the UI in a plain browser (`pnpm ui:dev`).
 // Never loaded inside the app.
-import type { Availability, Download, GrabbedLink, Package, Status } from './api.js';
+import type { Availability, Download, GrabbedLink, Package, Status, ToolInfo } from './api.js';
 import type { Live } from './downloads.svelte.js';
 
 const MB = 1024 * 1024;
@@ -24,7 +24,9 @@ function dl(
 		size,
 		downloaded: Math.round((size ?? 0) * fraction),
 		status,
-		error
+		error,
+		ytdlp: null,
+		title: null
 	};
 }
 
@@ -49,7 +51,17 @@ export function packages(): Package[] {
 			dl(3, 'panel.mp4', null, 0, 'failed', 'link expired or access denied (HTTP 403)'),
 			dl(3, null, null, 0, 'queued')
 		]),
-		pkg(4, 'Drivers', [dl(4, 'gpu-driver-setup.exe', 742 * MB, 1, 'completed')])
+		pkg(4, 'Drivers', [dl(4, 'gpu-driver-setup.exe', 742 * MB, 1, 'completed')]),
+		pkg(5, 'Big Buck Bunny', [
+			{
+				...dl(5, null, 412 * MB, 0.3, 'active'),
+				kind: 'ytdlp',
+				sourceUrl: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+				destPath: 'C:\\Users\\You\\Downloads\\Big Buck Bunny [aqz-KE-bpKQ].mp4',
+				ytdlp: { preset: 'max1080', customFormat: null },
+				title: 'Big Buck Bunny'
+			}
+		])
 	];
 }
 
@@ -70,7 +82,39 @@ export function grabbedLinks(): GrabbedLink[] {
 		availability,
 		error,
 		package: pkg,
-		destDir: null
+		destDir: null,
+		kind: 'http',
+		media: null,
+		ytdlp: null
+	});
+	const video = (
+		vid: string,
+		title: string,
+		pkg: string,
+		size: number | null,
+		heights: number[],
+		duration: number
+	): GrabbedLink => ({
+		id: id++,
+		url: `https://www.youtube.com/watch?v=${vid}`,
+		host: 'www.youtube.com',
+		filename: title,
+		size,
+		availability: 'online',
+		error: null,
+		package: pkg,
+		destDir: null,
+		kind: 'ytdlp',
+		media: {
+			title,
+			uploader: 'Blender',
+			duration,
+			thumbnail: null,
+			extractor: 'Youtube',
+			heights,
+			isLive: false
+		},
+		ytdlp: { preset: 'best', customFormat: null }
 	});
 	return [
 		link('movie.part1.rar', 'movie', 'online', 1024 * MB),
@@ -78,7 +122,45 @@ export function grabbedLinks(): GrabbedLink[] {
 		link('movie.part3.rar', 'movie', 'checking', null),
 		link('notes.pdf', 'files.example.net', 'online', 2 * MB),
 		link('old/archive.zip', 'files.example.net', 'offline', null, 'server returned HTTP 404'),
-		link('slow/report.docx', 'files.example.net', 'error', null, 'operation timed out')
+		link('slow/report.docx', 'files.example.net', 'error', null, 'operation timed out'),
+		video('aqz-KE-bpKQ', 'Big Buck Bunny 60fps 4K', 'Big Buck Bunny 60fps 4K', 640 * MB, [2160, 1440, 1080, 720, 480, 360], 634),
+		video('eRsGyueVLvQ', 'Sintel', 'Open Movies', null, [], 888),
+		video('R6MlUcmOul8', 'Tears of Steel', 'Open Movies', null, [], 734)
+	];
+}
+
+export function tools(): ToolInfo[] {
+	const day = 24 * 60 * 60 * 1000;
+	const now = Date.now();
+	return [
+		{
+			name: 'ytdlp',
+			channel: 'stable',
+			path: 'C:\\Users\\You\\AppData\\Roaming\\rusty-downloader\\tools\\yt-dlp\\2026.10.07-1a2b3c4d\\yt-dlp.exe',
+			version: '2026.10.07',
+			release: '2026.10.07',
+			installedAt: now - 17 * day,
+			latestRelease: '2026.10.21',
+			updateAvailable: true,
+			lastCheck: now - 2 * 60 * 60 * 1000,
+			previousVersion: '2026.09.26',
+			task: null,
+			error: null
+		},
+		{
+			name: 'ffmpeg',
+			channel: 'stable',
+			path: null,
+			version: null,
+			release: null,
+			installedAt: null,
+			latestRelease: null,
+			updateAvailable: false,
+			lastCheck: null,
+			previousVersion: null,
+			task: { type: 'downloading', downloaded: 38 * MB, total: 91 * MB },
+			error: null
+		}
 	];
 }
 

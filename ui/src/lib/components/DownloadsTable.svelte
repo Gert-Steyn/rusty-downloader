@@ -221,7 +221,7 @@
 						data-index={first + i}
 					>
 						<span class="name" role="gridcell">
-							<Icon name="file" />
+							<Icon name={d.kind === 'ytdlp' ? 'video' : 'file'} />
 							<span class="label" title={d.sourceUrl}>{displayName(d)}</span>
 						</span>
 						<span class="num" role="gridcell">{formatBytes(d.size)}</span>

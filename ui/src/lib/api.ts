@@ -7,11 +7,24 @@ import type {
 	Event_Serialize,
 	GrabbedLink_Serialize,
 	GrabberEvents_Serialize,
-	Package_Serialize
+	MediaSummary_Serialize,
+	Package_Serialize,
+	ToolEvents_Serialize,
+	ToolInfo_Serialize,
+	ToolTask_Serialize,
+	YtDlpOptions_Serialize
 } from './bindings.js';
 
 export { commands, events } from './bindings.js';
-export type { AppInfo, Availability, LinkSource, Status } from './bindings.js';
+export type {
+	AppInfo,
+	Availability,
+	FormatPreset,
+	LinkSource,
+	Status,
+	ToolChannel,
+	ToolName
+} from './bindings.js';
 export { isTauri };
 
 // The backend serialises these; the UI only ever receives them.
@@ -21,6 +34,11 @@ export type DownloadEvent = Event_Serialize;
 export type DownloadEventBatch = DownloadEvents_Serialize;
 export type GrabbedLink = GrabbedLink_Serialize;
 export type GrabberEventBatch = GrabberEvents_Serialize;
+export type MediaSummary = MediaSummary_Serialize;
+export type YtDlpOptions = YtDlpOptions_Serialize;
+export type ToolInfo = ToolInfo_Serialize;
+export type ToolTask = ToolTask_Serialize;
+export type ToolEventBatch = ToolEvents_Serialize;
 
 type CommandResult<T> = { status: 'ok'; data: T } | { status: 'error'; error: CommandError };
 

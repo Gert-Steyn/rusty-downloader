@@ -29,7 +29,7 @@ pub fn client(user_agent: Option<&str>) -> Result<reqwest::Client> {
 }
 
 /// Map a non-success status to the matching error.
-fn check_status(status: StatusCode, url: &Url) -> Result<()> {
+pub(crate) fn check_status(status: StatusCode, url: &Url) -> Result<()> {
     match status.as_u16() {
         200..=299 => Ok(()),
         code @ (401 | 403 | 410) => Err(Error::LinkExpired(code)),

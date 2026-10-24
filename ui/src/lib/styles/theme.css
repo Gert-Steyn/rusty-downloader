@@ -170,6 +170,33 @@ button {
 	border-bottom: 2px solid var(--accent);
 	padding-bottom: 4px;
 }
+/* Drop-downs: Fluent ComboBox look on a native select */
+.select {
+	min-height: 28px;
+	padding: 3px 8px;
+	font: inherit;
+	font-size: 13px;
+	color: var(--text-primary);
+	background: var(--fill-control);
+	border: 1px solid var(--stroke-control);
+	border-bottom-color: var(--stroke-control-bottom);
+	border-radius: var(--radius-control);
+	outline: none;
+}
+.select:hover:not(:disabled) {
+	background: var(--fill-control-hover);
+}
+.select:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+.select:disabled {
+	color: var(--text-secondary);
+}
+.select option {
+	color: var(--text-primary);
+	background: var(--page-fallback);
+}
 .field {
 	display: flex;
 	flex-direction: column;

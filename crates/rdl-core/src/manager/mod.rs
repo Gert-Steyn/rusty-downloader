@@ -10,6 +10,7 @@
 mod job;
 mod store;
 mod types;
+mod ytdlp_job;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -20,11 +21,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::db::Pool;
 use crate::http::{self, SegmentConfig, filename};
-use crate::{Error, Result};
+use crate::tools::Tools;
+use crate::{Error, Result, ytdlp};
 
 pub use types::{
-    DEFAULT_QUEUE, Download, DownloadId, Event, NewDownload, NewPackage, Package, PackageId,
-    QueueId, Status,
+    DEFAULT_QUEUE, Download, DownloadId, DownloadKind, Event, NewDownload, NewPackage, Package,
+    PackageId, QueueId, Status,
 };
 
 #[derive(Debug, Clone)]
@@ -35,6 +37,8 @@ pub struct ManagerConfig {
     /// Fallback re-check of the queues in case a wake-up was missed.
     pub rescan_interval: Duration,
     pub user_agent: Option<String>,
+    /// Runs yt-dlp downloads; without it they fail as unsupported.
+    pub tools: Option<Tools>,
 }
 
 impl Default for ManagerConfig {
@@ -44,6 +48,7 @@ impl Default for ManagerConfig {
             save_interval: Duration::from_secs(2),
             rescan_interval: Duration::from_secs(5),
             user_agent: None,
+            tools: None,
         }
     }
 }
@@ -233,6 +238,11 @@ impl Manager {
 
         if let Some(dest) = row.dest_path.as_deref().map(std::path::Path::new) {
             remove_file_if_exists(&job::part_path(dest)).await?;
+            if row.kind == DownloadKind::Ytdlp.as_str() && row.status() != Status::Completed {
+                for leftover in ytdlp::partial_files(dest) {
+                    remove_file_if_exists(&leftover).await?;
+                }
+            }
             if delete_files && row.status() == Status::Completed {
                 remove_file_if_exists(dest).await?;
             }

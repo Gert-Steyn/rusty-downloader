@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use rdl_core::linkgrabber::{GrabbedLink, LinkId, LinkSource, extract_links};
 use rdl_core::manager::PackageId;
+use rdl_core::ytdlp::YtDlpOptions;
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager, State};
@@ -93,6 +94,17 @@ pub async fn grabber_set_folder(
 #[specta::specta]
 pub async fn grabber_recheck(state: State<'_, AppState>, ids: Vec<LinkId>) -> CommandResult<()> {
     Ok(state.grabber.recheck(&ids).await?)
+}
+
+/// Choose the yt-dlp format for links (plain links are skipped).
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_set_format(
+    state: State<'_, AppState>,
+    ids: Vec<LinkId>,
+    options: YtDlpOptions,
+) -> CommandResult<()> {
+    Ok(state.grabber.set_format(&ids, &options).await?)
 }
 
 /// Queue the links as downloads; returns the new package ids.

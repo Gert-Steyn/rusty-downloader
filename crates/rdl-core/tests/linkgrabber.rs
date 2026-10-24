@@ -24,7 +24,7 @@ impl Fixture {
     async fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let pool = db::open(&dir.path().join("test.db")).await.unwrap();
-        let grabber = LinkGrabber::start(pool.clone(), None).await.unwrap();
+        let grabber = LinkGrabber::start(pool.clone(), None, None).await.unwrap();
         Self { dir, pool, grabber }
     }
 
@@ -232,7 +232,7 @@ async fn unfinished_checks_resume_after_restart() {
         .await
         .unwrap();
 
-    let grabber = LinkGrabber::start(pool.clone(), None).await.unwrap();
+    let grabber = LinkGrabber::start(pool.clone(), None, None).await.unwrap();
     let fx = Fixture { dir, pool, grabber };
     let links = fx.settled().await;
 
