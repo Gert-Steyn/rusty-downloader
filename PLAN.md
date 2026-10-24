@@ -6,6 +6,99 @@ A full-featured download manager for Windows, modeled on **JDownloader**. It has
 
 ---
 
+## 0. Current Status (updated 2026-10-24)
+
+**Where we are:** Phase 0 is done. Phase 1 milestones **1a–1d are done**. **Next up: 1e (tool manager + yt-dlp).**
+
+The app works today as a plain HTTP(S) download manager. You can paste, drop or copy links into the LinkGrabber, review and rename them, and start them. Downloads are segmented and resumable, with pause, resume and remove, and they survive an app restart.
+
+### Done so far
+
+| Milestone | Commit | What landed |
+|---|---|---|
+| Phase 0 – scaffold | `d489b40` | Cargo workspace, Tauri 2 + SvelteKit shell, SQLite migrations, tracing logs, CI workflow, Fluent theme |
+| Rename | `768a07c` | `win-pydl` → Rusty Downloader / `rdl-core` |
+| 1a – HTTP engine | `fe0f510` | Probe, filenames (RFC 6266/5987, Windows-safe), dynamic segment splitting, pause/resume, `If-Range`, retries |
+| 1b – Download manager | `f2f4992` | SQLite-backed packages/downloads/queues, scheduler with per-queue limits, segment saves every ~2 s, crash recovery, event stream |
+| 1c – Downloads UI | `bea4e42` | tauri-specta typed IPC, batched events, virtualised treegrid, details panel, add/remove dialogs |
+| 1d – LinkGrabber | `adba9eb` | Background probing + availability, archive-set grouping, inline renames, clipboard watcher, drag-drop, global paste |
+
+Tests: 64 Rust tests (unit tests, plus engine, manager and LinkGrabber suites against a local misbehaving HTTP server, plus app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. `svelte-check` passes with 0 errors or warnings. Each milestone was also verified end to end in the running app (see "How to test in the real app" below).
+
+### Next: 1e – tool manager + yt-dlp (suggested order)
+
+1. `rdl-core::tools`:
+   - Tool layout under `<data>/tools/` (or next to the exe when portable).
+   - Version detection (`yt-dlp --version`).
+   - Update from GitHub releases with `SHA2-256SUMS` verification, an atomic swap and rollback.
+   - Uses the existing `tools` table.
+2. Subprocess runner:
+   - `CREATE_NO_WINDOW`, plus a Windows job object so children die with the app.
+   - UTF-8 output, cancellation.
+3. yt-dlp resolver: `-J --flat-playlist` → title, formats, playlist entries. The LinkGrabber should pick it for sites yt-dlp supports, falling back to the HTTP probe.
+4. Downloader:
+   - `--newline --progress-template "download:%(progress)j"`, parsed into the existing `Progress` events.
+   - Pause = kill, resume = re-run with `--continue`.
+   - `ffmpeg` location passed explicitly.
+5. Manager: run `kind = 'ytdlp'` downloads (currently rejected as "not supported yet").
+6. UI: Tools page (versions, update button), and a format picker / preset in the LinkGrabber.
+7. Decide how ffmpeg is obtained (bundled vs downloaded on first use) before writing the updater.
+
+### Deferred / known gaps (pick up in the milestone noted)
+
+- **Not verified:**
+  - CI on GitHub has never been checked (the repo is private and the browser pane isn't signed in).
+  - The Mica window background has never been seen. It can't be captured by DevTools screenshots.
+- **1g:**
+  - History and duplicate warnings against past downloads.
+  - Tray icon and menu.
+  - Settings page: default folder, connections, clipboard options, startup.
+  - Right-click menu, and drag-to-reorder in the downloads table.
+- **Clipboard watcher:** no "ask first" mode or URL filters yet (only on/off).
+- **HTTP engine:**
+  - `Retry-After` on 429 isn't honoured (429 uses normal backoff).
+  - Expired links (`LinkExpired`) need plugin refresh (Phase 6).
+- **Per-download headers and cookies:** not stored yet. Needed for browser hand-off (Phase 2).
+- **Windows 10:** the transparent window shows the desktop through it, because Mica is Windows 11 only. A fallback is needed if Windows 10 ever matters.
+- **Tool and plugin kinds:** only `kind = 'http'` downloads run so far.
+
+### Implementation notes & gotchas
+
+- **Pinned versions:**
+  - `tauri-specta =2.0.0-rc.26`, `specta =2.0.0-rc.26` and `specta-typescript =0.0.13` must move together.
+  - Tauri plugins stay on **2.x**, because their latest releases are 3.0 alphas.
+- **Bindings:** `ui/src/lib/bindings.ts` is generated. `pnpm dev` rewrites it, or run `cargo test -p rusty-downloader -- --ignored regenerate_bindings`. CI fails if it's stale.
+- **Test binaries:** `src-tauri/build.rs` embeds the Common Controls v6 manifest for every target. Without it, test binaries linking Tauri crash with `STATUS_ENTRYPOINT_NOT_FOUND`.
+- **sqlx 0.9:** it rejects SQL built at runtime. Use static strings, or `AssertSqlSafe` only for SQL built from our own constants.
+- **Svelte 5:** in `$effect`, anything read becomes a dependency. Wrap reset logic in `untrack` (this caused the "folder field wipes links" bug in 1c).
+- **Windows PowerShell 5.1:**
+  - Commit messages with embedded `"` get split. Write the message to a file and use `git commit -F`.
+  - `Invoke-RestMethod` doesn't unroll JSON arrays.
+- **Toolchain on this machine:**
+  - Rust 1.99 (MSVC), Node 24, pnpm 10, Git, VS 2022 Build Tools.
+  - A new shell may need PATH refreshed from the registry.
+  - Git identity is set repo-locally. GitHub auth goes through Git Credential Manager.
+
+### How to test in the real app
+
+The native window can't be clicked from automation, but WebView2 exposes Chrome DevTools:
+
+1. **Start a local file server.** Any HTTP server with Range support works. The one used so far served 200 MiB of deterministic bytes, throttled to ~3 MB/s per connection, at `http://127.0.0.1:8765/<name>`.
+2. **Launch the app with DevTools enabled:**
+   ```powershell
+   $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222 --remote-allow-origins=http://127.0.0.1'
+   pnpm dev
+   ```
+3. **Drive it over CDP.** Connect a WebSocket to the page listed at `http://127.0.0.1:9222/json` and send:
+   - `Runtime.evaluate` to click and type in the real UI, or call `window.__TAURI_INTERNALS__.invoke(...)`
+   - `Page.captureScreenshot` for screenshots
+   
+   Delete `document.documentElement.dataset.shell` first, so screenshots get a solid background instead of transparent Mica.
+4. **Clean up.** Remove test packages with `remove_package(id, deleteFiles: true)`, and point test folders somewhere disposable, not your Downloads folder.
+5. **Clipboard tests use the real Windows clipboard.** Save it first and restore it afterwards. Restoring while watching is on re-adds any link in your own clipboard text.
+
+---
+
 ## 1. Goals & Constraints
 
 | Item | Decision |
@@ -282,30 +375,30 @@ Locations: installed builds use `%APPDATA%\rusty-downloader\` (db, logs, plugins
 
 ## 12. Roadmap
 
-| Phase | Scope | Exit criteria |
-|---|---|---|
-| **0. Scaffold** | Workspace, Tauri + SvelteKit shell, SQLite migrations, tracing logs, CI, Fluent theme base | App launches, CI green |
-| **1. MVP** | Segmented HTTP engine (resume, retries, dynamic splitting, headers/cookies/auth), queues + concurrency, packages, LinkGrabber (paste/clipboard/drag-drop), yt-dlp + gallery-dl (resolve, download, progress, common flags, impersonation, archives) + tool updater, tray, toasts, history/duplicate detection, single instance, settings | Used as daily driver for HTTP, video and galleries |
-| **2. Browser** | MV3 extension (Chromium + Firefox), native host, download interception, context menus, cookie hand-off | Browser downloads flow into the app with cookies |
-| **3. Control** | Scheduler, speed limiting + profiles, keep-awake, on-complete actions, checksum verification | Overnight queue then shutdown works |
-| **4. Network & protocols** | Proxies + rules, interface binding + kill-switch, accounts in the keyring, FTP/FTPS, SFTP | Downloads via SOCKS5/VPN interface, FTP/SFTP resume |
-| **5. Torrent** | librqbit integration, magnet/.torrent associations, seeding limits (ratio/time) | Torrent download + seed from the same UI |
-| **6. Plugins & extract** | Rhai plugin host + API, 2–3 reference plugins, auto-extract with password lists | A hoster resolved via plugin, archive auto-extracted |
-| **7. Remote & release polish** | axum remote UI/API, portable build, auto-update pipeline, installer polish | Install, auto-update and phone control work end to end |
+| Phase | Scope | Exit criteria | Status |
+|---|---|---|---|
+| **0. Scaffold** | Workspace, Tauri + SvelteKit shell, SQLite migrations, tracing logs, CI, Fluent theme base | App launches, CI green | ✅ Done (CI never checked) |
+| **1. MVP** | Segmented HTTP engine (resume, retries, dynamic splitting, headers/cookies/auth), queues + concurrency, packages, LinkGrabber (paste/clipboard/drag-drop), yt-dlp + gallery-dl (resolve, download, progress, common flags, impersonation, archives) + tool updater, tray, toasts, history/duplicate detection, single instance, settings | Used as daily driver for HTTP, video and galleries | 🚧 1a–1d done, 1e next |
+| **2. Browser** | MV3 extension (Chromium + Firefox), native host, download interception, context menus, cookie hand-off | Browser downloads flow into the app with cookies | ⏳ |
+| **3. Control** | Scheduler, speed limiting + profiles, keep-awake, on-complete actions, checksum verification | Overnight queue then shutdown works | ⏳ |
+| **4. Network & protocols** | Proxies + rules, interface binding + kill-switch, accounts in the keyring, FTP/FTPS, SFTP | Downloads via SOCKS5/VPN interface, FTP/SFTP resume | ⏳ |
+| **5. Torrent** | librqbit integration, magnet/.torrent associations, seeding limits (ratio/time) | Torrent download + seed from the same UI | ⏳ |
+| **6. Plugins & extract** | Rhai plugin host + API, 2–3 reference plugins, auto-extract with password lists | A hoster resolved via plugin, archive auto-extracted | ⏳ |
+| **7. Remote & release polish** | axum remote UI/API, portable build, auto-update pipeline, installer polish | Install, auto-update and phone control work end to end | ⏳ |
 
 ### Phase 1 milestones
 
 Each milestone is a commit or series of commits that leaves the app working.
 
-| # | Milestone | Scope |
-|---|---|---|
-| 1a | HTTP engine | Headless, in `rdl-core`: probe, filename handling, segmented download with dynamic splitting, pause/resume from segment state, `If-Range` validation, retries with backoff. Tested against a local test server. |
-| 1b | Download manager | Packages, downloads and queues persisted in SQLite. Per-queue concurrency, start/pause/remove, segment state saved every ~2 s, resume after restart, event stream. |
-| 1c | Downloads UI | Typed IPC (tauri-specta), batched progress events, virtualised downloads table with package rows, add-links dialog, details panel. |
-| 1d | LinkGrabber | Paste / clipboard watcher / drag-drop, background probing, availability badges, package grouping, confirm to queue. |
-| 1e | Tool manager + yt-dlp | Bundled tool layout, version check/update with checksum verification, yt-dlp resolve (`-J`), format picker, JSON progress parsing. |
-| 1f | gallery-dl | Resolve with `-j --simulate`, native download with stdout progress, flag schema + `--help` self-check, managed download archives, impersonation options. |
-| 1g | Desktop polish | Tray icon/menu, toasts, history + duplicate warnings, settings page (folders, connections, clipboard, startup). |
+| # | Milestone | Scope | Status |
+|---|---|---|---|
+| 1a | HTTP engine | Headless, in `rdl-core`: probe, filename handling, segmented download with dynamic splitting, pause/resume from segment state, `If-Range` validation, retries with backoff. Tested against a local test server. | ✅ `fe0f510` |
+| 1b | Download manager | Packages, downloads and queues persisted in SQLite. Per-queue concurrency, start/pause/remove, segment state saved every ~2 s, resume after restart, event stream. | ✅ `f2f4992` |
+| 1c | Downloads UI | Typed IPC (tauri-specta), batched progress events, virtualised downloads table with package rows, add-links dialog, details panel. | ✅ `bea4e42` |
+| 1d | LinkGrabber | Paste / clipboard watcher / drag-drop, background probing, availability badges, package grouping, confirm to queue. | ✅ `adba9eb` |
+| 1e | Tool manager + yt-dlp | Bundled tool layout, version check/update with checksum verification, yt-dlp resolve (`-J`), format picker, JSON progress parsing. | ▶️ Next |
+| 1f | gallery-dl | Resolve with `-j --simulate`, native download with stdout progress, flag schema + `--help` self-check, managed download archives, impersonation options. | ⏳ |
+| 1g | Desktop polish | Tray icon/menu, toasts, history + duplicate warnings, settings page (folders, connections, clipboard, startup). Toasts already exist for the LinkGrabber. | ⏳ |
 
 ---
 
