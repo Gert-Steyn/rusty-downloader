@@ -11,6 +11,7 @@ pub type QueueId = i64;
 pub const DEFAULT_QUEUE: QueueId = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     Queued,
@@ -71,6 +72,7 @@ pub struct NewPackage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct Download {
     pub id: DownloadId,
@@ -86,6 +88,7 @@ pub struct Download {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct Package {
     pub id: PackageId,
@@ -100,6 +103,7 @@ pub struct Package {
 /// broadcast channel: a receiver that lags simply misses events and should
 /// re-read the full list.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(
     tag = "type",
     rename_all = "camelCase",

@@ -148,6 +148,51 @@ button {
 	color: var(--text-disabled);
 }
 
+/* Text boxes: Fluent TextBox with the accent underline on focus */
+.textbox {
+	width: 100%;
+	min-height: 32px;
+	padding: 5px 10px;
+	font: inherit;
+	color: var(--text-primary);
+	background: var(--fill-control);
+	border: 1px solid var(--stroke-control);
+	border-bottom-color: var(--stroke-control-bottom);
+	border-radius: var(--radius-control);
+	outline: none;
+	resize: vertical;
+}
+.textbox:hover {
+	background: var(--fill-control-hover);
+}
+.textbox:focus {
+	background: var(--page-fallback);
+	border-bottom: 2px solid var(--accent);
+	padding-bottom: 4px;
+}
+.field {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-bottom: 16px;
+}
+.field > span {
+	font-size: 14px;
+}
+.hint {
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+.error-text {
+	color: var(--critical);
+}
+input[type='checkbox'] {
+	width: 18px;
+	height: 18px;
+	margin: 0;
+	accent-color: var(--accent);
+}
+
 .card {
 	background: var(--card);
 	border: 1px solid var(--stroke-card);

@@ -1,11 +1,49 @@
 mod commands;
+mod events;
 mod state;
 
+use specta_typescript::Typescript;
 use tauri::Manager;
+use tauri_specta::{Builder, collect_commands, collect_events};
 
 use crate::state::AppState;
 
+/// Generated TypeScript bindings for every command and event.
+const BINDINGS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../ui/src/lib/bindings.ts");
+
+fn specta_builder() -> Builder<tauri::Wry> {
+    Builder::<tauri::Wry>::new()
+        .commands(collect_commands![
+            commands::app_info,
+            commands::list_packages,
+            commands::default_download_dir,
+            commands::add_links,
+            commands::pause_download,
+            commands::resume_download,
+            commands::pause_all,
+            commands::resume_all,
+            commands::remove_download,
+            commands::remove_package,
+            commands::open_download,
+            commands::reveal_download,
+            commands::open_package_folder,
+        ])
+        .events(collect_events![events::DownloadEvents])
+        // Sizes and ids are far below 2^53, so plain numbers are safe in JS.
+        .dangerously_cast_bigints_to_number()
+}
+
+fn typescript() -> Typescript {
+    Typescript::default()
+}
+
 pub fn run() {
+    let specta = specta_builder();
+    #[cfg(debug_assertions)]
+    if let Err(e) = specta.export(typescript(), BINDINGS_PATH) {
+        eprintln!("could not export TypeScript bindings: {e}");
+    }
+
     tauri::Builder::default()
         // Must be registered first: a second launch hands over and exits before anything else runs.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
@@ -16,12 +54,16 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .setup(|app| {
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(specta.invoke_handler())
+        .setup(move |app| {
+            specta.mount_events(app);
             let state = tauri::async_runtime::block_on(AppState::init())?;
+            let events = state.downloads.subscribe();
             app.manage(state);
+            tauri::async_runtime::spawn(events::forward(app.handle().clone(), events));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::app_info])
         .build(tauri::generate_context!())
         .expect("error while building rusty-downloader")
         .run(|app, event| {
@@ -32,4 +74,39 @@ pub fn run() {
                 tauri::async_runtime::block_on(state.downloads.shutdown());
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Fails when a command or type changed but `bindings.ts` wasn't regenerated.
+    /// Regenerate by starting the app in debug (`pnpm dev`) or with
+    /// `cargo test -p rusty-downloader -- --ignored regenerate_bindings`.
+    #[test]
+    fn typescript_bindings_are_up_to_date() {
+        let fresh_path =
+            std::env::temp_dir().join(format!("rdl-bindings-{}.ts", std::process::id()));
+        specta_builder()
+            .export(typescript(), &fresh_path)
+            .expect("export bindings");
+        let fresh = std::fs::read_to_string(&fresh_path).unwrap();
+        let _ = std::fs::remove_file(&fresh_path);
+        let committed = std::fs::read_to_string(BINDINGS_PATH)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
+
+        assert!(
+            fresh.replace("\r\n", "\n") == committed,
+            "ui/src/lib/bindings.ts is out of date; regenerate it (see this test's docs)"
+        );
+    }
+
+    #[test]
+    #[ignore = "writes ui/src/lib/bindings.ts"]
+    fn regenerate_bindings() {
+        specta_builder()
+            .export(typescript(), BINDINGS_PATH)
+            .expect("export bindings");
+    }
 }

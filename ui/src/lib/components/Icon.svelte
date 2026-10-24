@@ -11,7 +11,13 @@
 		plus: 'M12 5v14M5 12h14',
 		play: 'M7 4l13 8-13 8z',
 		pause: 'M8 4v16M16 4v16',
-		trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3'
+		trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+		'chevron-right': 'M9 6l6 6-6 6',
+		'chevron-down': 'M6 9l6 6 6-6',
+		folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+		open: 'M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5',
+		close: 'M6 6l12 12M18 6L6 18',
+		file: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5'
 	} as const;
 
 	export type IconName = keyof typeof paths;

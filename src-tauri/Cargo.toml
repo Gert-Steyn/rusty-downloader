@@ -16,8 +16,15 @@ name = "rusty_downloader_lib"
 tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
-rdl-core = { path = "../crates/rdl-core" }
+rdl-core = { version = "0.1.0", path = "../crates/rdl-core", features = ["specta"] }
 serde = { version = "1.0.229", features = ["derive"] }
+specta = { version = "=2.0.0-rc.26", features = ["derive"] }
+specta-typescript = "=0.0.13"
 tauri = { version = "2.12.5", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2.5.4"
+tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
+tokio = { version = "1.54.1", features = ["sync", "time"] }
 tracing = "0.1.44"
+url = "2.5.8"

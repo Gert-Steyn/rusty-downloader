@@ -3,7 +3,9 @@
 	import favicon from '#lib/assets/favicon.svg';
 	import Icon from '#lib/components/Icon.svelte';
 	import { mainNav, footerNav, type NavItem } from '#lib/nav.js';
-	import { appInfo, isTauri } from '#lib/api.js';
+	import { commands, isTauri, unwrap } from '#lib/api.js';
+	import { downloads } from '#lib/downloads.svelte.js';
+	import { formatSpeed } from '#lib/format.js';
 	import { page } from '$app/state';
 	import type { LayoutProps } from './$types';
 
@@ -13,10 +15,12 @@
 
 	if (isTauri()) {
 		document.documentElement.dataset.shell = 'tauri';
-		appInfo()
+		unwrap(commands.appInfo())
 			.then((info) => (version = info.version))
 			.catch((e) => console.error('app_info failed', e));
 	}
+	// Owned by the layout so the status bar is live on every page.
+	downloads.start();
 
 	const isActive = (item: NavItem) =>
 		item.href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(item.href);
@@ -52,9 +56,9 @@
 	</main>
 
 	<footer class="statusbar">
-		<span><Icon name="downloads" size={14} /> 0 B/s</span>
-		<span>0 active</span>
-		<span>0 queued</span>
+		<span><Icon name="downloads" size={14} /> {downloads.stats.speed ? formatSpeed(downloads.stats.speed) : '0 B/s'}</span>
+		<span>{downloads.stats.active} active</span>
+		<span>{downloads.stats.queued} queued</span>
 		<span class="spacer"></span>
 		<span>No speed limit</span>
 	</footer>

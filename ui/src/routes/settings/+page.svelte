@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { appInfo, isTauri, type AppInfo } from '#lib/api.js';
+	import { commands, isTauri, unwrap, type AppInfo } from '#lib/api.js';
 
 	let info = $state<AppInfo | null>(null);
 	let error = $state<string | null>(null);
@@ -9,7 +9,7 @@
 			error = 'Running in a plain browser, so backend details are unavailable.';
 			return;
 		}
-		appInfo()
+		unwrap(commands.appInfo())
 			.then((i) => (info = i))
 			.catch((e) => (error = String(e)));
 	});
