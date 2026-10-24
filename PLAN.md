@@ -22,7 +22,7 @@ The app works today as an HTTP(S) and video download manager. You can paste, dro
 | 1b – Download manager | `f2f4992` | SQLite-backed packages/downloads/queues, scheduler with per-queue limits, segment saves every ~2 s, crash recovery, event stream |
 | 1c – Downloads UI | `bea4e42` | tauri-specta typed IPC, batched events, virtualised treegrid, details panel, add/remove dialogs |
 | 1d – LinkGrabber | `adba9eb` | Background probing + availability, archive-set grouping, inline renames, clipboard watcher, drag-drop, global paste |
-| 1e – Tools + yt-dlp | (this commit) | Tool manager (install on first use, SHA-256 verified, versioned folders, rollback, daily yt-dlp auto-update), job-object subprocess runner, yt-dlp resolve/download, playlist expansion, format presets, Tools page |
+| 1e – Tools + yt-dlp | `462a74b` | Tool manager (install on first use, SHA-256 verified, versioned folders, rollback, daily yt-dlp auto-update), job-object subprocess runner, yt-dlp resolve/download, playlist expansion, format presets, Tools page |
 
 Tests: 90 Rust tests (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against a fake GitHub API; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Three opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools and pause/resume a real yt-dlp download (`RDL_LIVE_DIR=<folder> cargo test -p rdl-core --test tools_live -- --ignored`). `svelte-check` passes with 0 errors or warnings. Each milestone was also verified end to end in the running app (see "How to test in the real app" below).
 
@@ -37,9 +37,21 @@ Tests: 90 Rust tests (unit tests; engine, manager and LinkGrabber suites against
 - **LinkGrabber:** a link whose probe returns HTML, or fails, is offered to yt-dlp. "Unsupported URL" falls back to the plain HTTP result. Playlists replace their link with one link per entry (untitled entries use the URL slug). Format presets: best, ≤4K/1080/720/480, MP3, M4A, custom `-f`. A size estimate comes from the `-J` formats.
 - **Test sites:** YouTube and Vimeo ask automated clients to sign in from this machine. Use `https://archive.org/details/BigBuckBunny_124` (video, format `0` = 46,935,223 bytes) and `https://soundcloud.com/forss/sets/soulhack` (11-track playlist).
 
-### Next: 1f – gallery-dl
+### Resume here
 
-Same shape as 1e: add gallery-dl to `tools` (GitHub `mikf/gallery-dl`, check how its release publishes checksums), resolve with `-j --simulate`, run downloads natively with stdout progress, and add the flag schema with a `--help` self-check (§5.3). The process runner, tool manager and LinkGrabber hand-off (`linkgrabber/media.rs`) are meant to be reused.
+- **Repo state:** 1e is committed on `main` (`462a74b`) plus this PLAN update. Check `git status -sb` for whether it has been pushed yet.
+- **Your machine:** testing installed yt-dlp 2026.10.21 and ffmpeg N-128018 into `%APPDATA%\rusty-downloader\tools`, which is what the app does on first use anyway. The app's DB is at schema `20261024000003`, and its downloads and LinkGrabber are empty. "Check for updates" on the Tools page should show both as current.
+- **Sanity check before starting:** `cargo test --workspace` (90 pass), `pnpm -C ui check`, then `pnpm dev` and open the Tools page.
+- **Optional, real network:** `RDL_LIVE_DIR=<some folder> cargo test -p rdl-core --test tools_live -- --ignored --nocapture` (about 110 MB of tools on the first run, reused after).
+
+### Next: 1f – gallery-dl (suggested order)
+
+1. **Look first.** Check how `mikf/gallery-dl` publishes Windows releases (`gallery-dl.exe`, and whether a checksum file exists; if not, decide between pinning hashes, GitHub's asset `digest` field, or a signature). Run `gallery-dl --help` and `-j --simulate` on a couple of real gallery URLs and save the output as test fixtures. §5.3 warns that flags change between versions.
+2. **Tools:** add `ToolName::GalleryDl` with an `Upstream` entry in `tools/mod.rs`. Everything else (versioned folders, rollback, auto-update, Tools page card) follows. Add its text to `ABOUT` in `ui/src/routes/tools/+page.svelte`.
+3. **Resolver:** a `gallerydl` module next to `ytdlp` (`-j --simulate` → item count, first thumbnails, size if known). In `linkgrabber/media.rs`, decide the order (plan §6: yt-dlp first, then gallery-dl if an extractor matches) and store a gallery as **one** link, not expanded, since gallery-dl downloads the whole set itself.
+4. **Downloader:** `manager/gallerydl_job.rs` like `ytdlp_job.rs`. Progress = files done / resolved total, parsed from stdout (one path per file, `# ` prefix for skipped). Pause = kill, resume = re-run (gallery-dl skips existing files). Use `-D <package folder>` and a managed `--download-archive` per site under `<data>/archives/`.
+5. **Flag schema:** `gallery-dl-flags.json` (versioned) driving a per-download options drawer in the LinkGrabber, with the `--help` self-check hiding missing flags. Include the impersonation options and a raw args box.
+6. **Migration 4** if new columns are needed. The `downloads.kind` CHECK already allows `gallerydl`.
 
 ### Deferred / known gaps (pick up in the milestone noted)
 
@@ -74,6 +86,9 @@ Same shape as 1e: add gallery-dl to `tools` (GitHub `mikf/gallery-dl`, check how
 - **Bindings:** `ui/src/lib/bindings.ts` is generated. `pnpm dev` rewrites it, or run `cargo test -p rusty-downloader -- --ignored regenerate_bindings`. CI fails if it's stale.
 - **Test binaries:** `src-tauri/build.rs` embeds the Common Controls v6 manifest for every target. Without it, test binaries linking Tauri crash with `STATUS_ENTRYPOINT_NOT_FOUND`.
 - **sqlx 0.9:** it rejects SQL built at runtime. Use static strings, or `AssertSqlSafe` only for SQL built from our own constants.
+- **tauri-specta reserved names:** a type called `Channel` (and probably other Tauri runtime names) fails export with "must be renamed". That's why the tools enum is `ToolChannel`.
+- **SQLite ids are reused:** tables use `INTEGER PRIMARY KEY` without `AUTOINCREMENT`, so after deleting the newest row its id comes back. Fine today. Keep it in mind for history and duplicate detection in 1g: never key history on a download id.
+- **Clippy `large_enum_variant`:** `GrabberEvent::Updated` holds a `Box<GrabbedLink>` for this reason; serialisation is unchanged.
 - **Svelte 5:** in `$effect`, anything read becomes a dependency. Wrap reset logic in `untrack` (this caused the "folder field wipes links" bug in 1c).
 - **Windows PowerShell 5.1:**
   - Commit messages with embedded `"` get split. Write the message to a file and use `git commit -F`.
@@ -90,16 +105,20 @@ The native window can't be clicked from automation, but WebView2 exposes Chrome 
 1. **Start a local file server.** Any HTTP server with Range support works. The one used so far served 200 MiB of deterministic bytes, throttled to ~3 MB/s per connection, at `http://127.0.0.1:8765/<name>`.
 2. **Launch the app with DevTools enabled:**
    ```powershell
-   $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222 --remote-allow-origins=http://127.0.0.1'
+   $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222 --remote-allow-origins=*'
    pnpm dev
    ```
-3. **Drive it over CDP.** Connect a WebSocket to the page listed at `http://127.0.0.1:9222/json` and send:
+   (`*` is needed for Node's built-in WebSocket client.)
+3. **Drive it over CDP.** `node tools/dev/cdp.mjs eval "<js>"` and `node tools/dev/cdp.mjs shot out.png` do the following for you. Under the hood, connect a WebSocket to the page listed at `http://127.0.0.1:9222/json` and send:
    - `Runtime.evaluate` to click and type in the real UI, or call `window.__TAURI_INTERNALS__.invoke(...)`
    - `Page.captureScreenshot` for screenshots
    
    Delete `document.documentElement.dataset.shell` first, so screenshots get a solid background instead of transparent Mica.
-4. **Clean up.** Remove test packages with `remove_package(id, deleteFiles: true)`, and point test folders somewhere disposable, not your Downloads folder.
-5. **Clipboard tests use the real Windows clipboard.** Save it first and restore it afterwards. Restoring while watching is on re-adds any link in your own clipboard text.
+   - From Git Bash, a Windows folder passed inside an `eval` string loses its backslashes. Use forward slashes (`C:/Users/...`).
+   - Navigate with the app's own links (`document.querySelector('a[href="/tools"]').click()`); `history.pushState` doesn't route.
+4. **Video tests:** use the archive.org and SoundCloud URLs above. YouTube and Vimeo want a sign-in from this machine.
+5. **Clean up.** Remove test packages with `remove_package(id, deleteFiles: true)`, and point test folders somewhere disposable, not your Downloads folder.
+6. **Clipboard tests use the real Windows clipboard.** Save it first and restore it afterwards. Restoring while watching is on re-adds any link in your own clipboard text.
 
 ---
 
@@ -207,7 +226,7 @@ rusty-downloader/
 ├─ ui/                         # SvelteKit (adapter-static, SPA, ssr=false)
 ├─ extension/                  # MV3 extension (Chromium + Firefox manifests)
 ├─ plugins/                    # bundled .rhai hoster plugins
-├─ tools/                      # build-time scripts to fetch yt-dlp/gallery-dl/ffmpeg/7z
+├─ tools/                      # dev and build scripts (tools/dev/cdp.mjs drives the running app)
 ├─ tests/fixtures/             # local test server scenarios, tool output samples
 └─ .github/workflows/          # CI build/test, release + updater manifest
 ```
