@@ -1,4 +1,5 @@
 use std::io;
+use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -16,6 +17,42 @@ pub enum Error {
 
     #[error("logging setup failed: {0}")]
     Logging(String),
+
+    #[error("HTTP request failed: {0}")]
+    Http(#[from] reqwest::Error),
+
+    #[error("server returned HTTP {status} for {url}")]
+    HttpStatus { status: u16, url: String },
+
+    #[error("link expired or access denied (HTTP {0})")]
+    LinkExpired(u16),
+
+    #[error("the file on the server changed since the download started")]
+    RemoteChanged,
+
+    #[error("the server did not honour the byte-range request")]
+    RangeNotHonored,
+
+    #[error("connection closed before the data was complete")]
+    Incomplete,
+
+    #[error("downloaded {actual} bytes but expected {expected}")]
+    SizeMismatch { expected: u64, actual: u64 },
+
+    #[error("destination already exists: {}", .0.display())]
+    DestinationExists(PathBuf),
+}
+
+impl Error {
+    /// Whether retrying the same request might succeed (network blips, 5xx, 429).
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Error::Http(e) => !e.is_builder() && !e.is_redirect(),
+            Error::HttpStatus { status, .. } => matches!(status, 408 | 425 | 429 | 500..=599),
+            Error::Incomplete => true,
+            _ => false,
+        }
+    }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

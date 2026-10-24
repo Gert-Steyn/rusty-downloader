@@ -293,6 +293,20 @@ Locations: installed builds use `%APPDATA%\rusty-downloader\` (db, logs, plugins
 | **6. Plugins & extract** | Rhai plugin host + API, 2–3 reference plugins, auto-extract with password lists | A hoster resolved via plugin, archive auto-extracted |
 | **7. Remote & release polish** | axum remote UI/API, portable build, auto-update pipeline, installer polish | Install, auto-update and phone control work end to end |
 
+### Phase 1 milestones
+
+Each milestone is a commit or series of commits that leaves the app working.
+
+| # | Milestone | Scope |
+|---|---|---|
+| 1a | HTTP engine | Headless, in `rdl-core`: probe, filename handling, segmented download with dynamic splitting, pause/resume from segment state, `If-Range` validation, retries with backoff. Tested against a local test server. |
+| 1b | Download manager | Packages, downloads and queues persisted in SQLite. Per-queue concurrency, start/pause/remove, segment state saved every ~2 s, resume after restart, event stream. |
+| 1c | Downloads UI | Typed IPC (tauri-specta), batched progress events, virtualised downloads table with package rows, add-links dialog, details panel. |
+| 1d | LinkGrabber | Paste / clipboard watcher / drag-drop, background probing, availability badges, package grouping, confirm to queue. |
+| 1e | Tool manager + yt-dlp | Bundled tool layout, version check/update with checksum verification, yt-dlp resolve (`-J`), format picker, JSON progress parsing. |
+| 1f | gallery-dl | Resolve with `-j --simulate`, native download with stdout progress, flag schema + `--help` self-check, managed download archives, impersonation options. |
+| 1g | Desktop polish | Tray icon/menu, toasts, history + duplicate warnings, settings page (folders, connections, clipboard, startup). |
+
 ---
 
 ## 13. Risks & Mitigations
