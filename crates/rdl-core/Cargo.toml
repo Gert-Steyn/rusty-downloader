@@ -1,6 +1,6 @@
 [package]
-name = "pydl-core"
-description = "Download engine, storage and services for win-pydl (no UI dependencies)"
+name = "rdl-core"
+description = "Download engine, storage and services for rusty-downloader (no UI dependencies)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

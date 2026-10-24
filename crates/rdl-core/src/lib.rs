@@ -1,4 +1,4 @@
-//! Core of win-pydl: everything that is not UI. The Tauri app (and later the
+//! Core of rusty-downloader: everything that is not UI. The Tauri app (and later the
 //! native-messaging host and remote server) depend on this crate; it never
 //! depends on Tauri.
 

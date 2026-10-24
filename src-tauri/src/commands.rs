@@ -9,8 +9,8 @@ use crate::state::AppState;
 #[derive(Debug, Serialize)]
 pub struct CommandError(String);
 
-impl From<pydl_core::Error> for CommandError {
-    fn from(err: pydl_core::Error) -> Self {
+impl From<rdl_core::Error> for CommandError {
+    fn from(err: rdl_core::Error) -> Self {
         tracing::error!(%err, "command failed");
         Self(err.to_string())
     }
@@ -34,11 +34,11 @@ pub async fn app_info(state: State<'_, AppState>) -> CommandResult<AppInfo> {
     tracing::debug!("app_info requested");
     let paths = &state.paths;
     Ok(AppInfo {
-        version: pydl_core::VERSION,
+        version: rdl_core::VERSION,
         portable: paths.portable,
         data_dir: paths.data_dir.display().to_string(),
         db_file: paths.db_file.display().to_string(),
         logs_dir: paths.logs_dir.display().to_string(),
-        schema_version: pydl_core::db::schema_version(&state.db).await?,
+        schema_version: rdl_core::db::schema_version(&state.db).await?,
     })
 }

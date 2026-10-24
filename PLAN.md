@@ -1,8 +1,8 @@
-# win-pydl — Project Plan
+# Rusty Downloader — Project Plan
 
 A full-featured download manager for Windows, modeled on **JDownloader**. It has a Rust engine, a Tauri 2 + SvelteKit UI, and built-in **yt-dlp** and **gallery-dl** support.
 
-> Working name: `win-pydl` (from the folder name). The app is now Rust rather than Python, so a rename is still open (see Open Decisions).
+> Naming: the product is **Rusty Downloader** (binary, package, data folder: `rusty-downloader`; app identifier `dev.rustydownloader.app`). Internal crates use the short prefix `rdl-` (`rdl-core`, later `rdl-plugins`, `rdl-native-host`, `rdl-remote`). Repo: `Gert-Steyn/rusty-downloader`.
 
 ---
 
@@ -66,7 +66,7 @@ A full-featured download manager for Windows, modeled on **JDownloader**. It has
 - Keep the system awake while downloads are active (`SetThreadExecutionState`).
 - Single instance (`tauri-plugin-single-instance`). Later launches forward their arguments to the running app.
 - Protocol and file associations: `magnet:` (`tauri-plugin-deep-link`), `.torrent`, and an optional `.dlc`/link-list import.
-- Explorer context menu "Download links from file with win-pydl" for `.txt` link lists. This uses the classic registry verb, which shows under *Show more options* on Windows 11. A modern `IExplorerCommand` menu needs package identity, so it's deferred.
+- Explorer context menu "Download links from file with Rusty Downloader" for `.txt` link lists. This uses the classic registry verb, which shows under *Show more options* on Windows 11. A modern `IExplorerCommand` menu needs package identity, so it's deferred.
 
 ---
 
@@ -79,7 +79,7 @@ A full-featured download manager for Windows, modeled on **JDownloader**. It has
 │  App layer: commands, event batching (≤10 Hz), tray, notifications,   │
 │             clipboard watcher, single-instance, deep links             │
 │                               │                                        │
-│  ┌────────────────────── pydl-core (no Tauri dep) ──────────────────┐ │
+│  ┌────────────────────── rdl-core (no Tauri dep) ──────────────────┐ │
 │  │ Manager ─ Queues ─ Scheduler ─ RateLimiter ─ RetryPolicy           │ │
 │  │    │                                                               │ │
 │  │    ├── Handlers (trait Downloader):                                │ │
@@ -91,21 +91,21 @@ A full-featured download manager for Windows, modeled on **JDownloader**. It has
 │  │    └── Tools: version check/update for yt-dlp, gallery-dl, ffmpeg  │ │
 │  └────────────────────────────────────────────────────────────────────┘ │
 └────────────▲───────────────────────────────────▲───────────────────────┘
-             │ named pipe \\.\pipe\win-pydl       │ HTTP/WS (optional)
+             │ named pipe \\.\pipe\rusty-downloader       │ HTTP/WS (optional)
    ┌─────────┴─────────┐                 ┌───────┴────────┐
-   │ pydl-native-host  │◄─ stdio ─ Browser extension (MV3) │ pydl-remote (axum) │
+   │ rdl-native-host  │◄─ stdio ─ Browser extension (MV3) │ rdl-remote (axum) │
    └───────────────────┘                 └────────────────┘
 ```
 
 ### 3.1 Repository layout (Cargo workspace + pnpm)
 ```
-win-pydl/
+rusty-downloader/
 ├─ Cargo.toml                  # workspace
 ├─ crates/
-│  ├─ pydl-core/               # engine, storage, handlers, scheduler
-│  ├─ pydl-plugins/            # Rhai host + plugin API
-│  ├─ pydl-native-host/        # browser native-messaging bridge exe
-│  └─ pydl-remote/             # axum server for remote control
+│  ├─ rdl-core/               # engine, storage, handlers, scheduler
+│  ├─ rdl-plugins/            # Rhai host + plugin API
+│  ├─ rdl-native-host/        # browser native-messaging bridge exe
+│  └─ rdl-remote/             # axum server for remote control
 ├─ src-tauri/                  # Tauri shell, commands, tray, OS integration
 ├─ ui/                         # SvelteKit (adapter-static, SPA, ssr=false)
 ├─ extension/                  # MV3 extension (Chromium + Firefox manifests)
@@ -156,9 +156,9 @@ enum JobKind { Http, Ftp, Sftp, Torrent, YtDlp, GalleryDl }
 ## 4. HTTP Segmented Engine (MVP core)
 
 1. **Probe**: `HEAD`, or `GET` with `Range: bytes=0-0` when HEAD isn't supported. Records final URL after redirects, `Content-Length`, `Accept-Ranges`/206 support, `ETag`, `Last-Modified`, and the filename from `Content-Disposition` (RFC 6266/5987), falling back to the URL path, then content-type.
-2. **Allocate**: create `<name>.pydl.part` and pre-size it with `set_len`. Segments write with positional writes (`FileExt::seek_write`), so no locking is needed between segments.
+2. **Allocate**: create `<name>.rdl.part` and pre-size it with `set_len`. Segments write with positional writes (`FileExt::seek_write`), so no locking is needed between segments.
 3. **Segments**: start with N (default 8, min segment 1 MiB). **Dynamic splitting** (IDM-style): when a connection finishes, split the largest remaining segment in half and start a new connection on it, until segments reach the minimum size.
-4. **Persistence**: segment offsets are flushed to SQLite every ~2 s and on pause/exit. A small sidecar `.pydl.meta` file allows recovery if the DB is lost.
+4. **Persistence**: segment offsets are flushed to SQLite every ~2 s and on pause/exit. A small sidecar `.rdl.meta` file allows recovery if the DB is lost.
 5. **Resume validation**: resume uses `If-Range` with the ETag/Last-Modified. If the server returns 200 instead of 206, or the size/ETag changed, the user chooses restart or keep.
 6. **Non-range servers**: a single connection. Resume isn't possible, and the UI says so.
 7. **Expiring links**: on 403/410 mid-download, ask the resolver/plugin to **refresh** the URL, then continue at the same offsets.
@@ -207,7 +207,7 @@ enum JobKind { Http, Ftp, Sftp, Torrent, YtDlp, GalleryDl }
 
 ## 6. Hoster Plugin System (Rhai)
 
-- Plugins are `.rhai` files in `plugins/` (bundled) and `%APPDATA%\win-pydl\plugins\` (user). They hot-reload on change.
+- Plugins are `.rhai` files in `plugins/` (bundled) and `%APPDATA%\rusty-downloader\plugins\` (user). They hot-reload on change.
 - Manifest header: `name`, `version`, `url_patterns` (regex), `needs_account`, `max_connections`, `min_wait`.
 - Entry points: `check(url)` → availability/size/name, `resolve(url, account)` → direct links + headers + optional hash, `login(account)` → session cookies, and `refresh(url)` for expired links.
 - Host API (sandboxed, no filesystem or process access): `http.get/post` (shares the cookie jar and proxy), `html.select`, `regex`, `json`, `sleep`, `log`, `wait_countdown(secs)` (shown in the UI), `open_browser(url)` for manual captcha.
@@ -220,9 +220,9 @@ enum JobKind { Http, Ftp, Sftp, Torrent, YtDlp, GalleryDl }
 
 - **Extension (Manifest V3)**, Chromium (Chrome/Edge/Brave) plus a Firefox manifest variant:
   - Intercepts downloads (`chrome.downloads.onCreated`) that match rules: min size, extensions, an always/never site list, and a modifier key to bypass. It cancels the browser download and sends URL, referer, filename, cookies (`chrome.cookies.getAll` for that URL) and user agent.
-  - Context menus: *Download with win-pydl*, *Send all links on page to LinkGrabber*, *Send selection links*, *Send page to gallery-dl / yt-dlp*.
+  - Context menus: *Download with Rusty Downloader*, *Send all links on page to LinkGrabber*, *Send selection links*, *Send page to gallery-dl / yt-dlp*.
   - A popup shows connection status and lets you pause interception.
-- **Native messaging host** (`pydl-native-host.exe`): registered under `HKCU\Software\Google\Chrome\NativeMessagingHosts`, `...\Microsoft\Edge\...` and `...\Mozilla\NativeMessagingHosts` by the installer. Relays JSON over a named pipe to the app and starts the app if it isn't running.
+- **Native messaging host** (`rdl-native-host.exe`): registered under `HKCU\Software\Google\Chrome\NativeMessagingHosts`, `...\Microsoft\Edge\...` and `...\Mozilla\NativeMessagingHosts` by the installer. Relays JSON over a named pipe to the app and starts the app if it isn't running.
 - **Clipboard monitoring**: `AddClipboardFormatListener` on a hidden window. Detects URLs with configurable patterns and ignores the app's own copies. Off, ask (toast), or straight to LinkGrabber.
 - Note: Chrome's app-bound cookie encryption (Chrome 127+) makes reading Chrome cookies from disk unreliable. The extension is the main way to get cookies. `--cookies-from-browser` is offered mainly for Firefox.
 
@@ -244,7 +244,7 @@ enum JobKind { Http, Ftp, Sftp, Torrent, YtDlp, GalleryDl }
 | `tools` | name, version, channel, path, last_check |
 | `settings` | key, value_json |
 
-Locations: installed builds use `%APPDATA%\win-pydl\` (db, logs, plugins, archives, cookies). Portable builds use `.\data\`, detected by a `portable.flag` file next to the exe.
+Locations: installed builds use `%APPDATA%\rusty-downloader\` (db, logs, plugins, archives, cookies). Portable builds use `.\data\`, detected by a `portable.flag` file next to the exe.
 
 ---
 
@@ -312,12 +312,11 @@ Locations: installed builds use `%APPDATA%\win-pydl\` (db, logs, plugins, archiv
 
 ## 14. Open Decisions
 
-1. **Final name**: keep `win-pydl` or rename now that it's Rust (affects crate names, pipe name, registry keys and the extension ID, so decide before Phase 2).
-2. **Updater hosting**: separate public releases repo vs. private repo + token. Recommended: public releases-only repo.
-3. **Rhai vs Lua (`mlua`)**: Rhai is chosen for its pure-Rust build and sandboxing. Lua is the fallback if plugin performance or familiarity becomes an issue.
-4. **gallery-dl default mode**: native download (recommended) vs resolve-only via the HTTP engine, per site.
-5. **Default concurrency**: 3 active × 8 segments. Tune after real-world testing.
-6. **Authenticode certificate**: skip for personal use, or buy one (or use Azure Trusted Signing) if it's ever distributed.
+1. **Updater hosting**: separate public releases repo vs. private repo + token. Recommended: public releases-only repo.
+2. **Rhai vs Lua (`mlua`)**: Rhai is chosen for its pure-Rust build and sandboxing. Lua is the fallback if plugin performance or familiarity becomes an issue.
+3. **gallery-dl default mode**: native download (recommended) vs resolve-only via the HTTP engine, per site.
+4. **Default concurrency**: 3 active × 8 segments. Tune after real-world testing.
+5. **Authenticode certificate**: skip for personal use, or buy one (or use Azure Trusted Signing) if it's ever distributed.
 
 ---
 
@@ -337,3 +336,4 @@ Locations: installed builds use `%APPDATA%\win-pydl\` (db, logs, plugins, archiv
 - Duplicates: **global history + managed download archives**.
 - OS: **autostart to tray, toasts, prevent sleep, Explorer & protocol integration**.
 - Repo: **private GitHub, MIT**.
+- Name (decided after Phase 0): **Rusty Downloader**, repo `Gert-Steyn/rusty-downloader`, crate prefix `rdl-`. Renamed from the working name `win-pydl`.

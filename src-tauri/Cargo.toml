@@ -1,5 +1,5 @@
 [package]
-name = "win-pydl"
+name = "rusty-downloader"
 description = "Download manager for Windows"
 version.workspace = true
 edition.workspace = true
@@ -10,13 +10,13 @@ publish.workspace = true
 workspace = true
 
 [lib]
-name = "win_pydl_lib"
+name = "rusty_downloader_lib"
 
 [build-dependencies]
 tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
-pydl-core = { path = "../crates/pydl-core" }
+rdl-core = { path = "../crates/rdl-core" }
 serde = { version = "1.0.229", features = ["derive"] }
 tauri = { version = "2.12.5", features = [] }
 tauri-plugin-single-instance = "2.5.4"

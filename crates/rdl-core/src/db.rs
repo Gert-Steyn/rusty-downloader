@@ -1,4 +1,4 @@
-//! SQLite storage. Migrations in `crates/pydl-core/migrations` are embedded at
+//! SQLite storage. Migrations in `crates/rdl-core/migrations` are embedded at
 //! compile time and applied on every open.
 
 use std::path::Path;

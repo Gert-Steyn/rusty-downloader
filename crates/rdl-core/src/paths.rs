@@ -1,15 +1,15 @@
-//! Where win-pydl keeps its data.
+//! Where rusty-downloader keeps its data.
 //!
-//! Installed builds use `%APPDATA%\win-pydl`. A `portable.flag` file next to the
+//! Installed builds use `%APPDATA%\rusty-downloader`. A `portable.flag` file next to the
 //! executable switches to `<exe dir>\data`, so the whole app can live on a USB stick.
 
 use std::path::{Path, PathBuf};
 
 use crate::{Error, Result};
 
-pub const APP_DIR_NAME: &str = "win-pydl";
+pub const APP_DIR_NAME: &str = "rusty-downloader";
 pub const PORTABLE_FLAG: &str = "portable.flag";
-pub const DB_FILE_NAME: &str = "win-pydl.db";
+pub const DB_FILE_NAME: &str = "rusty-downloader.db";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppPaths {

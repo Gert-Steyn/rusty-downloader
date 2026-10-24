@@ -2854,20 +2854,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pydl-core"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "sqlx",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "quick-xml"
 version = "0.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2919,6 +2905,20 @@ name = "raw-window-handle"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
+
+[[package]]
+name = "rdl-core"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "redox_syscall"
@@ -3055,6 +3055,18 @@ name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+
+[[package]]
+name = "rusty-downloader"
+version = "0.1.0"
+dependencies = [
+ "rdl-core",
+ "serde",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-single-instance",
+ "tracing",
+]
 
 [[package]]
 name = "same-file"
@@ -4825,18 +4837,6 @@ name = "whoami"
 version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "626c4bac6755d76ffc12cb01b2eac751db1996b9e0041de9aa02c8c211ddc82c"
-
-[[package]]
-name = "win-pydl"
-version = "0.1.0"
-dependencies = [
- "pydl-core",
- "serde",
- "tauri",
- "tauri-build",
- "tauri-plugin-single-instance",
- "tracing",
-]
 
 [[package]]
 name = "winapi"

@@ -23,5 +23,5 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![commands::app_info])
         .run(tauri::generate_context!())
-        .expect("error while running win-pydl");
+        .expect("error while running rusty-downloader");
 }

@@ -1,5 +1,5 @@
-use pydl_core::logging::{self, WorkerGuard};
-use pydl_core::{db, paths::AppPaths};
+use rdl_core::logging::{self, WorkerGuard};
+use rdl_core::{db, paths::AppPaths};
 
 /// Long-lived services shared by all commands.
 pub struct AppState {
@@ -9,16 +9,16 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub async fn init() -> pydl_core::Result<Self> {
+    pub async fn init() -> rdl_core::Result<Self> {
         let paths = AppPaths::resolve()?;
         paths.ensure_dirs()?;
         let log_guard = logging::init(&paths.logs_dir)?;
 
         tracing::info!(
-            version = pydl_core::VERSION,
+            version = rdl_core::VERSION,
             portable = paths.portable,
             data_dir = %paths.data_dir.display(),
-            "starting win-pydl"
+            "starting rusty-downloader"
         );
 
         let db = db::open(&paths.db_file).await?;

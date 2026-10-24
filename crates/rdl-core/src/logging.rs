@@ -1,6 +1,6 @@
 //! Tracing setup: daily-rolling log files, plus stderr in debug builds.
 //!
-//! The filter comes from `PYDL_LOG` (same syntax as `RUST_LOG`), defaulting to `info`.
+//! The filter comes from `RDL_LOG` (same syntax as `RUST_LOG`), defaulting to `info`.
 
 use std::path::Path;
 
@@ -18,7 +18,7 @@ const MAX_LOG_FILES: usize = 14;
 pub fn init(logs_dir: &Path) -> Result<WorkerGuard> {
     let appender = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
-        .filename_prefix("win-pydl")
+        .filename_prefix("rusty-downloader")
         .filename_suffix("log")
         .max_log_files(MAX_LOG_FILES)
         .build(logs_dir)
@@ -26,7 +26,7 @@ pub fn init(logs_dir: &Path) -> Result<WorkerGuard> {
     let (file_writer, guard) = tracing_appender::non_blocking(appender);
 
     let filter =
-        EnvFilter::try_from_env("PYDL_LOG").unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILTER));
+        EnvFilter::try_from_env("RDL_LOG").unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILTER));
     let stderr = cfg!(debug_assertions).then(|| fmt::layer().with_writer(std::io::stderr));
 
     tracing_subscriber::registry()

@@ -1,4 +1,4 @@
-# win-pydl
+# Rusty Downloader
 
 A download manager for Windows, modeled on JDownloader: segmented HTTP, LinkGrabber, packages,
 yt-dlp and gallery-dl integration, and later FTP/SFTP, torrents, hoster plugins and browser capture.
@@ -7,7 +7,7 @@ See [PLAN.md](PLAN.md) for the full design and roadmap. Current status: **Phase 
 
 ## Stack
 
-- **Engine**: Rust (`crates/pydl-core`), tokio, sqlx/SQLite, tracing
+- **Engine**: Rust (`crates/rdl-core`), tokio, sqlx/SQLite, tracing
 - **App shell**: Tauri 2 (`src-tauri`)
 - **UI**: SvelteKit + TypeScript (`ui`), Fluent / Windows 11 styling
 
@@ -45,14 +45,14 @@ pnpm ui:check
 ## Layout
 
 ```
-crates/pydl-core/   engine, storage (migrations/), paths, logging
-src-tauri/          Tauri shell: commands, window, single-instance
-ui/                 SvelteKit SPA (adapter-static)
+crates/rdl-core/   engine, storage (migrations/), paths, logging
+src-tauri/         Tauri shell: commands, window, single-instance
+ui/                SvelteKit SPA (adapter-static)
 ```
 
 ## Data locations
 
-- Installed: `%APPDATA%\win-pydl\` (database, `logs\`, `plugins\`)
+- Installed: `%APPDATA%\rusty-downloader\` (database, `logs\`, `plugins\`)
 - Portable: put an empty `portable.flag` next to the exe; data then goes to `.\data\`
 
-Set `PYDL_LOG` (e.g. `debug` or `pydl_core=trace`) to change log verbosity.
+Set `RDL_LOG` (e.g. `debug` or `rdl_core=trace`) to change log verbosity.

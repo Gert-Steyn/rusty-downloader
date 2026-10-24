@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    win_pydl_lib::run();
+    rusty_downloader_lib::run();
 }

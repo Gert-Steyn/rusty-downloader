@@ -1,7 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "win-pydl",
-  "identifier": "dev.winpydl.app",
+  "productName": "Rusty Downloader",
+  "mainBinaryName": "rusty-downloader",
+  "identifier": "dev.rustydownloader.app",
   "build": {
     "beforeDevCommand": "pnpm ui:dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "win-pydl",
+        "title": "Rusty Downloader",
         "width": 1200,
         "height": 760,
         "minWidth": 800,

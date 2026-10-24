@@ -36,7 +36,7 @@
 <div class="shell">
 	<nav class="sidebar" aria-label="Main">
 		<div class="brand">
-			win-pydl
+			Rusty Downloader
 			{#if version}<span class="version">v{version}</span>{/if}
 		</div>
 		<div class="nav-list">
