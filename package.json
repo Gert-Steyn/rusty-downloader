@@ -1,0 +1,17 @@
+{
+	"name": "win-pydl",
+	"private": true,
+	"type": "module",
+	"packageManager": "pnpm@10.34.8",
+	"scripts": {
+		"tauri": "tauri",
+		"dev": "tauri dev",
+		"build": "tauri build",
+		"ui:dev": "pnpm --filter ui dev",
+		"ui:build": "pnpm --filter ui build",
+		"ui:check": "pnpm --filter ui check"
+	},
+	"devDependencies": {
+		"@tauri-apps/cli": "^2"
+	}
+}

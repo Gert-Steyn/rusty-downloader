@@ -1,0 +1,23 @@
+[package]
+name = "win-pydl"
+description = "Download manager for Windows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "win_pydl_lib"
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+pydl-core = { path = "../crates/pydl-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+tauri = { version = "2.12.5", features = [] }
+tauri-plugin-single-instance = "2.5.4"
+tracing = "0.1.44"
