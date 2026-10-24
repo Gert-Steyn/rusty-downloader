@@ -41,6 +41,15 @@ pub enum Error {
 
     #[error("destination already exists: {}", .0.display())]
     DestinationExists(PathBuf),
+
+    #[error("invalid URL: {0}")]
+    InvalidUrl(String),
+
+    #[error("{0} not found")]
+    NotFound(String),
+
+    #[error("not supported yet: {0}")]
+    Unsupported(String),
 }
 
 impl Error {

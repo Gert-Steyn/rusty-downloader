@@ -3,7 +3,7 @@
 A download manager for Windows, modeled on JDownloader: segmented HTTP, LinkGrabber, packages,
 yt-dlp and gallery-dl integration, and later FTP/SFTP, torrents, hoster plugins and browser capture.
 
-See [PLAN.md](PLAN.md) for the full design and roadmap. Current status: **Phase 0 (scaffold)**.
+See [PLAN.md](PLAN.md) for the full design and roadmap. Current status: **Phase 1 (MVP)**: 1a HTTP engine and 1b download manager are done; the UI for them is 1c.
 
 ## Stack
 

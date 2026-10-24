@@ -64,21 +64,21 @@ pub fn sanitize(name: &str) -> String {
 
 /// `dir/name`, or `dir/stem (n).ext` with the first free `n` if that exists.
 pub fn unique_path(dir: &Path, name: &str) -> PathBuf {
-    let candidate = dir.join(name);
-    if !candidate.exists() {
-        return candidate;
-    }
-    let (stem, ext) = match name.rsplit_once('.') {
-        Some((stem, ext)) if !stem.is_empty() => (stem, Some(ext)),
-        _ => (name, None),
-    };
-    (1..)
-        .map(|n| match ext {
-            Some(ext) => dir.join(format!("{stem} ({n}).{ext}")),
-            None => dir.join(format!("{stem} ({n})")),
-        })
+    (0..)
+        .map(|n| dir.join(numbered(name, n)))
         .find(|p| !p.exists())
         .expect("unbounded range always finds a free name")
+}
+
+/// `name` for `n == 0`, otherwise `stem (n).ext`.
+pub fn numbered(name: &str, n: u32) -> String {
+    if n == 0 {
+        return name.to_owned();
+    }
+    match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() => format!("{stem} ({n}).{ext}"),
+        _ => format!("{name} ({n})"),
+    }
 }
 
 /// Split header parameters on `;`, ignoring semicolons inside quoted strings.

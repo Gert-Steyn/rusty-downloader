@@ -6,6 +6,7 @@ pub mod db;
 pub mod error;
 pub mod http;
 pub mod logging;
+pub mod manager;
 pub mod paths;
 
 pub use error::{Error, Result};

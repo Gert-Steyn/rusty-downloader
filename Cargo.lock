@@ -3222,6 +3222,7 @@ dependencies = [
  "futures-util",
  "percent-encoding",
  "reqwest",
+ "serde",
  "sqlx",
  "tempfile",
  "thiserror 2.0.21",

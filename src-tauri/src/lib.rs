@@ -22,6 +22,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![commands::app_info])
-        .run(tauri::generate_context!())
-        .expect("error while running rusty-downloader");
+        .build(tauri::generate_context!())
+        .expect("error while building rusty-downloader")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event
+                && let Some(state) = app.try_state::<AppState>()
+            {
+                // Stop transfers cleanly so they pick up where they left off next launch.
+                tauri::async_runtime::block_on(state.downloads.shutdown());
+            }
+        });
 }
