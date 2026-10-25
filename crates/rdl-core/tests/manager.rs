@@ -393,9 +393,11 @@ async fn removing_a_running_download_cleans_up_files_and_package() {
     let mut fx = Fixture::new().await;
     let id = fx.add(&[url(&base, "slow")]).await[0];
     fx.wait_progress_over(id, 256 * KIB).await;
+    assert_eq!(fx.manager.running_count(), 1);
 
     fx.manager.remove(id, true).await.unwrap();
 
+    assert_eq!(fx.manager.running_count(), 0, "remove waits for the task");
     assert!(!fx.part_file("test.bin").exists());
     assert!(fx.manager.list().await.unwrap().is_empty());
     assert!(fx.manager.get(id).await.is_err());

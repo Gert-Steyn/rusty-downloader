@@ -3,6 +3,7 @@ mod clipboard;
 mod commands;
 mod events;
 mod grabber_commands;
+mod keep_awake;
 mod native_host;
 mod notify;
 mod settings_commands;
@@ -150,6 +151,7 @@ pub fn run() {
             ));
             tauri::async_runtime::spawn(clipboard::watch(handle.clone()));
             bridge::start(handle);
+            tauri::async_runtime::spawn(keep_awake::watch(handle.clone()));
             Ok(())
         })
         .build(tauri::generate_context!())

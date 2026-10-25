@@ -305,7 +305,8 @@ export function settings(): Settings {
 		closeToTray: true,
 		notifyFinished: true,
 		notifyFailed: true,
-		warnDuplicates: true
+		warnDuplicates: true,
+		keepAwake: true
 	};
 }
 

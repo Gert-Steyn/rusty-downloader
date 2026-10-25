@@ -8,9 +8,9 @@ A full-featured download manager for Windows, modeled on **JDownloader**. It has
 
 ## 0. Current Status (updated 2026-10-25)
 
-**Where we are:** Phases 0, 1 and **2 (browser integration, 2a–2e) are done**; only a live Firefox run is still owed (see the 2d/2e follow-ups). **Next up: Phase 3 (scheduler, speed limits, keep-awake, on-complete actions, checksums).**
+**Where we are:** Phases 0, 1 and **2 (browser integration, 2a–2e) are done**; only a live Firefox run is still owed (see the 2d/2e follow-ups). Phase 3 has started: **3a (keep-awake) is done**. **Next up: 3b, speed limits.**
 
-The app works as an HTTP(S), video and gallery download manager that lives in the tray. You can paste, drop or copy links into the LinkGrabber (optionally "ask first", with ignore patterns), review and rename them, pick a video format or gallery options, and start them. Links you downloaded before are flagged. Plain files download segmented and resumable. Pages from sites yt-dlp supports are recognised automatically, and playlists expand into one link per video. Pages yt-dlp doesn't know (or can't read) go to gallery-dl, and a gallery becomes one download into its own folder. yt-dlp, gallery-dl and ffmpeg install themselves on first use. Finished downloads go into History; Windows notifications report finished packages and failures. A browser extension (Edge, Chrome, Brave; Firefox untested) sends links, selections, pages and matching downloads to the app with the browser's cookies, starting the app if needed. Settings cover the download folder, limits, clipboard, start with Windows and the tray. Everything survives an app restart.
+The app works as an HTTP(S), video and gallery download manager that lives in the tray. You can paste, drop or copy links into the LinkGrabber (optionally "ask first", with ignore patterns), review and rename them, pick a video format or gallery options, and start them. Links you downloaded before are flagged. Plain files download segmented and resumable. Pages from sites yt-dlp supports are recognised automatically, and playlists expand into one link per video. Pages yt-dlp doesn't know (or can't read) go to gallery-dl, and a gallery becomes one download into its own folder. yt-dlp, gallery-dl and ffmpeg install themselves on first use. Finished downloads go into History; Windows notifications report finished packages and failures. A browser extension (Edge, Chrome, Brave; Firefox untested) sends links, selections, pages and matching downloads to the app with the browser's cookies, starting the app if needed. Windows doesn't go to sleep while downloads run. Settings cover the download folder, limits, clipboard, start with Windows, the tray and keep-awake. Everything survives an app restart.
 
 ### Done so far
 
@@ -30,8 +30,9 @@ The app works as an HTTP(S), video and gallery download manager that lives in th
 | 2c – Native host | `f7df5be` | `rdl-native-host.exe`: relays native messages to the pipe, checks the pipe is served by `rusty-downloader.exe` from its own folder under the same user, starts the app in the tray for an `add`, keeps the browser's pipes out of the app; error replies gain a `code` (`notRunning`, `untrusted`, `unavailable`) |
 | 2d – Extension | `8ad707b` | MV3 extension (`extension/`, plain JS, Chromium + generated Firefox build): right-click menus, download takeover by type/size/site rules, cookies per link site, popup with status and switch, options page; pinned id; unit tests in CI |
 | 2e – Registration | `8ad707b` | App registers the host for Chrome, Edge, Brave, Chromium and Firefox on every start; `pnpm dev` builds the host, `pnpm build` bundles it next to the app |
+| 3a – Keep-awake | (uncommitted) | A Windows power request ("system required") held while downloads run, released when none do; "Keep the computer awake while downloading" setting (on by default) |
 
-Tests: 167 Rust tests and 9 extension tests (`pnpm ext:test`) (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; pipe suite against real named pipes; native-host suite driving the real host binary over stdin/stdout; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
+Tests: 168 Rust tests and 9 extension tests (`pnpm ext:test`) (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; pipe suite against real named pipes; native-host suite driving the real host binary over stdin/stdout; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
 
 ### How 1e works
 
@@ -92,6 +93,15 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
 - **Checked against the real app (2026-10-25)**, with a script playing the browser and the debug binaries side by side: with the app off, `ping` answered `notRunning` without starting it; `add` started it in the tray (0.6 s warm, 4.9 s on the first run), passed the trust check, and the link reached the LinkGrabber with a "1 link from the browser" notification; a second host session reached the running app. Cleaned up afterwards.
 - **Not done here:** browsers can't find the host until 2e registers it (`HKCU\…\NativeMessagingHosts`).
 
+### How 3a works
+
+- **`src-tauri/src/keep_awake.rs`** (allowed `unsafe`, `windows-sys` `Win32_System_Power`): `PowerRequest` wraps `PowerCreateRequest` with the reason "Rusty Downloader is downloading", and `PowerSetRequest` / `PowerClearRequest` with `PowerRequestSystemRequired`. Dropping it releases and closes it. Not `SetThreadExecutionState`: that belongs to the calling thread, and async tasks move between threads.
+- **When:** a task started from `setup` checks every 2 s: held while the `keep_awake` setting is on and `Manager::running_count()` (new: running download tasks, including ones stopping) is above 0, released otherwise. So a download, a switch flip or a pause takes effect within 2 s; that is far below Windows' idle-sleep timeout. Logged as "keeping the computer awake" / "letting the computer sleep again".
+- **What it holds off:** idle sleep only. The screen can still turn off, and closing a laptop lid or choosing Sleep still sleeps.
+- **Setting:** `Settings::keep_awake` (default on; older saves get it on), a switch in Settings → Windows.
+- **Tests:** the unit test holds a request and checks `CallNtPowerInformation(SystemExecutionState)` reports `ES_SYSTEM_REQUIRED`; when nothing else holds the machine awake it also checks release and drop. On this machine something else already held it, so only holding was checked. `powercfg /requests` would list the request by its reason, but it needs an elevated prompt.
+- **Checked in the app (2026-10-25)** with a throttled 40 MB download: held when it started, released when the switch was turned off (clicked in the UI), held again when turned on, released when the download was paused, each within 2 s. Cleaned up afterwards.
+
 ### How 2d works
 
 - **Layout:** `extension/src/` holds one set of sources, plain ES modules with no bundler: `background.js` (worker), `native.js` (talking to the host), `rules.js` (pure helpers, unit-tested by `extension/test/` with `node --test`), `popup.*`, `options.*`, `style.css`. `node extension/build.mjs` (`pnpm ext:build`) writes `extension/dist/chromium/` and `extension/dist/firefox/` (git-ignored). The Firefox manifest is generated from the Chromium one: no `key`, `background.scripts` instead of a service worker, and `browser_specific_settings.gecko.id = extension@rustydownloader.dev`. Icons are copied from `src-tauri/icons`.
@@ -132,7 +142,7 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
 
 ### Resume here
 
-- **Repo state:** 2d and 2e are committed on `main` (`8ad707b`) plus this PLAN update. Check `git status -sb` for whether it has been pushed.
+- **Repo state:** 2d/2e are committed and pushed (`8ad707b`). 3a is written and tested but not committed yet.
 - **Checked in the app for 1g (2026-10-25)** (2b's checks are in "How 2b works"):
   - DB migrated to schema 5; the window starts hidden and is shown in setup.
   - Settings: a valid change saves ("Saved"), an invalid one (0 at once) shows the error and the field reverts; a relative folder is refused; the chosen folder is used by Add links.
@@ -146,16 +156,19 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
   - Not checked: clicking the tray menu items and the notification buttons (neither can be driven from DevTools); the Mica background.
   - Cleaned up: test downloads (with files), LinkGrabber, history and notifications cleared, settings back to defaults, no `Run` entry. The test overwrote the clipboard (it held no text before) and cleared it afterwards.
 - **Your machine:** yt-dlp 2026.10.21, gallery-dl 1.32.17 and ffmpeg N-128018 are in `%APPDATA%\rusty-downloader\tools`. The app's DB is at schema `20261027000006` with empty downloads, LinkGrabber and history. The notification registration (`HKCU\Software\Classes\AppUserModelId\dev.rustydownloader.app`) and the native-host registration (`HKCU\Software\…\NativeMessagingHosts\dev.rustydownloader.host`, currently pointing at the debug host in `target\debug`) stay; the app writes both on every start.
-- **Sanity check before starting:** `cargo test --workspace` (167 pass), `pnpm ext:test` (9), `pnpm -C ui check`, then `pnpm dev` and open Settings.
+- **Sanity check before starting:** `cargo test --workspace` (168 pass), `pnpm ext:test` (9), `pnpm -C ui check`, then `pnpm dev` and open Settings.
 - **Optional, real network:** `RDL_LIVE_DIR=<some folder> cargo test -p rdl-core --test tools_live -- --ignored --nocapture` (about 135 MB of tools on the first run, reused after).
 
 ### Phase 2 – browser integration (done)
 
 2a request context, 2b pipe server, 2c native host, 2d extension, 2e registration; see "How 2a works" to "How 2e works". Still owed: a run in Firefox (load `extension/dist/firefox/manifest.json` from `about:debugging`, grant site access in the options page, then repeat the Edge checks) and a download from a real site that needs sign-in.
 
-### Next: Phase 3 – control
+### Next: Phase 3 – control (suggested order)
 
-Scheduler (start/stop times per queue, on-complete action), speed limiting with time profiles, keep-awake while downloading, checksum verification (§2.3). The Queues page is still a placeholder.
+1. ~~**Keep-awake**~~ done as 3a (see "How 3a works").
+2. **Speed limits (3b):** a global cap and per-download caps (token bucket in the HTTP engine, `governor` per §3.2), the global budget split across yt-dlp / gallery-dl runs through their rate-limit flags (approximate), time-based profiles (`speed_profiles` table), and the status bar's "No speed limit" as a working toggle.
+3. **Scheduler and Queues page (3c):** start/stop times and days per queue, an on-complete action (nothing / sleep / hibernate / shut down / close the app, with a cancellable countdown), and a real Queues page. This is what the phase's exit criterion (overnight queue, then shutdown) tests.
+4. **Checksums (3d):** MD5 / SHA-1 / SHA-256 / CRC32 typed in or found in `.sfv` / `.md5` / `.sha256` files in the package; a mismatch fails the download.
 
 ### Deferred / known gaps (pick up in the milestone noted)
 
@@ -199,6 +212,10 @@ Scheduler (start/stop times per queue, on-complete action), speed limiting with 
   - The registry entries stay after uninstalling (no NSIS uninstall hook yet); they point at a host that's gone, which browsers report as "not found". A dev build overwrites an installed copy's registration until the installed app starts again.
   - No in-app status for the browser bridge (registered? extension seen?) and no switch to turn it off.
   - Not tried under a real browser yet (needs 2d and 2e), so the job breakaway and the stdin/stdout handling are only tested against a script.
+- **Keep-awake (3a follow-ups):**
+  - Releasing the request couldn't be confirmed from outside on this machine (something else kept it awake, and `powercfg /requests` needs admin); the app's log and the unit test's drop path are the evidence.
+  - Only running downloads count. A queue waiting for its scheduled start (3c) or the LinkGrabber checking links doesn't keep the machine awake.
+  - No option to keep the screen on, and nothing wakes the machine from sleep for a scheduled start (3c may want a wake timer).
 - **Windows 10:** the transparent window shows the desktop through it, because Mica is Windows 11 only. A fallback is needed if Windows 10 ever matters.
 - **Tool and plugin kinds:** `http`, `ytdlp` and `gallerydl` downloads run; the rest later.
 - **gallery-dl (1f follow-ups):**

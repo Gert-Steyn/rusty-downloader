@@ -653,6 +653,8 @@ export type Settings_Deserialize = {
 	 *  them while the file is still there.
 	 */
 	warnDuplicates?: boolean,
+	/**  Don't let Windows go to sleep while downloads are running. */
+	keepAwake?: boolean,
 };
 
 /**  The user's preferences. Missing fields (older saves) get their defaults. */
@@ -683,6 +685,8 @@ export type Settings_Serialize = {
 	 *  them while the file is still there.
 	 */
 	warnDuplicates: boolean,
+	/**  Don't let Windows go to sleep while downloads are running. */
+	keepAwake: boolean,
 };
 
 export type Status = "queued" | "active" | "paused" | "completed" | "failed" | "canceled";

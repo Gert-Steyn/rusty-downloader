@@ -157,6 +157,11 @@ impl Manager {
         Ok(Self { inner })
     }
 
+    /// Downloads running right now (including ones that are stopping).
+    pub fn running_count(&self) -> usize {
+        self.inner.running().len()
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
         self.inner.events.subscribe()
     }

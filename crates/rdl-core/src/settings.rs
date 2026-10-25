@@ -47,6 +47,8 @@ pub struct Settings {
     /// Flag links in the LinkGrabber that were downloaded before, and untick
     /// them while the file is still there.
     pub warn_duplicates: bool,
+    /// Don't let Windows go to sleep while downloads are running.
+    pub keep_awake: bool,
 }
 
 impl Default for Settings {
@@ -64,6 +66,7 @@ impl Default for Settings {
             notify_finished: true,
             notify_failed: true,
             warn_duplicates: true,
+            keep_awake: true,
         }
     }
 }
@@ -204,6 +207,7 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"maxActive": 2}"#).unwrap();
         assert_eq!(s.max_active, 2);
         assert!(s.close_to_tray);
+        assert!(s.keep_awake, "saves from before 3a keep the computer awake");
     }
 
     #[test]

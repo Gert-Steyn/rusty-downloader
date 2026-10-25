@@ -173,6 +173,10 @@
 				<input type="checkbox" checked={s.closeToTray} onchange={(e) => set('closeToTray', e.currentTarget.checked)} />
 				<span>Keep running in the tray when the window is closed <small>Quit from the tray menu.</small></span>
 			</label>
+			<label class="check">
+				<input type="checkbox" checked={s.keepAwake} onchange={(e) => set('keepAwake', e.currentTarget.checked)} />
+				<span>Keep the computer awake while downloading <small>Windows won’t go to sleep while downloads run; the screen can still turn off.</small></span>
+			</label>
 		</section>
 
 		<section class="card" aria-labelledby="set-notify">
