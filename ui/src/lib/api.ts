@@ -10,6 +10,8 @@ import type {
 	GalleryDlFlags_Serialize,
 	GalleryDlOptions_Serialize,
 	Gallery_Serialize,
+	HistoryEntry_Serialize,
+	Settings_Serialize,
 	GrabbedLink_Serialize,
 	GrabberEvents_Serialize,
 	MediaSummary_Serialize,
@@ -46,6 +48,8 @@ export type GalleryDlOptions = GalleryDlOptions_Serialize;
 export type GalleryDlFlags = GalleryDlFlags_Serialize;
 export type FlagDef = FlagDef_Serialize;
 export type FileCount = FileCount_Serialize;
+export type Settings = Settings_Serialize;
+export type HistoryEntry = HistoryEntry_Serialize;
 export type ToolInfo = ToolInfo_Serialize;
 export type ToolTask = ToolTask_Serialize;
 export type ToolEventBatch = ToolEvents_Serialize;

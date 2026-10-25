@@ -13,7 +13,7 @@ use url::Url;
 use super::store::{self, DownloadRow, Resolved};
 use super::{Event, Inner, RunningJob, Status, StopReason};
 use crate::http::{self, DownloadSpec, Outcome, ProbeResult, Progress, filename, segments};
-use crate::{Error, Result};
+use crate::{Error, Result, history};
 
 const PART_SUFFIX: &str = ".rdl.part";
 
@@ -148,7 +148,7 @@ async fn execute(
         &part_path(&dest),
         &dest,
         &resume_from,
-        &inner.config.segment,
+        &inner.segment_config(),
         &tx,
         cancel,
     )
@@ -240,8 +240,19 @@ async fn finalize(
     let pool = &inner.pool;
     let id = row.id;
     let (status, error) = match result {
-        Ok(Outcome::Completed { size, .. }) => {
+        Ok(Outcome::Completed { size, path }) => {
             store::mark_completed(pool, id, size).await?;
+            let package = store::get_package(pool, row.package_id).await?;
+            let finished = history::Finished {
+                url: &row.source_url,
+                path: &path,
+                size: Some(size),
+                kind: &row.kind,
+                package: package.as_ref().map(|p| p.name.as_str()),
+            };
+            if let Err(e) = history::record(pool, &finished).await {
+                tracing::warn!(download = id, error = %e, "could not record history");
+            }
             (Status::Completed, None)
         }
         Ok(Outcome::Paused) => {

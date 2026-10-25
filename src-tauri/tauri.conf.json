@@ -21,7 +21,8 @@
         "center": true,
         "transparent": true,
         "windowEffects": { "effects": ["mica"] },
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "visible": false
       }
     ],
     "security": {

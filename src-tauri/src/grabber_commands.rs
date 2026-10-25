@@ -10,7 +10,7 @@ use rdl_core::tools::ToolName;
 use rdl_core::ytdlp::YtDlpOptions;
 use serde::Serialize;
 use specta::Type;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::commands::{CommandError, CommandResult};
 use crate::state::AppState;
@@ -157,10 +157,8 @@ pub async fn grabber_confirm(
     state: State<'_, AppState>,
     ids: Vec<LinkId>,
 ) -> CommandResult<Vec<PackageId>> {
-    let default_dest = app
-        .path()
-        .download_dir()
-        .map_err(|e| CommandError(e.to_string()))?;
+    let default_dest = state.download_dir(&app)?;
+
     Ok(state
         .grabber
         .confirm(&ids, &default_dest, &state.downloads)

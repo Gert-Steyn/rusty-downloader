@@ -204,6 +204,30 @@ pub(crate) async fn list_packages(pool: &Pool) -> Result<Vec<Package>> {
         .collect())
 }
 
+/// A queue's packages in the order they start (after priority).
+pub(crate) async fn queue_package_ids(pool: &Pool, queue: QueueId) -> Result<Vec<PackageId>> {
+    Ok(sqlx::query_scalar(
+        "SELECT id FROM packages WHERE queue_id = ? ORDER BY priority DESC, position, id",
+    )
+    .bind(queue)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Number the packages in the given order.
+pub(crate) async fn set_package_order(pool: &Pool, ids: &[PackageId]) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    for (position, id) in ids.iter().enumerate() {
+        sqlx::query("UPDATE packages SET position = ? WHERE id = ?")
+            .bind(position as i64)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 pub(crate) async fn queues(pool: &Pool) -> Result<Vec<QueueRow>> {
     Ok(
         sqlx::query_as("SELECT id, max_active FROM queues ORDER BY position, id")

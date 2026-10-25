@@ -41,9 +41,10 @@ class GrabberStore {
 	error = $state<string | null>(null);
 	/**
 	 * Short message for the toast. `review` marks news about links waiting
-	 * here, which gets a "Review" button on other pages.
+	 * here, which gets a "Review" button on other pages. `addText` is a
+	 * clipboard offer: its button adds those links.
 	 */
-	notice = $state<{ text: string; id: number; review: boolean } | null>(null);
+	notice = $state<{ text: string; id: number; review: boolean; addText?: string } | null>(null);
 
 	groups = $derived.by(() => {
 		const map = new Map<string, LinkGroup>();
@@ -76,6 +77,8 @@ class GrabberStore {
 			return;
 		}
 		await events.grabberEvents.listen((e) => this.#apply(e.payload));
+		await events.clipboardOffer.listen((e) => this.offer(e.payload.text, e.payload.count));
+
 		this.clipboardWatch = await commands.getClipboardWatch();
 		await this.refresh();
 	}
@@ -156,7 +159,32 @@ class GrabberStore {
 
 	#setLinks(links: GrabbedLink[]) {
 		this.links = links;
-		for (const l of links) if (l.availability === 'offline') this.unchecked.add(l.id);
+		for (const l of links) this.#autoUntick(l);
+	}
+
+	/** Links whose earlier download is still on disk were unticked once already. */
+	#flagged = new Set<number>();
+
+	/**
+	 * Offline links start unticked, and so do links downloaded before whose
+	 * file is still there, but only the first time, so ticking one back sticks.
+	 */
+	#autoUntick(link: GrabbedLink) {
+		if (link.availability === 'offline') this.unchecked.add(link.id);
+		if (link.previous?.exists && !this.#flagged.has(link.id)) {
+			this.#flagged.add(link.id);
+			this.unchecked.add(link.id);
+		}
+	}
+
+	/** Copied links waiting for a yes ("ask first" clipboard mode). */
+	offer(text: string, count: number) {
+		this.notice = {
+			text: `${plural(count, 'link')} copied`,
+			id: ++this.#noticeId,
+			review: false,
+			addText: text
+		};
 	}
 
 	#apply(batch: GrabberEventBatch) {
@@ -169,6 +197,7 @@ class GrabberStore {
 				case 'added': {
 					const known = new Set(this.links.map((l) => l.id));
 					this.links.push(...event.links.filter((l) => !known.has(l.id)));
+					for (const l of event.links) this.#autoUntick(l);
 					// Manual adds already announced themselves in `add`.
 					if (event.source !== 'manual') {
 						this.say(`${plural(event.links.length, 'link')} added${SOURCE_LABEL[event.source]}`, true);
@@ -178,13 +207,16 @@ class GrabberStore {
 				case 'updated': {
 					const i = this.links.findIndex((l) => l.id === event.link.id);
 					if (i >= 0) this.links[i] = event.link;
-					if (event.link.availability === 'offline') this.unchecked.add(event.link.id);
+					this.#autoUntick(event.link);
 					break;
 				}
 				case 'removed': {
 					const gone = new Set(event.ids);
 					this.links = this.links.filter((l) => !gone.has(l.id));
-					for (const id of event.ids) this.unchecked.delete(id);
+					for (const id of event.ids) {
+						this.unchecked.delete(id);
+						this.#flagged.delete(id);
+					}
 					break;
 				}
 			}

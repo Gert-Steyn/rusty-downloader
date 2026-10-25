@@ -7,7 +7,10 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 export const commands = {
 	appInfo: () => typedError<AppInfo, CommandError>(__TAURI_INVOKE("app_info")),
 	listPackages: () => typedError<Package_Serialize[], CommandError>(__TAURI_INVOKE("list_packages")),
-	/**  The user's Downloads folder, the default destination for new packages. */
+	/**
+	 *  The folder new packages go to: the one chosen in Settings, else the
+	 *  user's Downloads folder.
+	 */
 	defaultDownloadDir: () => typedError<string, CommandError>(__TAURI_INVOKE("default_download_dir")),
 	addLinks: (request: AddLinks_Deserialize) => typedError<AddLinksResult, CommandError>(__TAURI_INVOKE("add_links", { request })),
 	pauseDownload: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("pause_download", { id })),
@@ -52,10 +55,29 @@ export const commands = {
 	toolRollback: (name: ToolName) => typedError<ToolInfo_Serialize, CommandError>(__TAURI_INVOKE("tool_rollback", { name })),
 	toolSetChannel: (name: ToolName, channel: ToolChannel) => typedError<ToolInfo_Serialize, CommandError>(__TAURI_INVOKE("tool_set_channel", { name, channel })),
 	openToolsFolder: () => typedError<null, CommandError>(__TAURI_INVOKE("open_tools_folder")),
+	/**
+	 *  The saved settings. "Start with Windows" reports what Windows actually
+	 *  has, since the entry can be removed outside the app (Task Manager).
+	 */
+	getSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_settings"),
+	/**  The user's Downloads folder, used when no folder is chosen in Settings. */
+	systemDownloadsDir: () => typedError<string, CommandError>(__TAURI_INVOKE("system_downloads_dir")),
+	/**  Save and apply settings; returns them as stored (trimmed, checked). */
+	setSettings: (settings: Settings_Deserialize) => typedError<Settings_Serialize, CommandError>(__TAURI_INVOKE("set_settings", { settings })),
+	/**  Newest first, at most `limit`; `search` matches name, link, folder or package. */
+	historyList: (search: string | null, limit: number) => typedError<HistoryEntry_Serialize[], CommandError>(__TAURI_INVOKE("history_list", { search, limit })),
+	/**  Forget entries; the files themselves are left alone. */
+	historyRemove: (ids: number[]) => typedError<null, CommandError>(__TAURI_INVOKE("history_remove", { ids })),
+	historyClear: () => typedError<null, CommandError>(__TAURI_INVOKE("history_clear")),
+	/**  Open a history entry's file (or gallery folder), or show it in Explorer. */
+	historyOpen: (id: number, reveal: boolean) => typedError<null, CommandError>(__TAURI_INVOKE("history_open", { id, reveal })),
+	/**  Move a package before another one in its queue (`None`: to the end). */
+	movePackage: (id: number, before: number | null) => typedError<null, CommandError>(__TAURI_INVOKE("move_package", { id, before })),
 };
 
 /** Events */
 export const events = {
+	clipboardOffer: makeEvent<ClipboardOffer, ClipboardOffer>("clipboard-offer"),
 	downloadEvents: makeEvent<DownloadEvents_Serialize, DownloadEvents_Deserialize>("download-events"),
 	grabberEvents: makeEvent<GrabberEvents_Serialize, GrabberEvents_Deserialize>("grabber-events"),
 	toolEvents: makeEvent<ToolEvents_Serialize, ToolEvents_Deserialize>("tool-events"),
@@ -101,6 +123,15 @@ export type Availability = "unknown" | "checking" | "online" |
 "offline" | 
 /**  The check itself failed (network, timeout, server error); may be temporary. */
 "error";
+
+/**
+ *  Links were copied while "ask first" is on. `text` holds them one per line,
+ *  ready for `grabber_add`.
+ */
+export type ClipboardOffer = {
+	text: string,
+	count: number,
+};
 
 /**  Errors cross the IPC boundary as plain messages. */
 export type CommandError = string;
@@ -176,7 +207,9 @@ export type Event = Event_Serialize | Event_Deserialize;
  *  broadcast channel: a receiver that lags simply misses events and should
  *  re-read the full list.
  */
-export type Event_Deserialize = { type: "packageAdded"; packageId: number } | { type: "packageRemoved"; packageId: number } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error?: string | null } | 
+export type Event_Deserialize = { type: "packageAdded"; packageId: number } | { type: "packageRemoved"; packageId: number } | 
+/**  Packages in the queue changed order; re-read the list. */
+{ type: "packagesReordered"; queueId: number } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error?: string | null } | 
 /**  Name, size and destination are known after the first probe. */
 { type: "resolved"; downloadId: number; filename: string; size?: number | null } | { type: "progress"; downloadId: number; downloaded: number; total?: number | null; speedBps: number; connections: number; 
 /**  For gallery downloads, which count files rather than bytes. */
@@ -187,7 +220,9 @@ files?: FileCount_Deserialize | null };
  *  broadcast channel: a receiver that lags simply misses events and should
  *  re-read the full list.
  */
-export type Event_Serialize = { type: "packageAdded"; packageId: number } | { type: "packageRemoved"; packageId: number } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error: string | null } | 
+export type Event_Serialize = { type: "packageAdded"; packageId: number } | { type: "packageRemoved"; packageId: number } | 
+/**  Packages in the queue changed order; re-read the list. */
+{ type: "packagesReordered"; queueId: number } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error: string | null } | 
 /**  Name, size and destination are known after the first probe. */
 { type: "resolved"; downloadId: number; filename: string; size: number | null } | { type: "progress"; downloadId: number; downloaded: number; total: number | null; speedBps: number; connections: number; 
 /**  For gallery downloads, which count files rather than bytes. */
@@ -436,6 +471,8 @@ export type GrabbedLink_Deserialize = {
 	gallery?: Gallery_Deserialize | null,
 	/**  Settings, for `Gallerydl` links. */
 	gallerydl?: GalleryDlOptions_Deserialize | null,
+	/**  The last time this link was downloaded, when duplicate warnings are on. */
+	previous?: PreviousDownload | null,
 };
 
 export type GrabbedLink_Serialize = {
@@ -458,6 +495,8 @@ export type GrabbedLink_Serialize = {
 	gallery: Gallery_Serialize | null,
 	/**  Settings, for `Gallerydl` links. */
 	gallerydl: GalleryDlOptions_Serialize | null,
+	/**  The last time this link was downloaded, when duplicate warnings are on. */
+	previous: PreviousDownload | null,
 };
 
 export type GrabberEvent = GrabberEvent_Serialize | GrabberEvent_Deserialize;
@@ -478,6 +517,40 @@ export type GrabberEvents_Serialize = {
 	events: GrabberEvent_Serialize[],
 	/**  Events were dropped because the UI fell behind; reload the full list. */
 	resync: boolean,
+};
+
+export type HistoryEntry = HistoryEntry_Serialize | HistoryEntry_Deserialize;
+
+export type HistoryEntry_Deserialize = {
+	id: number,
+	url: string,
+	/**  File (or gallery folder) as it was saved. */
+	path: string,
+	name: string,
+	size?: number | null,
+	/**  `http`, `ytdlp` or `gallerydl`. */
+	kind?: string | null,
+	package?: string | null,
+	/**  Unix milliseconds. */
+	finishedAt: number,
+	/**  The file or folder is still there. */
+	exists: boolean,
+};
+
+export type HistoryEntry_Serialize = {
+	id: number,
+	url: string,
+	/**  File (or gallery folder) as it was saved. */
+	path: string,
+	name: string,
+	size: number | null,
+	/**  `http`, `ytdlp` or `gallerydl`. */
+	kind: string | null,
+	package: string | null,
+	/**  Unix milliseconds. */
+	finishedAt: number,
+	/**  The file or folder is still there. */
+	exists: boolean,
 };
 
 /**  Where links came from, so the UI can say "3 links from the clipboard". */
@@ -538,6 +611,76 @@ export type Package_Serialize = {
 	queueId: number,
 	priority: number,
 	downloads: Download_Serialize[],
+};
+
+/**  What the LinkGrabber shows for a link downloaded before: the latest time. */
+export type PreviousDownload = {
+	finishedAt: number,
+	path: string,
+	exists: boolean,
+};
+
+/**  The user's preferences. Missing fields (older saves) get their defaults. */
+export type Settings = Settings_Serialize | Settings_Deserialize;
+
+/**  The user's preferences. Missing fields (older saves) get their defaults. */
+export type Settings_Deserialize = {
+	/**  Folder for new packages; `None` is the user's Downloads folder. */
+	downloadDir?: string | null,
+	/**  Downloads running at once (in the main queue). */
+	maxActive?: number,
+	/**  Connections per plain download. */
+	maxConnections?: number,
+	/**  Add links copied anywhere to the LinkGrabber. */
+	clipboardWatch?: boolean,
+	/**  Offer copied links with an "Add" button instead of adding them. */
+	clipboardAsk?: boolean,
+	/**  Copied links matching one of these (`*` matches anything) are ignored. */
+	clipboardIgnore?: string[],
+	startWithWindows?: boolean,
+	/**  When started with Windows, stay in the tray. */
+	startMinimized?: boolean,
+	/**  Closing the window hides it to the tray; Quit is in the tray menu. */
+	closeToTray?: boolean,
+	/**  Windows notification when a package finishes. */
+	notifyFinished?: boolean,
+	/**  Windows notification when a download fails. */
+	notifyFailed?: boolean,
+	/**
+	 *  Flag links in the LinkGrabber that were downloaded before, and untick
+	 *  them while the file is still there.
+	 */
+	warnDuplicates?: boolean,
+};
+
+/**  The user's preferences. Missing fields (older saves) get their defaults. */
+export type Settings_Serialize = {
+	/**  Folder for new packages; `None` is the user's Downloads folder. */
+	downloadDir: string | null,
+	/**  Downloads running at once (in the main queue). */
+	maxActive: number,
+	/**  Connections per plain download. */
+	maxConnections: number,
+	/**  Add links copied anywhere to the LinkGrabber. */
+	clipboardWatch: boolean,
+	/**  Offer copied links with an "Add" button instead of adding them. */
+	clipboardAsk: boolean,
+	/**  Copied links matching one of these (`*` matches anything) are ignored. */
+	clipboardIgnore: string[],
+	startWithWindows: boolean,
+	/**  When started with Windows, stay in the tray. */
+	startMinimized: boolean,
+	/**  Closing the window hides it to the tray; Quit is in the tray menu. */
+	closeToTray: boolean,
+	/**  Windows notification when a package finishes. */
+	notifyFinished: boolean,
+	/**  Windows notification when a download fails. */
+	notifyFailed: boolean,
+	/**
+	 *  Flag links in the LinkGrabber that were downloaded before, and untick
+	 *  them while the file is still there.
+	 */
+	warnDuplicates: boolean,
 };
 
 export type Status = "queued" | "active" | "paused" | "completed" | "failed" | "canceled";

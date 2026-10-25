@@ -18,6 +18,7 @@ mod media;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Semaphore, broadcast};
@@ -25,6 +26,7 @@ use url::Url;
 
 use crate::db::Pool;
 use crate::gallerydl::{self, Gallery, GalleryDlOptions};
+use crate::history::{self, PreviousDownload};
 use crate::http::{self, DownloadSpec, filename};
 use crate::manager::{DEFAULT_QUEUE, DownloadKind, Manager, NewDownload, NewPackage, PackageId};
 use crate::tools::Tools;
@@ -109,6 +111,8 @@ pub struct GrabbedLink {
     pub gallery: Option<Gallery>,
     /// Settings, for `Gallerydl` links.
     pub gallerydl: Option<GalleryDlOptions>,
+    /// The last time this link was downloaded, when duplicate warnings are on.
+    pub previous: Option<PreviousDownload>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -149,6 +153,23 @@ struct Inner {
     events: broadcast::Sender<GrabberEvent>,
     probes: Arc<Semaphore>,
     tools: Option<Tools>,
+    /// Look links up in the download history.
+    warn_duplicates: AtomicBool,
+}
+
+/// Note which links were downloaded before (a no-op with warnings off).
+async fn with_history(inner: &Inner, mut links: Vec<GrabbedLink>) -> Result<Vec<GrabbedLink>> {
+    if links.is_empty() || !inner.warn_duplicates.load(Ordering::Relaxed) {
+        return Ok(links);
+    }
+    let found = {
+        let urls: Vec<&str> = links.iter().map(|l| l.url.as_str()).collect();
+        history::previous(&inner.pool, &urls).await?
+    };
+    for link in &mut links {
+        link.previous = found.get(&link.url).cloned();
+    }
+    Ok(links)
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -217,6 +238,7 @@ impl LinkRow {
             ytdlp,
             gallery,
             gallerydl,
+            previous: None,
         }
     }
 }
@@ -233,6 +255,7 @@ impl LinkGrabber {
                 events,
                 probes: Arc::new(Semaphore::new(PROBE_CONCURRENCY)),
                 tools,
+                warn_duplicates: AtomicBool::new(true),
             }),
         };
         let pending: Vec<LinkRow> = sqlx::query_as(
@@ -250,11 +273,20 @@ impl LinkGrabber {
         self.inner.events.subscribe()
     }
 
+    /// Whether links are looked up in the download history.
+    pub fn set_warn_duplicates(&self, on: bool) {
+        self.inner.warn_duplicates.store(on, Ordering::Relaxed);
+    }
+
     pub async fn list(&self) -> Result<Vec<GrabbedLink>> {
         let rows: Vec<LinkRow> = sqlx::query_as("SELECT * FROM link_grabber ORDER BY id")
             .fetch_all(&self.inner.pool)
             .await?;
-        Ok(rows.into_iter().map(LinkRow::into_link).collect())
+        with_history(
+            &self.inner,
+            rows.into_iter().map(LinkRow::into_link).collect(),
+        )
+        .await
     }
 
     /// Stage links, skipping ones already here, and start checking them.
@@ -287,6 +319,7 @@ impl LinkGrabber {
             added.push(row.into_link());
         }
         tx.commit().await?;
+        let added = with_history(&self.inner, added).await?;
 
         if !added.is_empty() {
             tracing::info!(count = added.len(), ?source, "links added to LinkGrabber");
@@ -573,10 +606,11 @@ async fn updated(inner: &Inner, id: LinkId) -> Result<()> {
         .await?;
     // A row that's gone was removed meanwhile; nothing to report.
     if let Some(row) = row {
+        let link = with_history(inner, vec![row.into_link()]).await?.remove(0);
         inner
             .events
             .send(GrabberEvent::Updated {
-                link: Box::new(row.into_link()),
+                link: Box::new(link),
             })
             .ok();
     }

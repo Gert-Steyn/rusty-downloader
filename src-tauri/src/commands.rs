@@ -9,7 +9,7 @@ use rdl_core::manager::{
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 use url::Url;
 
 use crate::state::AppState;
@@ -64,14 +64,12 @@ pub async fn list_packages(state: State<'_, AppState>) -> CommandResult<Vec<Pack
     Ok(state.downloads.list().await?)
 }
 
-/// The user's Downloads folder, the default destination for new packages.
+/// The folder new packages go to: the one chosen in Settings, else the
+/// user's Downloads folder.
 #[tauri::command]
 #[specta::specta]
-pub fn default_download_dir(app: AppHandle) -> CommandResult<String> {
-    app.path()
-        .download_dir()
-        .map(|p| p.display().to_string())
-        .map_err(|e| CommandError(e.to_string()))
+pub fn default_download_dir(app: AppHandle, state: State<'_, AppState>) -> CommandResult<String> {
+    Ok(state.download_dir(&app)?.display().to_string())
 }
 
 #[derive(Debug, Deserialize, Type)]
@@ -111,11 +109,9 @@ pub async fn add_links(
         .filter(|d| !d.is_empty())
     {
         Some(dir) => PathBuf::from(dir),
-        None => app
-            .path()
-            .download_dir()
-            .map_err(|e| CommandError(e.to_string()))?,
+        None => state.download_dir(&app)?,
     };
+
     let name = request
         .package_name
         .as_deref()

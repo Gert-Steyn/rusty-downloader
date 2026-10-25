@@ -27,13 +27,41 @@
 		packages,
 		live,
 		selection = $bindable(null),
-		onactivate
+		onactivate,
+		onmenu,
+		onmovepackage
 	}: {
 		packages: Package[];
 		live: Record<number, Live>;
 		selection?: Selection;
 		onactivate?: (selection: NonNullable<Selection>) => void;
+		/** Right click on a row (already selected), at client coordinates. */
+		onmenu?: (selection: NonNullable<Selection>, x: number, y: number) => void;
+		/** A package was dragged before another one, or to the end (`null`). */
+		onmovepackage?: (id: number, before: number | null) => void;
 	} = $props();
+
+	/** Drag type for package rows; the layout's link-drop overlay ignores it. */
+	const PACKAGE_DRAG = 'application/x-rdl-package';
+	let dragging = $state<number | null>(null);
+	/** Where the dragged package would land: before this package, or at the end. */
+	let dropBefore = $state<number | 'end' | null>(null);
+
+	function dragOver(e: DragEvent) {
+		if (dragging == null) return;
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		const row = rowAt(e);
+		dropBefore = row ? row.pkg.id : 'end';
+	}
+
+	function drop(e: DragEvent) {
+		if (dragging == null) return;
+		e.preventDefault();
+		const before = dropBefore === 'end' ? null : dropBefore;
+		if (before !== dragging) onmovepackage?.(dragging, before);
+		dragging = dropBefore = null;
+	}
 
 	const ROW = 34;
 	const OVERSCAN = 8;
@@ -147,6 +175,18 @@
 		if (row?.kind === 'package') toggle(row.pkg.id);
 		else if (row) onactivate?.(selectionOf(row));
 	}}
+	oncontextmenu={(e) => {
+		const row = rowAt(e);
+		if (!row || !onmenu) return;
+		e.preventDefault();
+		selection = selectionOf(row);
+		onmenu(selection, e.clientX, e.clientY);
+	}}
+	ondragover={dragOver}
+	ondrop={drop}
+	ondragleave={(e) => {
+		if (!(e.currentTarget as Element).contains(e.relatedTarget as Node)) dropBefore = null;
+	}}
 >
 	<div class="header row-grid" role="row">
 		<span role="columnheader">Name</span>
@@ -174,6 +214,8 @@
 						id={row.key}
 						class="row row-grid package"
 						class:selected={isSelected(row)}
+						class:drop-before={dropBefore === row.pkg.id && dragging !== row.pkg.id}
+						class:dragging={dragging === row.pkg.id}
 						style:top="{top}px"
 						role="row"
 						aria-level="1"
@@ -181,6 +223,15 @@
 						aria-selected={isSelected(row)}
 						tabindex="-1"
 						data-index={first + i}
+						draggable={onmovepackage ? 'true' : undefined}
+						title={onmovepackage ? 'Drag to change the order packages start in' : undefined}
+						ondragstart={(e) => {
+							if (!e.dataTransfer) return;
+							e.dataTransfer.setData(PACKAGE_DRAG, String(row.pkg.id));
+							e.dataTransfer.effectAllowed = 'move';
+							dragging = row.pkg.id;
+						}}
+						ondragend={() => (dragging = dropBefore = null)}
 					>
 						<span class="name" role="gridcell">
 							<button
@@ -242,9 +293,13 @@
 					</div>
 				{/if}
 			{/each}
+			{#if dropBefore === 'end'}
+				<div class="drop-end" style:top="{rows.length * ROW}px" aria-hidden="true"></div>
+			{/if}
 		</div>
 	</div>
 </div>
+
 
 <style>
 	.table {
@@ -284,6 +339,19 @@
 	}
 	.spacer {
 		position: relative;
+	}
+	.row.dragging {
+		opacity: 0.5;
+	}
+	.row.drop-before {
+		box-shadow: inset 0 2px 0 var(--accent);
+	}
+	.drop-end {
+		position: absolute;
+		left: 0;
+		right: 0;
+		height: 2px;
+		background: var(--accent);
 	}
 	.row {
 		position: absolute;

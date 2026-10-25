@@ -15,7 +15,9 @@ mod ytdlp_job;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+
 use std::time::Duration;
 
 use tokio::sync::{Notify, broadcast, watch};
@@ -75,6 +77,9 @@ struct Inner {
     dest_lock: tokio::sync::Mutex<()>,
     wake: Notify,
     shutdown: CancellationToken,
+    /// Connections per plain download, changeable while running; starts at
+    /// `config.segment.max_connections`.
+    max_connections: AtomicUsize,
 }
 
 struct RunningJob {
@@ -96,6 +101,14 @@ enum StopReason {
 }
 
 impl Inner {
+    /// Segment settings for a download starting now.
+    fn segment_config(&self) -> SegmentConfig {
+        SegmentConfig {
+            max_connections: self.max_connections.load(Ordering::Relaxed),
+            ..self.config.segment.clone()
+        }
+    }
+
     fn emit(&self, event: Event) {
         // No subscribers is fine.
         let _ = self.events.send(event);
@@ -128,6 +141,7 @@ impl Manager {
         }
         let (events, _) = broadcast::channel(1024);
         let inner = Arc::new(Inner {
+            max_connections: AtomicUsize::new(config.segment.max_connections),
             client: http::client(config.user_agent.as_deref())?,
             pool,
             config,
@@ -175,6 +189,35 @@ impl Manager {
         if !store::set_queue_limit(&self.inner.pool, queue, max_active).await? {
             return Err(Error::NotFound(format!("queue {queue}")));
         }
+        self.inner.wake.notify_one();
+        Ok(())
+    }
+
+    /// Connections for plain downloads that start from now on; running ones
+    /// keep theirs.
+    pub fn set_max_connections(&self, connections: usize) {
+        self.inner
+            .max_connections
+            .store(connections.max(1), Ordering::Relaxed);
+    }
+
+    /// Move a package within its queue, before `before` (or to the end).
+    /// Packages start in this order, after priority.
+    pub async fn move_package(&self, id: PackageId, before: Option<PackageId>) -> Result<()> {
+        let pool = &self.inner.pool;
+        let package = store::get_package(pool, id)
+            .await?
+            .ok_or_else(|| Error::NotFound(format!("package {id}")))?;
+        let mut order = store::queue_package_ids(pool, package.queue_id).await?;
+        order.retain(|p| *p != id);
+        let at = before
+            .and_then(|b| order.iter().position(|p| *p == b))
+            .unwrap_or(order.len());
+        order.insert(at, id);
+        store::set_package_order(pool, &order).await?;
+        self.inner.emit(Event::PackagesReordered {
+            queue_id: package.queue_id,
+        });
         self.inner.wake.notify_one();
         Ok(())
     }

@@ -21,7 +21,10 @@
 		video: 'M3 7a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM15 10l6-3v10l-6-3',
 		gallery: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM3 16l5-5 4 4 3-3 6 6M15.5 9.5h.01',
 		refresh: 'M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5',
-		undo: 'M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3'
+		undo: 'M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3',
+		copy: 'M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1',
+		'move-top': 'M5 4h14M12 20V9M7 14l5-5 5 5',
+		'move-bottom': 'M5 20h14M12 4v11M7 10l5 5 5-5'
 	} as const;
 
 	export type IconName = keyof typeof paths;

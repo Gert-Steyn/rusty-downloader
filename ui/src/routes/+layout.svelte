@@ -132,8 +132,17 @@
 
 <Toast
 	message={grabber.notice}
-	action={grabber.notice?.review && page.url.pathname !== '/linkgrabber' ? 'Review' : undefined}
-	onaction={() => goto('/linkgrabber')}
+	action={grabber.notice?.addText
+		? 'Add'
+		: grabber.notice?.review && page.url.pathname !== '/linkgrabber'
+			? 'Review'
+			: undefined}
+	duration={grabber.notice?.addText ? 10000 : 4000}
+	onaction={() => {
+		const text = grabber.notice?.addText;
+		if (text) grab(text, 'clipboard');
+		else goto('/linkgrabber');
+	}}
 />
 
 <style>

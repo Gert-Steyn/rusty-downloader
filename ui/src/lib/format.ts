@@ -70,6 +70,19 @@ export function formatDuration(seconds: number | null | undefined): string {
 	return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
 }
 
+/** "just now", "5 minutes ago", "3 days ago", or the date once it's months back. */
+export function formatAgo(ms: number, now = Date.now()): string {
+	const minutes = Math.round((now - ms) / 60_000);
+	const unit = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'} ago`;
+	if (minutes < 1) return 'just now';
+	if (minutes < 60) return unit(minutes, 'minute');
+	const hours = Math.round(minutes / 60);
+	if (hours < 24) return unit(hours, 'hour');
+	const days = Math.round(hours / 24);
+	if (days < 45) return unit(days, 'day');
+	return `on ${new Date(ms).toLocaleDateString(undefined, { dateStyle: 'medium' })}`;
+}
+
 export function formatDate(ms: number | null | undefined): string {
 	if (ms == null) return '—';
 	return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });

@@ -9,7 +9,7 @@
 	import GalleryOptionsDialog from '#lib/components/GalleryOptionsDialog.svelte';
 	import Icon from '#lib/components/Icon.svelte';
 	import { isTauri, type GalleryDlOptions, type GrabbedLink, type YtDlpOptions } from '#lib/api.js';
-	import { formatBytes, formatDuration, iconFor } from '#lib/format.js';
+	import { formatAgo, formatBytes, formatDuration, iconFor } from '#lib/format.js';
 	import { DEFAULT_GALLERY_OPTIONS, changedCount, galleryLine, sameOptions } from '#lib/gallerydl.js';
 	import { grabber, type LinkGroup } from '#lib/linkgrabber.svelte.js';
 
@@ -170,8 +170,8 @@
 							/>
 							<span class="count">{group.links.length}</span>
 						</span>
-						<span class="folder" title={group.destDir ?? 'Downloads folder'}>
-							{group.destDir ?? 'Downloads folder'}
+						<span class="folder" title={group.destDir ?? 'The folder chosen in Settings (Downloads unless changed)'}>
+							{group.destDir ?? 'Default folder'}
 						</span>
 						<span class="format">
 							{#if mediaLinks(group).length > 1}
@@ -223,6 +223,16 @@
 										<span class="pending">{link.url}</span>
 									{/if}
 									{#if mediaLine(link)}<span class="meta">{mediaLine(link)}</span>{/if}
+									{#if link.previous}
+										<span
+											class="meta before"
+											title={link.previous.exists
+												? `Saved to ${link.previous.path}`
+												: `Was saved to ${link.previous.path}, which is gone now`}
+										>
+											Downloaded {formatAgo(link.previous.finishedAt)}{link.previous.exists ? '' : ' (file gone)'}
+										</span>
+									{/if}
 								</span>
 							</span>
 							<span
@@ -389,6 +399,9 @@
 		font-size: 12px;
 		font-weight: 400;
 		color: var(--text-secondary);
+	}
+	.meta.before {
+		color: var(--caution);
 	}
 	.format {
 		min-width: 0;

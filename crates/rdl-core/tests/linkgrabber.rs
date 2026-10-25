@@ -238,3 +238,44 @@ async fn unfinished_checks_resume_after_restart() {
 
     assert_eq!(links[0].availability, Availability::Online);
 }
+
+#[tokio::test]
+async fn links_downloaded_before_are_flagged() {
+    use rdl_core::history::{self, Finished};
+
+    let (base, _server) = spawn_server().await;
+    let fx = Fixture::new().await;
+    let kept = fx.dir.path().join("kept.bin");
+    std::fs::write(&kept, "x").unwrap();
+    let url = base.join("file#ignored-fragment").unwrap();
+    history::record(
+        &fx.pool,
+        &Finished {
+            url: url.as_str(),
+            path: &kept,
+            size: Some(1),
+            kind: "http",
+            package: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let added = fx.add(&base, &["file", "named/new.bin"]).await;
+    let previous = by_url(&added, "file")
+        .previous
+        .clone()
+        .expect("flagged when added");
+    assert!(previous.exists);
+    assert_eq!(previous.path, kept);
+    assert!(by_url(&added, "new.bin").previous.is_none());
+    // Still flagged after the check finishes.
+    assert!(by_url(&fx.settled().await, "file").previous.is_some());
+
+    fx.grabber.set_warn_duplicates(false);
+    assert!(
+        by_url(&fx.grabber.list().await.unwrap(), "file")
+            .previous
+            .is_none()
+    );
+}

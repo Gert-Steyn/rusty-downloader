@@ -181,6 +181,71 @@ async fn completes_a_package_and_numbers_colliding_names() {
             "segments are cleared on completion"
         );
     }
+
+    let history = rdl_core::history::list(&fx.pool, None, 10).await.unwrap();
+    let mut names: Vec<&str> = history.iter().map(|h| h.name.as_str()).collect();
+    names.sort();
+    assert_eq!(names, ["test (1).bin", "test.bin"]);
+    assert!(
+        history
+            .iter()
+            .all(|h| h.exists && h.package.as_deref() == Some("test"))
+    );
+    fx.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn packages_can_be_reordered_and_connections_changed_at_runtime() {
+    let (base, _server) = spawn_server().await;
+    let mut fx = Fixture::new().await;
+    fx.manager.set_queue_limit(DEFAULT_QUEUE, 1).await.unwrap();
+    fx.manager.set_max_connections(1);
+    // The slow one takes the only slot; it started after the change, so it
+    // uses one connection.
+    let a = fx.add(&[url(&base, "slow")]).await[0];
+    let event = fx
+        .wait_for(|e| matches!(e, Event::Progress { download_id, connections, .. } if *download_id == a && *connections > 0))
+        .await;
+    assert!(matches!(event, Event::Progress { connections: 1, .. }));
+    let b = fx.add(&[url(&base, "named/b.bin")]).await[0];
+    let c = fx.add(&[url(&base, "named/c.bin")]).await[0];
+    let mut packages = Vec::new();
+    for id in [a, b, c] {
+        packages.push(fx.manager.get(id).await.unwrap().package_id);
+    }
+    let [pa, pb, pc] = packages[..] else {
+        unreachable!()
+    };
+
+    // c jumps ahead of b, so it starts once a (the slow one) is out of the way.
+    fx.manager.move_package(pc, Some(pb)).await.unwrap();
+    let order: Vec<i64> = fx
+        .manager
+        .list()
+        .await
+        .unwrap()
+        .iter()
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(order, [pa, pc, pb]);
+    // Moving to the end.
+    fx.manager.move_package(pa, None).await.unwrap();
+    let order: Vec<i64> = fx
+        .manager
+        .list()
+        .await
+        .unwrap()
+        .iter()
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(order, [pc, pb, pa]);
+
+    // Freeing the slot starts c before b.
+    fx.manager.pause(a).await.unwrap();
+    let started = fx
+        .wait_for(|e| matches!(e, Event::StatusChanged { status: Status::Active, download_id, .. } if *download_id == b || *download_id == c))
+        .await;
+    assert!(matches!(started, Event::StatusChanged { download_id, .. } if download_id == c));
     fx.manager.shutdown().await;
 }
 

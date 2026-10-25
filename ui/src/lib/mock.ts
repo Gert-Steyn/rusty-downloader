@@ -5,7 +5,9 @@ import type {
 	Download,
 	GalleryDlFlags,
 	GrabbedLink,
+	HistoryEntry,
 	Package,
+	Settings,
 	Status,
 	ToolInfo
 } from './api.js';
@@ -109,7 +111,11 @@ export function grabbedLinks(): GrabbedLink[] {
 		media: null,
 		ytdlp: null,
 		gallery: null,
-		gallerydl: null
+		gallerydl: null,
+		previous:
+			path === 'notes.pdf'
+				? { finishedAt: Date.now() - 3 * 24 * 3600 * 1000, path: 'C:\\Users\\You\\Downloads\\notes.pdf', exists: true }
+				: null
 	});
 	const video = (
 		vid: string,
@@ -140,7 +146,8 @@ export function grabbedLinks(): GrabbedLink[] {
 		},
 		ytdlp: { preset: 'best', customFormat: null },
 		gallery: null,
-		gallerydl: null
+		gallerydl: null,
+		previous: null
 	});
 	const gallery = (path: string, title: string, files: number, category: string, sub: string): GrabbedLink => ({
 		id: id++,
@@ -165,7 +172,8 @@ export function grabbedLinks(): GrabbedLink[] {
 			thumbnails: [],
 			partial: false
 		},
-		gallerydl: { archive: true, userConfig: false, flags: {}, rawArgs: null }
+		gallerydl: { archive: true, userConfig: false, flags: {}, rawArgs: null },
+		previous: null
 	});
 	return [
 		link('movie.part1.rar', 'movie', 'online', 1024 * MB),
@@ -282,4 +290,54 @@ export function live(): Record<number, Live> {
 		1: { speedBps: 18.4 * MB, connections: 8 },
 		3: { speedBps: 6.1 * MB, connections: 4 }
 	};
+}
+
+export function settings(): Settings {
+	return {
+		downloadDir: null,
+		maxActive: 3,
+		maxConnections: 8,
+		clipboardWatch: true,
+		clipboardAsk: false,
+		clipboardIgnore: ['*youtube.com/shorts/*'],
+		startWithWindows: false,
+		startMinimized: true,
+		closeToTray: true,
+		notifyFinished: true,
+		notifyFailed: true,
+		warnDuplicates: true
+	};
+}
+
+export function history(search = ''): HistoryEntry[] {
+	const hour = 3600 * 1000;
+	const now = Date.now();
+	const entry = (
+		id: number,
+		name: string,
+		kind: string,
+		size: number,
+		ago: number,
+		exists = true,
+		pkg: string | null = null
+	): HistoryEntry => ({
+		id,
+		url: `https://downloads.example.com/files/${encodeURIComponent(name)}`,
+		path: `C:\\Users\\You\\Downloads\\${name}`,
+		name,
+		size,
+		kind,
+		package: pkg ?? name,
+		finishedAt: now - ago * hour,
+		exists
+	});
+	const all = [
+		entry(1, 'gpu-driver-setup.exe', 'http', 742 * MB, 2, true, 'Drivers'),
+		entry(2, 'dataset.part1.rar', 'http', 1024 * MB, 5, true, 'Dataset (3 parts)'),
+		entry(3, 'Big Buck Bunny [aqz-KE-bpKQ].mp4', 'ytdlp', 412 * MB, 26),
+		entry(4, 'Mountain trip', 'gallerydl', 61 * MB, 50),
+		entry(5, 'notes.pdf', 'http', 2 * MB, 72, false, 'files.example.net')
+	];
+	const q = search.trim().toLowerCase();
+	return q ? all.filter((e) => `${e.name} ${e.url} ${e.package}`.toLowerCase().includes(q)) : all;
 }

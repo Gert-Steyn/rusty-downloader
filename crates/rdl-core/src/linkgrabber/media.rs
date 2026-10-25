@@ -275,8 +275,10 @@ async fn expand_playlist(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+    let added = super::with_history(inner, added).await?;
 
     tracing::info!(entries = added.len(), %package, "playlist expanded");
+
     inner
         .events
         .send(GrabberEvent::Removed { ids: vec![id] })

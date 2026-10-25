@@ -1,10 +1,14 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::PathBuf;
+use std::sync::{RwLock, RwLockReadGuard};
 
+use rdl_core::http::SegmentConfig;
 use rdl_core::linkgrabber::LinkGrabber;
 use rdl_core::logging::{self, WorkerGuard};
-use rdl_core::manager::{Manager as DownloadManager, ManagerConfig};
+use rdl_core::manager::{DEFAULT_QUEUE, Manager as DownloadManager, ManagerConfig};
+use rdl_core::settings::Settings;
 use rdl_core::tools::{Tools, ToolsConfig};
-use rdl_core::{db, paths::AppPaths, settings};
+use rdl_core::{db, paths::AppPaths};
+use tauri::{AppHandle, Manager};
 use tokio_util::sync::CancellationToken;
 
 /// Long-lived services shared by all commands.
@@ -16,8 +20,8 @@ pub struct AppState {
     pub tools: Tools,
     /// Stops background work (tool update checks) on exit.
     pub shutdown: CancellationToken,
-    /// Mirrors the `linkgrabber.clipboard_watch` setting for the watcher loop.
-    clipboard_watch: AtomicBool,
+    /// The saved preferences, as last applied.
+    settings: RwLock<Settings>,
     _log_guard: WorkerGuard,
 }
 
@@ -36,6 +40,7 @@ impl AppState {
 
         let db = db::open(&paths.db_file).await?;
         tracing::info!(schema = db::schema_version(&db).await?, "database ready");
+        let settings = Settings::load(&db).await?;
 
         let tools =
             Tools::start(db.clone(), paths.tools_dir.clone(), ToolsConfig::default()).await?;
@@ -46,35 +51,71 @@ impl AppState {
             ManagerConfig {
                 tools: Some(tools.clone()),
                 archives_dir: Some(paths.archives_dir.clone()),
+                segment: SegmentConfig {
+                    max_connections: settings.max_connections as usize,
+                    ..SegmentConfig::default()
+                },
                 ..ManagerConfig::default()
             },
         )
         .await?;
         let grabber = LinkGrabber::start(db.clone(), None, Some(tools.clone())).await?;
-        let clipboard_watch = settings::get(&db, settings::CLIPBOARD_WATCH)
-            .await?
-            .unwrap_or(true);
 
-        Ok(Self {
+        let state = Self {
             paths,
             db,
             downloads,
             grabber,
             tools,
             shutdown,
-            clipboard_watch: AtomicBool::new(clipboard_watch),
+            settings: RwLock::new(settings.clone()),
             _log_guard: log_guard,
-        })
+        };
+        state.apply(&settings).await?;
+        Ok(state)
+    }
+
+    pub fn settings(&self) -> RwLockReadGuard<'_, Settings> {
+        self.settings.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Check, save and apply new preferences; returns them as stored.
+    pub async fn update_settings(&self, new: Settings) -> rdl_core::Result<Settings> {
+        let new = new.validated()?;
+        new.save(&self.db).await?;
+        self.apply(&new).await?;
+        *self.settings.write().unwrap_or_else(|e| e.into_inner()) = new.clone();
+        tracing::info!(?new, "settings saved");
+        Ok(new)
+    }
+
+    /// Push the preferences the core services hold into them.
+    async fn apply(&self, settings: &Settings) -> rdl_core::Result<()> {
+        self.downloads
+            .set_queue_limit(DEFAULT_QUEUE, settings.max_active)
+            .await?;
+        self.downloads
+            .set_max_connections(settings.max_connections as usize);
+        self.grabber.set_warn_duplicates(settings.warn_duplicates);
+        Ok(())
     }
 
     pub fn clipboard_watch(&self) -> bool {
-        self.clipboard_watch.load(Ordering::Relaxed)
+        self.settings().clipboard_watch
     }
 
     pub async fn set_clipboard_watch(&self, enabled: bool) -> rdl_core::Result<()> {
-        settings::set(&self.db, settings::CLIPBOARD_WATCH, &enabled).await?;
-        self.clipboard_watch.store(enabled, Ordering::Relaxed);
-        tracing::info!(enabled, "clipboard watching changed");
+        let mut settings = self.settings().clone();
+        settings.clipboard_watch = enabled;
+        self.update_settings(settings).await?;
         Ok(())
+    }
+
+    /// Folder for new packages: the chosen one, else the user's Downloads.
+    pub fn download_dir(&self, app: &AppHandle) -> Result<PathBuf, String> {
+        if let Some(dir) = &self.settings().download_dir {
+            return Ok(dir.clone());
+        }
+        app.path().download_dir().map_err(|e| e.to_string())
     }
 }

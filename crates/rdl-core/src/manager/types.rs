@@ -184,6 +184,11 @@ pub enum Event {
     PackageRemoved {
         package_id: PackageId,
     },
+    /// Packages in the queue changed order; re-read the list.
+    PackagesReordered {
+        queue_id: QueueId,
+    },
+
     DownloadRemoved {
         download_id: DownloadId,
         package_id: PackageId,

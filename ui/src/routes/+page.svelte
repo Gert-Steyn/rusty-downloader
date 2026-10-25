@@ -1,5 +1,6 @@
 <script lang="ts">
 	import AddLinksDialog from '#lib/components/AddLinksDialog.svelte';
+	import ContextMenu, { type MenuItem } from '#lib/components/ContextMenu.svelte';
 	import DetailsPanel from '#lib/components/DetailsPanel.svelte';
 	import DownloadsTable, { type Selection } from '#lib/components/DownloadsTable.svelte';
 	import EmptyState from '#lib/components/EmptyState.svelte';
@@ -55,6 +56,75 @@
 		}
 	}
 
+	// Right-click menu for the row under the pointer.
+	let menuAt = $state<{ x: number; y: number } | null>(null);
+	let menuItems = $state<MenuItem[]>([]);
+
+	function openMenu(target: NonNullable<Selection>, x: number, y: number) {
+		menuItems = target.kind === 'download' ? downloadMenu(target.id) : packageMenu(target.id);
+		menuAt = { x, y };
+	}
+
+	function downloadMenu(id: number): MenuItem[] {
+		const d = downloads.download(id);
+		if (!d) return [];
+		const running = d.status === 'active' || d.status === 'queued';
+		return [
+			running
+				? { label: 'Pause', icon: 'pause', action: () => downloads.pause(id) }
+				: {
+						label: d.status === 'paused' ? 'Resume' : 'Retry',
+						icon: 'play',
+						disabled: d.status === 'completed',
+						action: () => downloads.resume(id)
+					},
+			{ label: 'Open', icon: 'open', disabled: d.status !== 'completed', action: () => downloads.open(id) },
+			{ label: 'Show in folder', icon: 'folder', action: () => downloads.reveal(id) },
+			{ label: 'Copy link', icon: 'copy', action: () => copy(d.sourceUrl) },
+			'separator',
+			{ label: 'Remove…', icon: 'trash', danger: true, action: askRemove }
+		];
+	}
+
+	function packageMenu(id: number): MenuItem[] {
+		const p = downloads.package(id);
+		if (!p) return [];
+		const ids = downloads.packages.map((q) => q.id);
+		const at = ids.indexOf(id);
+		const running = p.downloads.some((d) => d.status === 'active' || d.status === 'queued');
+		const resumable = p.downloads.some((d) => d.status !== 'completed');
+		return [
+			running
+				? { label: 'Pause all', icon: 'pause', action: () => p.downloads.forEach((d) => downloads.pause(d.id)) }
+				: {
+						label: 'Resume all',
+						icon: 'play',
+						disabled: !resumable,
+						action: () => p.downloads.forEach((d) => d.status !== 'completed' && downloads.resume(d.id))
+					},
+			{ label: 'Open folder', icon: 'folder', action: () => downloads.openFolder(id) },
+			{ label: 'Copy links', icon: 'copy', action: () => copy(p.downloads.map((d) => d.sourceUrl).join('\n')) },
+			'separator',
+			{ label: 'Move to top', icon: 'move-top', disabled: at <= 0, action: () => downloads.movePackage(id, ids[0]) },
+			{
+				label: 'Move to bottom',
+				icon: 'move-bottom',
+				disabled: at === ids.length - 1,
+				action: () => downloads.movePackage(id, null)
+			},
+			'separator',
+			{ label: 'Remove…', icon: 'trash', danger: true, action: askRemove }
+		];
+	}
+
+	async function copy(text: string) {
+		try {
+			await navigator.clipboard.writeText(text);
+		} catch (e) {
+			downloads.error = `Could not copy: ${e}`;
+		}
+	}
+
 	function inTextField(target: EventTarget | null): boolean {
 		return target instanceof HTMLElement && target.closest('input, textarea, [contenteditable]') !== null;
 	}
@@ -100,7 +170,14 @@
 	{#if !downloads.ready}
 		<div class="fill"></div>
 	{:else if hasAny}
-		<DownloadsTable packages={downloads.packages} live={downloads.live} bind:selection onactivate={activate} />
+		<DownloadsTable
+			packages={downloads.packages}
+			live={downloads.live}
+			bind:selection
+			onactivate={activate}
+			onmenu={openMenu}
+			onmovepackage={downloads.movePackage}
+		/>
 		<DetailsPanel {selection} onremove={askRemove} />
 	{:else}
 		<div class="fill">
@@ -119,6 +196,8 @@
 	onadded={(id) => (selection = { kind: 'package', id })}
 />
 <RemoveDialog bind:open={removing} target={removeTarget} />
+<ContextMenu bind:at={menuAt} items={menuItems} />
+
 
 <style>
 	.page {

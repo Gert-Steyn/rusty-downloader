@@ -4,9 +4,15 @@
 	let {
 		message,
 		action,
+		duration = 4000,
 		onaction
-	}: { message: { text: string; id: number } | null; action?: string; onaction?: () => void } =
-		$props();
+	}: {
+		message: { text: string; id: number } | null;
+		action?: string;
+		/** Milliseconds before it hides. */
+		duration?: number;
+		onaction?: () => void;
+	} = $props();
 
 	let visible = $state(false);
 
@@ -14,7 +20,7 @@
 		if (!message) return;
 		message.id; // re-run for every new message, even with the same text
 		visible = true;
-		const timer = setTimeout(() => (visible = false), 4000);
+		const timer = setTimeout(() => (visible = false), duration);
 		return () => clearTimeout(timer);
 	});
 </script>

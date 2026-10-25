@@ -109,6 +109,9 @@ class DownloadsStore {
 	reveal = (id: number) => this.run(() => unwrap(commands.revealDownload(id)));
 	openFolder = (packageId: number) =>
 		this.run(() => unwrap(commands.openPackageFolder(packageId)));
+	/** Put a package before another (`null`: last); the order is the start order. */
+	movePackage = (id: number, before: number | null) =>
+		this.run(() => unwrap(commands.movePackage(id, before)));
 
 	#reindex() {
 		// Index the reactive proxies so in-place updates re-render.
@@ -165,6 +168,7 @@ class DownloadsStore {
 					break;
 				}
 				case 'packageAdded':
+				case 'packagesReordered':
 					refresh = true;
 					break;
 				case 'downloadRemoved': {
