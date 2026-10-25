@@ -13,6 +13,7 @@ use rdl_core::http::SegmentConfig;
 use rdl_core::manager::{
     DEFAULT_QUEUE, DownloadId, Event, Manager, ManagerConfig, NewDownload, NewPackage, Status,
 };
+use rdl_core::request::{Cookie, RequestContext};
 use reqwest::Url;
 use tokio::sync::broadcast;
 
@@ -69,13 +70,18 @@ impl Fixture {
 
     /// Add one package with the given URLs; returns the download ids in order.
     async fn add(&self, urls: &[Url]) -> Vec<DownloadId> {
+        self.add_downloads(urls.iter().cloned().map(NewDownload::new).collect())
+            .await
+    }
+
+    async fn add_downloads(&self, downloads: Vec<NewDownload>) -> Vec<DownloadId> {
         let package = self
             .manager
             .add_package(NewPackage {
                 name: "test".into(),
                 dest_dir: self.dest_dir(),
                 queue_id: DEFAULT_QUEUE,
-                downloads: urls.iter().cloned().map(NewDownload::new).collect(),
+                downloads,
             })
             .await
             .unwrap();
@@ -463,5 +469,73 @@ async fn pausing_a_queued_download_keeps_it_out_of_the_queue() {
     // Give the scheduler a chance to (wrongly) pick it up.
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(fx.manager.get(ids[1]).await.unwrap().status, Status::Paused);
+    fx.manager.shutdown().await;
+}
+
+/// Wait until download `id` completes or fails; returns the final status.
+async fn finished(fx: &mut Fixture, id: DownloadId) -> Status {
+    let event = fx
+        .wait_for(|e| {
+            matches!(e, Event::StatusChanged { download_id, status: Status::Completed | Status::Failed, .. } if *download_id == id)
+        })
+        .await;
+    let Event::StatusChanged { status, .. } = event else {
+        unreachable!()
+    };
+    status
+}
+
+#[tokio::test]
+async fn browser_cookies_and_referer_reach_only_their_host() {
+    let (base, server) = spawn_server().await;
+    let mut fx = Fixture::new().await;
+    let request = RequestContext {
+        referer: Some(format!("{base}page")),
+        user_agent: Some("TestBrowser/1".into()),
+        cookies: vec![Cookie {
+            name: "sid".into(),
+            value: "ok".into(),
+            domain: "127.0.0.1".into(),
+            host_only: true,
+            path: "/".into(),
+            secure: false,
+            http_only: true,
+            expires: None,
+        }],
+    };
+    let with_request = |path: &str| NewDownload {
+        request: request.clone(),
+        ..NewDownload::new(url(&base, path))
+    };
+
+    // Signed in: probe and every segment send the cookie and referer.
+    let id = fx.add_downloads(vec![with_request("private")]).await[0];
+    assert_eq!(finished(&mut fx, id).await, Status::Completed);
+    assert_file(&fx, "test.bin", &server);
+    {
+        let seen = server.private_cookies.lock().unwrap();
+        assert!(seen.len() > 1, "expected probe plus segment requests");
+        assert!(seen.iter().all(|c| c.as_deref() == Some("sid=ok")));
+    }
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT request_json FROM downloads WHERE id = ?")
+            .bind(id)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        stored, None,
+        "cookies are dropped once the download is done"
+    );
+
+    // Without them, the server refuses.
+    let id = fx.add(&[url(&base, "private")]).await[0];
+    assert_eq!(finished(&mut fx, id).await, Status::Failed);
+
+    // A redirect to another host doesn't take the cookie along.
+    server.private_cookies.lock().unwrap().clear();
+    let id = fx.add_downloads(vec![with_request("to-localhost")]).await[0];
+    assert_eq!(finished(&mut fx, id).await, Status::Failed);
+    assert_eq!(*server.private_cookies.lock().unwrap(), [None]);
     fx.manager.shutdown().await;
 }

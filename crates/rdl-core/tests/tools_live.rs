@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 
 use rdl_core::db;
+use rdl_core::request::RequestContext;
 use rdl_core::tools::{ToolName, Tools, ToolsConfig};
 use rdl_core::ytdlp::{self, Media, RunEvent, RunOutcome, RunSpec, YtDlpOptions};
 use tokio_util::sync::CancellationToken;
@@ -35,9 +36,14 @@ async fn installs_real_tools_and_resolves() {
         assert!(info.version.is_some());
     }
     let exe = tools.path(ToolName::Ytdlp).await.unwrap().unwrap();
-    let media = ytdlp::resolve(&exe, &Url::parse(VIDEO).unwrap(), &CancellationToken::new())
-        .await
-        .unwrap();
+    let media = ytdlp::resolve(
+        &exe,
+        &Url::parse(VIDEO).unwrap(),
+        &RequestContext::default(),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     let Media::Video(info) = media else {
         panic!("expected a video")
     };
@@ -63,6 +69,8 @@ async fn downloads_real_video() {
             preset: ytdlp::FormatPreset::Max480,
             custom_format: None,
         },
+        request: RequestContext::default(),
+        cookie_file: None,
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let printer = tokio::spawn(async move {
@@ -205,9 +213,14 @@ async fn gallery_dl_resolves_and_downloads_a_real_gallery() {
     let url = Url::parse(&url).unwrap();
     let (root, tools) = tools().await;
     let exe = tools.ensure(ToolName::Gallerydl).await.unwrap();
-    let resolved = gallerydl::resolve(&exe, &url, &CancellationToken::new())
-        .await
-        .unwrap();
+    let resolved = gallerydl::resolve(
+        &exe,
+        &url,
+        &RequestContext::default(),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     println!("{:#?}", resolved.gallery);
     assert!(resolved.error.is_none(), "{:?}", resolved.error);
     assert!(resolved.gallery.files > 0 || resolved.gallery.sub_galleries > 0);
@@ -227,6 +240,8 @@ async fn gallery_dl_resolves_and_downloads_a_real_gallery() {
         archive: Some(archive),
         options,
         available: Some(gallerydl::supported_flags(&exe).await.unwrap()),
+        request: RequestContext::default(),
+        cookie_file: None,
     };
     println!("args: {:?}", spec.args().unwrap());
     for run in 1..=2 {

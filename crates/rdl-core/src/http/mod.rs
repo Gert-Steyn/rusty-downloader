@@ -7,7 +7,8 @@ pub mod segments;
 
 use std::time::Duration;
 
-use reqwest::{StatusCode, Url, redirect};
+use reqwest::header::{HeaderMap, LOCATION};
+use reqwest::{Client, Response, StatusCode, Url, redirect};
 
 use crate::{Error, Result};
 
@@ -17,15 +18,62 @@ pub use segments::Segment;
 
 pub const DEFAULT_USER_AGENT: &str = concat!("RustyDownloader/", env!("CARGO_PKG_VERSION"));
 
-/// Shared client for all HTTP downloads. Responses are never decompressed: byte
-/// ranges must refer to the bytes on the wire.
-pub fn client(user_agent: Option<&str>) -> Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
+/// Redirects followed per request, as browsers allow.
+const MAX_REDIRECTS: usize = 10;
+
+/// Shared client for all HTTP downloads. Responses are never decompressed:
+/// byte ranges must refer to the bytes on the wire. Redirects are not
+/// followed by the client but by [`get`], so each hop gets its own cookies.
+pub fn client(user_agent: Option<&str>) -> Result<Client> {
+    Ok(Client::builder()
         .user_agent(user_agent.unwrap_or(DEFAULT_USER_AGENT))
-        .redirect(redirect::Policy::limited(10))
+        .redirect(redirect::Policy::none())
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(Duration::from_secs(30))
         .build()?)
+}
+
+/// Client for API calls and tool downloads, which follows redirects itself.
+pub fn api_client() -> Result<Client> {
+    Ok(Client::builder()
+        .user_agent(DEFAULT_USER_AGENT)
+        .redirect(redirect::Policy::limited(MAX_REDIRECTS))
+        .connect_timeout(Duration::from_secs(15))
+        .read_timeout(Duration::from_secs(30))
+        .build()?)
+}
+
+/// `GET url` with `spec`'s referer, user agent and cookies plus `extra`
+/// headers, following redirects. Cookies are picked again for every hop,
+/// as a browser would, so another host never sees cookies not meant for it.
+pub(crate) async fn get(
+    client: &Client,
+    spec: &DownloadSpec,
+    url: &Url,
+    extra: &HeaderMap,
+) -> Result<Response> {
+    let mut url = url.clone();
+    for _ in 0..=MAX_REDIRECTS {
+        let response = client
+            .get(url.clone())
+            .headers(spec.request.headers_for(&url))
+            .headers(extra.clone())
+            .send()
+            .await?;
+        let next = response
+            .status()
+            .is_redirection()
+            .then(|| response.headers().get(LOCATION))
+            .flatten()
+            .and_then(|l| l.to_str().ok())
+            .and_then(|l| url.join(l).ok())
+            .filter(|u| matches!(u.scheme(), "http" | "https"));
+        match next {
+            Some(next) => url = next,
+            None => return Ok(response),
+        }
+    }
+    Err(Error::TooManyRedirects(url.to_string()))
 }
 
 /// Map a non-success status to the matching error.

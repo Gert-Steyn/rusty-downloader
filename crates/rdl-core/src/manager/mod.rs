@@ -139,6 +139,8 @@ impl Manager {
                 "re-queued downloads interrupted by the last exit"
             );
         }
+        // Tool runs that were killed with the app left their cookies behind.
+        tokio::task::spawn_blocking(crate::request::sweep_cookie_files);
         let (events, _) = broadcast::channel(1024);
         let inner = Arc::new(Inner {
             max_connections: AtomicUsize::new(config.segment.max_connections),

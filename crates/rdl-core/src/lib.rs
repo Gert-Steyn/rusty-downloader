@@ -12,6 +12,7 @@ pub mod logging;
 pub mod manager;
 pub mod paths;
 pub mod process;
+pub mod request;
 pub mod settings;
 pub mod tools;
 pub mod ytdlp;

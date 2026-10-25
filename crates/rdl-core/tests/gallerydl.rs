@@ -2,7 +2,9 @@
 //! behaves like the real one with stdout piped: it prints each finished
 //! file's path, `# ` before files that already exist, and logs errors as
 //! `[extractor][error] ...` on stderr. The URL picks the behaviour:
-//! `/slow` waits after the first file, `/fail` fails after it.
+//! `/slow` waits after the first file, `/fail` fails after it. A cookie
+//! file it's given is copied to `cookies.txt` in the gallery folder; when
+//! resolving, it calls the album "Fake album signed in" instead.
 #![cfg(windows)]
 
 use std::path::{Path, PathBuf};
@@ -13,6 +15,7 @@ use rdl_core::gallerydl::{self, GalleryDlOptions, RunEvent, RunOutcome, RunSpec}
 use rdl_core::manager::{
     DEFAULT_QUEUE, DownloadKind, FileCount, Manager, ManagerConfig, NewDownload, NewPackage, Status,
 };
+use rdl_core::request::{Cookie, RequestContext};
 use rdl_core::tools::{Tools, ToolsConfig};
 use tokio_util::sync::CancellationToken;
 use url::Url;
@@ -20,14 +23,16 @@ use url::Url;
 const FAKE: &str = r#"@echo off
 setlocal
 if "%~1"=="--help" exit /b 0
-if "%~2"=="-j" goto json
 :args
 if "%~1"=="" goto run
+if "%~1"=="-j" goto json
 if "%~1"=="-D" set "DIR=%~2"
+if "%~1"=="--cookies" set "COOKIES=%~2"
 set "URL=%~1"
 shift
 goto args
 :run
+if defined COOKIES copy /y "%COOKIES%" "%DIR%\cookies.txt" >NUL
 set FRESH=1
 if exist "%DIR%\001.jpg" set FRESH=0
 if exist "%DIR%\001.jpg" (echo # %DIR%\001.jpg) else (
@@ -45,7 +50,9 @@ if exist "%DIR%\002.jpg" (echo # %DIR%\002.jpg) else (
 )
 exit /b 0
 :json
-echo [[2, {"category": "fake", "subcategory": "album", "title": "Fake album"}], [3, "https://gallery.test/1.jpg", {"extension": "jpg", "filesize": 5}], [3, "https://gallery.test/2.jpg", {"extension": "jpg", "filesize": 9}]]
+set "TITLE=Fake album"
+if defined COOKIES if exist "%COOKIES%" set "TITLE=Fake album signed in"
+echo [[2, {"category": "fake", "subcategory": "album", "title": "%TITLE%"}], [3, "https://gallery.test/1.jpg", {"extension": "jpg", "filesize": 5}], [3, "https://gallery.test/2.jpg", {"extension": "jpg", "filesize": 9}]]
 exit /b 0
 "#;
 
@@ -67,6 +74,8 @@ fn spec(exe: &Path, dir: &Path, url: &str) -> RunSpec {
         archive: None,
         options: GalleryDlOptions::default(),
         available: None,
+        request: RequestContext::default(),
+        cookie_file: None,
     }
 }
 
@@ -327,22 +336,15 @@ async fn manager_records_gallery_failures_and_can_delete_what_finished() {
     fx.manager.shutdown().await;
 }
 
-#[tokio::test]
-async fn linkgrabber_offers_pages_yt_dlp_rejects_to_gallery_dl() {
-    use rdl_core::linkgrabber::{Availability, LinkGrabber, LinkSource};
-
-    let root = tempfile::tempdir().unwrap();
-    let gallery_dl = fake_tool(root.path());
-    let ytdlp = root.path().join("yt-dlp.cmd");
+/// Fake yt-dlp and gallery-dl installed in `root`, and tools that use them.
+async fn fake_tools(root: &Path) -> (db::Pool, Tools) {
+    let gallery_dl = fake_tool(root);
+    let ytdlp = root.join("yt-dlp.cmd");
     std::fs::write(&ytdlp, FAKE_YTDLP).unwrap();
-    let pool = db::open(&root.path().join("t.db")).await.unwrap();
-    let tools = Tools::start(
-        pool.clone(),
-        root.path().join("tools"),
-        ToolsConfig::default(),
-    )
-    .await
-    .unwrap();
+    let pool = db::open(&root.join("t.db")).await.unwrap();
+    let tools = Tools::start(pool.clone(), root.join("tools"), ToolsConfig::default())
+        .await
+        .unwrap();
     for (name, exe) in [("yt-dlp", &ytdlp), ("gallery-dl", &gallery_dl)] {
         sqlx::query("UPDATE tools SET path = ?, version = 'fake' WHERE name = ?")
             .bind(exe.to_string_lossy().into_owned())
@@ -351,14 +353,15 @@ async fn linkgrabber_offers_pages_yt_dlp_rejects_to_gallery_dl() {
             .await
             .unwrap();
     }
-    let grabber = LinkGrabber::start(pool.clone(), None, Some(tools.clone()))
-        .await
-        .unwrap();
+    (pool, tools)
+}
 
-    // Nothing listens on port 9: the probe fails, which is worth asking the tools about.
-    let url = Url::parse("http://127.0.0.1:9/album/42").unwrap();
-    grabber.add(vec![url], LinkSource::Manual).await.unwrap();
-    let link = tokio::time::timeout(Duration::from_secs(20), async {
+/// The first link in the grabber, once its check is done.
+async fn checked_link(
+    grabber: &rdl_core::linkgrabber::LinkGrabber,
+) -> rdl_core::linkgrabber::GrabbedLink {
+    use rdl_core::linkgrabber::Availability;
+    tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             let links = grabber.list().await.unwrap();
             if !matches!(
@@ -371,7 +374,79 @@ async fn linkgrabber_offers_pages_yt_dlp_rejects_to_gallery_dl() {
         }
     })
     .await
-    .expect("link check finished");
+    .expect("link check finished")
+}
+
+#[tokio::test]
+async fn browser_cookies_go_to_gallery_dl_when_checking_and_downloading() {
+    use rdl_core::linkgrabber::{LinkGrabber, LinkSource};
+
+    let root = tempfile::tempdir().unwrap();
+    let (pool, tools) = fake_tools(root.path()).await;
+    let grabber = LinkGrabber::start(pool.clone(), None, Some(tools.clone()))
+        .await
+        .unwrap();
+    let request = RequestContext {
+        cookies: vec![Cookie {
+            name: "sid".into(),
+            value: "ok".into(),
+            domain: "127.0.0.1".into(),
+            host_only: true,
+            path: "/".into(),
+            secure: false,
+            http_only: false,
+            expires: None,
+        }],
+        ..Default::default()
+    };
+    let url = Url::parse("http://127.0.0.1:9/album/42").unwrap();
+    grabber
+        .add_with_request(vec![url], LinkSource::Manual, request.clone())
+        .await
+        .unwrap();
+    let link = checked_link(&grabber).await;
+    assert_eq!(link.filename.as_deref(), Some("Fake album signed in"));
+
+    let manager = Manager::start(
+        pool,
+        ManagerConfig {
+            tools: Some(tools),
+            rescan_interval: Duration::from_millis(100),
+            ..ManagerConfig::default()
+        },
+    )
+    .await
+    .unwrap();
+    let out = root.path().join("out");
+    grabber.confirm(&[link.id], &out, &manager).await.unwrap();
+    let id = manager.list().await.unwrap()[0].downloads[0].id;
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while manager.get(id).await.unwrap().status != Status::Completed {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("gallery finished");
+    let seen =
+        std::fs::read_to_string(out.join("Fake album signed in").join("cookies.txt")).unwrap();
+    assert_eq!(seen, request.netscape());
+    manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn linkgrabber_offers_pages_yt_dlp_rejects_to_gallery_dl() {
+    use rdl_core::linkgrabber::{Availability, LinkGrabber, LinkSource};
+
+    let root = tempfile::tempdir().unwrap();
+    let (pool, tools) = fake_tools(root.path()).await;
+    let grabber = LinkGrabber::start(pool.clone(), None, Some(tools.clone()))
+        .await
+        .unwrap();
+
+    // Nothing listens on port 9: the probe fails, which is worth asking the tools about.
+    let url = Url::parse("http://127.0.0.1:9/album/42").unwrap();
+    grabber.add(vec![url], LinkSource::Manual).await.unwrap();
+    let link = checked_link(&grabber).await;
 
     assert_eq!(link.availability, Availability::Online, "{:?}", link.error);
     assert_eq!(link.kind, DownloadKind::Gallerydl);

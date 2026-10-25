@@ -62,6 +62,8 @@ pub(super) async fn execute(
         dest_dir: PathBuf::from(&package.dest_dir),
         name: row.filename.clone(),
         options: row.ytdlp_options().unwrap_or_default(),
+        request: row.request(),
+        cookie_file: None,
     };
     let (tx, rx) = mpsc::unbounded_channel();
     let forwarder = tokio::spawn(forward(Arc::clone(inner), row.id, rx));

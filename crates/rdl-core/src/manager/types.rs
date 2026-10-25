@@ -4,6 +4,7 @@ use serde::Serialize;
 use url::Url;
 
 use crate::gallerydl::GalleryDlOptions;
+use crate::request::RequestContext;
 use crate::ytdlp::YtDlpOptions;
 
 pub type PackageId = i64;
@@ -107,6 +108,8 @@ pub struct NewDownload {
     pub files_total: Option<u32>,
     /// Size in bytes, when known in advance (a gallery whose files list it).
     pub size: Option<u64>,
+    /// Referer, user agent and cookies to send, from the browser.
+    pub request: RequestContext,
 }
 
 impl NewDownload {
@@ -120,6 +123,7 @@ impl NewDownload {
             title: None,
             files_total: None,
             size: None,
+            request: RequestContext::default(),
         }
     }
 }

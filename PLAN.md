@@ -8,7 +8,7 @@ A full-featured download manager for Windows, modeled on **JDownloader**. It has
 
 ## 0. Current Status (updated 2026-10-25)
 
-**Where we are:** Phase 0 and **all of Phase 1 (1a–1g) are done** (see "Resume here"). **Next up: Phase 2 (browser extension, native host, cookie hand-off).**
+**Where we are:** Phase 0 and **all of Phase 1 (1a–1g) are done**. Phase 2 has started: **2a (per-download referer, user agent and cookies) is done** (see "How 2a works"). **Next up: 2b, the named-pipe server.**
 
 The app works as an HTTP(S), video and gallery download manager that lives in the tray. You can paste, drop or copy links into the LinkGrabber (optionally "ask first", with ignore patterns), review and rename them, pick a video format or gallery options, and start them. Links you downloaded before are flagged. Plain files download segmented and resumable. Pages from sites yt-dlp supports are recognised automatically, and playlists expand into one link per video. Pages yt-dlp doesn't know (or can't read) go to gallery-dl, and a gallery becomes one download into its own folder. yt-dlp, gallery-dl and ffmpeg install themselves on first use. Finished downloads go into History; Windows notifications report finished packages and failures. Settings cover the download folder, limits, clipboard, start with Windows and the tray. Everything survives an app restart.
 
@@ -25,8 +25,9 @@ The app works as an HTTP(S), video and gallery download manager that lives in th
 | 1e – Tools + yt-dlp | `462a74b` | Tool manager (install on first use, SHA-256 verified, versioned folders, rollback, daily yt-dlp auto-update), job-object subprocess runner, yt-dlp resolve/download, playlist expansion, format presets, Tools page |
 | 1f – gallery-dl | `ba04aa8` | gallery-dl from Codeberg (stable) or `gdl-org/builds` (nightly), `-j` resolve into one gallery link, native download with file-count progress, managed per-site archives, flag schema + `--help` self-check, options dialog with impersonation and raw args, migration 4 |
 | 1g – Desktop polish | `804ae23` | Settings page, history + duplicate warnings, tray icon and menu, close to tray, start with Windows (in the tray), Windows notifications with buttons, clipboard "ask first" + ignore patterns, right-click menu and drag-to-reorder in Downloads, migration 5 |
+| 2a – Request context | (uncommitted) | `rdl-core::request` (referer, user agent, browser-shaped cookies with RFC 6265 matching), redirects followed by hand so each hop gets its own cookies, temporary Netscape cookie files for yt-dlp and gallery-dl (checking and downloading), LinkGrabber `add_with_request`, migration 6 |
 
-Tests: 133 Rust tests (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
+Tests: 144 Rust tests (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
 
 ### How 1e works
 
@@ -51,7 +52,17 @@ Tests: 133 Rust tests (unit tests; engine, manager and LinkGrabber suites agains
 - **ffmpeg** is put on gallery-dl's `PATH` when already installed (for ugoira conversion) but never installed just for a gallery.
 - **Testing on Wikimedia:** it answers `429 Too many requests` after a few full-size files; use small ranges and a sleep.
 
-### How 1g works (for picking up Phase 2)
+### How 2a works
+
+- **`RequestContext`** (`rdl-core::request`): `referer`, `user_agent` and `cookies`. A `Cookie` has the fields of the browser's `chrome.cookies.Cookie` (`name`, `value`, `domain`, `hostOnly`, `path`, `secure`, `httpOnly`) except that `expires` is whole Unix seconds (the extension will convert `expirationDate`). `cleaned()` drops a non-http(s) referer, an invalid user agent, and malformed or expired cookies; everything from outside goes through it, and so does every read from the DB.
+- **Storage** (migration 6): `downloads.request_json` and `link_grabber.request_json`, NULL when empty. A download's copy is cleared when it completes, so cookies don't outlive their use (a failed or paused one keeps them for the retry). Playlist entries inherit their playlist link's. The UI never sees cookies: they aren't on `Download` or `GrabbedLink`, and `bindings.ts` is unchanged.
+- **HTTP:** the engine client no longer follows redirects; `http::get` does, up to 10, and picks the headers again for each hop (`RequestContext::headers_for`). So a redirect to another host (or a CDN subdomain the cookie doesn't cover) gets no cookies, as in a browser. The probe and every segment / stream request go through it. The tool manager uses `http::api_client()`, which still follows redirects itself. Too many redirects is `Error::TooManyRedirects`.
+- **Cookie matching:** RFC 6265: host-only cookies match their host exactly, others also subdomains; IPs only exactly; path prefix on `/` boundaries; `Secure` only over https; longer paths first in the header.
+- **Tools:** `CookieFile` writes a Netscape `cookies.txt` (`#HttpOnly_` prefix, empty expiry for session cookies, which both tools read as session cookies) to `%TEMP%dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has ended. Files older than a day left by a crash are swept when the manager starts. yt-dlp gets `--add-header Referer:…`, `--add-header User-Agent:…` and `--cookies`, when resolving and downloading. gallery-dl gets `--user-agent` and `--cookies`, unless the download's own options already set a cookies file / cookies-from-browser or a user agent (`GalleryDlOptions::is_set`); no referer (extractors send the one their site wants).
+- **Entry points:** `LinkGrabber::add_with_request(urls, source, request)` (checking uses the request; confirming copies it onto the downloads) and `NewDownload.request`. Nothing in the app passes a request yet; the pipe server (2b) will.
+- **Tests:** unit tests for matching, cleaning, the header, the file format and its removal; a manager test against a `/private` route (403 without cookie and referer) that also checks a redirect to `localhost` arrives without the cookie and that `request_json` is cleared on completion; a gallery-dl test where the fake tool proves it got the cookie file both when resolving and when downloading through LinkGrabber → Manager.
+
+### How 1g works
 
 - **Settings** (`rdl-core::settings::Settings`): one JSON value under the `app` key (missing fields get defaults; the old `linkgrabber.clipboard_watch` key is read once as a fallback). `AppState::update_settings` validates (limits 1–20 active, 1–32 connections, absolute folder, trimmed patterns), saves and applies: the main queue's `max_active`, `Manager::set_max_connections` (new downloads only), and the LinkGrabber's duplicate lookups. "Start with Windows" goes through `tauri-plugin-autostart` (HKCU `Run` entry with `--minimized`), and `get_settings` reports what Windows actually has. The Settings page saves each change at once and reloads on every visit, since the LinkGrabber's clipboard switch also writes settings.
 - **Default folder:** `AppState::download_dir` (the chosen folder, else the user's Downloads) is used by Add links and LinkGrabber confirm; `system_downloads_dir` is the plain Downloads folder for the Settings page.
@@ -64,7 +75,7 @@ Tests: 133 Rust tests (unit tests; engine, manager and LinkGrabber suites agains
 
 ### Resume here
 
-- **Repo state:** 1g is committed on `main` (`804ae23`) plus this PLAN update. Check `git status -sb` for whether it has been pushed.
+- **Repo state:** 1g is committed and pushed (`804ae23`). 2a is written and tested but not committed yet.
 - **Checked in the app (2026-10-25):**
   - DB migrated to schema 5; the window starts hidden and is shown in setup.
   - Settings: a valid change saves ("Saved"), an invalid one (0 at once) shows the error and the field reverts; a relative folder is refused; the chosen folder is used by Add links.
@@ -77,14 +88,14 @@ Tests: 133 Rust tests (unit tests; engine, manager and LinkGrabber suites agains
   - Downloads: the right-click menu (with Move to bottom disabled on the last package), Move to top, and dragging a package (indicator shown, link overlay not) reordered as expected.
   - Not checked: clicking the tray menu items and the notification buttons (neither can be driven from DevTools); the Mica background.
   - Cleaned up: test downloads (with files), LinkGrabber, history and notifications cleared, settings back to defaults, no `Run` entry. The test overwrote the clipboard (it held no text before) and cleared it afterwards.
-- **Your machine:** yt-dlp 2026.10.21, gallery-dl 1.32.17 and ffmpeg N-128018 are in `%APPDATA%\rusty-downloader\tools`. The app's DB is at schema `20261026000005` with empty downloads, LinkGrabber and history. The notification registration (`HKCU\Software\Classes\AppUserModelId\dev.rustydownloader.app`) stays; it's what the app writes on every start.
-- **Sanity check before starting:** `cargo test --workspace` (133 pass), `pnpm -C ui check`, then `pnpm dev` and open Settings.
+- **Your machine:** yt-dlp 2026.10.21, gallery-dl 1.32.17 and ffmpeg N-128018 are in `%APPDATA%\rusty-downloader\tools`. The app's DB is at schema `20261026000005` (migration 6, `20261027000006`, applies on the next start) with empty downloads, LinkGrabber and history. The notification registration (`HKCU\Software\Classes\AppUserModelId\dev.rustydownloader.app`) stays; it's what the app writes on every start.
+- **Sanity check before starting:** `cargo test --workspace` (144 pass), `pnpm -C ui check`, then `pnpm dev` and open Settings.
 - **Optional, real network:** `RDL_LIVE_DIR=<some folder> cargo test -p rdl-core --test tools_live -- --ignored --nocapture` (about 135 MB of tools on the first run, reused after).
 
 ### Next: Phase 2 – browser integration (suggested order)
 
-1. **Per-download headers and cookies:** store request headers (referer, user agent) and a cookie list per download (migration 6), send them from the HTTP engine, and hand cookies to yt-dlp (`--cookies`) and gallery-dl (`-C`) as temporary Netscape files deleted after the run. Everything below depends on this.
-2. **App side of the bridge:** a named-pipe server (`\\.\pipe\rusty-downloader`) with a small versioned JSON protocol: `add` (links + cookies + referer, to the LinkGrabber or straight to the queue), `ping`, `status`. Reject anything else; the pipe is local but still untrusted input.
+1. ~~**Per-download headers and cookies**~~ done as 2a (see "How 2a works").
+2. **App side of the bridge (2b):** a named-pipe server (`\\.\pipe\rusty-downloader`) with a small versioned JSON protocol: `add` (links + cookies + referer, to the LinkGrabber or straight to the queue), `ping`, `status`. Reject anything else; the pipe is local but still untrusted input.
 3. **`rdl-native-host`:** a tiny exe that speaks Chrome/Firefox native messaging (length-prefixed JSON on stdio) and relays to the pipe, starting the app (`--minimized`) if it isn't running.
 4. **MV3 extension** (`extension/`, Chromium first, then a Firefox manifest): context menus (download link, all links on page, selection, send page to yt-dlp / gallery-dl), download interception by size/extension/site rules with a modifier to bypass, `chrome.cookies` for the link's site, and a popup with connection status and a pause switch.
 5. **Registration:** native-host manifests under `HKCU\Software\Google\Chrome\NativeMessagingHosts`, `…\Microsoft\Edge\…` and `…\Mozilla\NativeMessagingHosts`, written by the NSIS installer and by a dev script (`tools/dev/`), with the extension id pinned via a manifest `key`.
@@ -103,13 +114,17 @@ Tests: 133 Rust tests (unit tests; engine, manager and LinkGrabber suites agains
 - **HTTP engine:**
   - `Retry-After` on 429 isn't honoured (429 uses normal backoff).
   - Expired links (`LinkExpired`) need plugin refresh (Phase 6).
-- **Per-download headers and cookies:** not stored yet. First step of Phase 2.
+- **Request context (2a follow-ups):**
+  - Not tried against a real site that needs sign-in yet; that needs the extension (2d). The cookie file format was checked against what yt-dlp's and gallery-dl's loaders accept, not by a live run.
+  - Cookies sit in the SQLite DB in plain text until the download completes (same protection as the rest of `%APPDATA%`). DPAPI encryption would be the next step if that matters.
+  - No UI shows that a link carries browser cookies, and there's no way to add or clear them by hand (a `cookies.txt` import belongs to Phase 4 accounts).
+  - The yt-dlp cookie file is written back by yt-dlp at exit; harmless, since it's deleted right after.
 - **Windows 10:** the transparent window shows the desktop through it, because Mica is Windows 11 only. A fallback is needed if Windows 10 ever matters.
 - **Tool and plugin kinds:** `http`, `ytdlp` and `gallerydl` downloads run; the rest later.
 - **gallery-dl (1f follow-ups):**
   - Rechecking a link whose handler changes (yt-dlp ↔ gallery-dl) keeps the earlier tool's file and package name.
   - Sites that rate-limit (Wikimedia's 429) fail the download; gallery-dl's own `--sleep-429` isn't set by default.
-  - Resolving always uses default settings, so a gallery that needs cookies or sign-in fails at the LinkGrabber even if its options would fix that.
+  - Resolving uses default settings plus the link's browser cookies (2a), so a gallery that needs sign-in works when it comes from the browser, but not when its own options (a cookies file) would be the fix.
   - Thumbnails are stored (`Gallery.thumbnails`) but not shown: the CSP only allows local images, and many sites block hotlinking.
   - No TLS-fingerprint impersonation: gallery-dl 1.32.17's `--help` has no impersonation flag.
   - No way to force a link to a handler (yt-dlp / gallery-dl / plain) from the LinkGrabber.
@@ -118,7 +133,7 @@ Tests: 133 Rust tests (unit tests; engine, manager and LinkGrabber suites agains
   - Speed is averaged over finished files (5 s window), so it is jumpy for galleries of big files.
   - The nightly install from `gdl-org/builds` was never run for real (its `digest` field was confirmed).
 - **yt-dlp (1e follow-ups):**
-  - No cookies or accounts yet, so sites that demand sign-in (YouTube from some IPs, Vimeo) fail with yt-dlp's message. Needs Phase 2/4 cookie hand-off.
+  - Cookies are passed when a link carries them (2a), but nothing sends links with cookies until the extension exists; sites that demand sign-in (YouTube from some IPs, Vimeo) still fail for pasted links.
   - No subtitles, thumbnails, SponsorBlock, rate-limit or raw-args options yet (§5.2). The `YtDlpOptions` struct is where they go.
   - No progress during post-processing (merge or audio conversion). The row sits at 100% until it finishes.
   - No "use my own yt-dlp.exe" override.

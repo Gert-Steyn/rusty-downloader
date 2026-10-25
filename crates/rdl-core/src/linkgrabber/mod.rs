@@ -15,7 +15,7 @@ mod gallery;
 mod links;
 mod media;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,6 +29,7 @@ use crate::gallerydl::{self, Gallery, GalleryDlOptions};
 use crate::history::{self, PreviousDownload};
 use crate::http::{self, DownloadSpec, filename};
 use crate::manager::{DEFAULT_QUEUE, DownloadKind, Manager, NewDownload, NewPackage, PackageId};
+use crate::request::RequestContext;
 use crate::tools::Tools;
 use crate::ytdlp::{MediaInfo, YtDlpOptions};
 use crate::{Error, Result};
@@ -185,9 +186,15 @@ struct LinkRow {
     dest_dir: Option<String>,
     handler_opts_json: Option<String>,
     info_json: Option<String>,
+    request_json: Option<String>,
 }
 
 impl LinkRow {
+    /// Referer, user agent and cookies the link came with.
+    fn request(&self) -> RequestContext {
+        RequestContext::from_json(self.request_json.as_deref())
+    }
+
     fn kind(&self) -> DownloadKind {
         DownloadKind::parse(self.kind.as_deref().unwrap_or_default())
     }
@@ -264,7 +271,8 @@ impl LinkGrabber {
         .fetch_all(&grabber.inner.pool)
         .await?;
         for row in pending {
-            grabber.spawn_probe(row.id, row.source_url, row.proposed_package);
+            let request = row.request();
+            grabber.spawn_probe(row.id, row.source_url, request, row.proposed_package);
         }
         Ok(grabber)
     }
@@ -291,6 +299,21 @@ impl LinkGrabber {
 
     /// Stage links, skipping ones already here, and start checking them.
     pub async fn add(&self, urls: Vec<Url>, source: LinkSource) -> Result<AddOutcome> {
+        self.add_with_request(urls, source, RequestContext::default())
+            .await
+    }
+
+    /// [`add`](Self::add), for links that come with what the browser would
+    /// send (referer, user agent, cookies). Checking them uses it, and so
+    /// does downloading them.
+    pub async fn add_with_request(
+        &self,
+        urls: Vec<Url>,
+        source: LinkSource,
+        request: RequestContext,
+    ) -> Result<AddOutcome> {
+        let request = request.cleaned();
+        let request_json = request.to_json()?;
         let pool = &self.inner.pool;
         let existing: HashSet<String> = sqlx::query_scalar("SELECT source_url FROM link_grabber")
             .fetch_all(pool)
@@ -310,10 +333,12 @@ impl LinkGrabber {
         let mut tx = pool.begin().await?;
         for url in &fresh {
             let row: LinkRow = sqlx::query_as(
-                "INSERT INTO link_grabber (source_url, kind, proposed_package) VALUES (?, 'http', ?) RETURNING *",
+                "INSERT INTO link_grabber (source_url, kind, proposed_package, request_json)
+                 VALUES (?, 'http', ?, ?) RETURNING *",
             )
             .bind(url.as_str())
             .bind(&package)
+            .bind(request_json.as_deref())
             .fetch_one(&mut *tx)
             .await?;
             added.push(row.into_link());
@@ -332,7 +357,12 @@ impl LinkGrabber {
                 .ok();
         }
         for link in &added {
-            self.spawn_probe(link.id, link.url.clone(), Some(link.package.clone()));
+            self.spawn_probe(
+                link.id,
+                link.url.clone(),
+                request.clone(),
+                Some(link.package.clone()),
+            );
         }
         Ok(AddOutcome { added, duplicates })
     }
@@ -459,7 +489,8 @@ impl LinkGrabber {
     pub async fn recheck(&self, ids: &[LinkId]) -> Result<()> {
         for id in ids {
             if let Some(row) = self.row(*id).await? {
-                self.spawn_probe(row.id, row.source_url, None);
+                let request = row.request();
+                self.spawn_probe(row.id, row.source_url, request, None);
             }
         }
         Ok(())
@@ -481,6 +512,7 @@ impl LinkGrabber {
             .into_iter()
             .filter(|l| wanted.contains(&l.id))
             .collect();
+        let requests = self.requests(ids).await?;
 
         // Group by (package, folder), keeping the order packages first appear.
         let mut groups: Vec<((String, PathBuf), Vec<GrabbedLink>)> = Vec::new();
@@ -499,7 +531,13 @@ impl LinkGrabber {
 
         let mut packages = Vec::with_capacity(groups.len());
         for ((name, dest_dir), members) in groups {
-            let downloads = members.iter().filter_map(new_download).collect();
+            let downloads = members
+                .iter()
+                .filter_map(|link| {
+                    let request = requests.get(&link.id).cloned().unwrap_or_default();
+                    new_download(link, request)
+                })
+                .collect();
             let package = manager
                 .add_package(NewPackage {
                     name,
@@ -513,6 +551,22 @@ impl LinkGrabber {
             self.remove(&member_ids).await?;
         }
         Ok(packages)
+    }
+
+    /// The request contexts of those of `ids` that have one.
+    async fn requests(&self, ids: &[LinkId]) -> Result<HashMap<LinkId, RequestContext>> {
+        let mut found = HashMap::new();
+        for id in ids {
+            let json: Option<Option<String>> =
+                sqlx::query_scalar("SELECT request_json FROM link_grabber WHERE id = ?")
+                    .bind(id)
+                    .fetch_optional(&self.inner.pool)
+                    .await?;
+            if let Some(Some(json)) = json {
+                found.insert(*id, RequestContext::from_json(Some(&json)));
+            }
+        }
+        Ok(found)
     }
 
     async fn row(&self, id: LinkId) -> Result<Option<LinkRow>> {
@@ -547,18 +601,29 @@ impl LinkGrabber {
     /// Probe in the background. `default_package` is the package name the link
     /// got when added; only that name may be replaced by an archive-set name,
     /// so a package the user picked is never overwritten.
-    fn spawn_probe(&self, id: LinkId, url: String, default_package: Option<String>) {
+    fn spawn_probe(
+        &self,
+        id: LinkId,
+        url: String,
+        request: RequestContext,
+        default_package: Option<String>,
+    ) {
         let inner = Arc::clone(&self.inner);
         tokio::spawn(async move {
-            if let Err(e) = probe_link(&inner, id, &url, default_package.as_deref()).await {
+            let package = default_package.as_deref();
+            if let Err(e) = probe_link(&inner, id, &url, &request, package).await {
                 tracing::warn!(link = id, error = %e, "could not record link check");
             }
         });
     }
 }
 
-fn new_download(link: &GrabbedLink) -> Option<NewDownload> {
+fn new_download(link: &GrabbedLink, request: RequestContext) -> Option<NewDownload> {
     let url = Url::parse(&link.url).ok()?;
+    let url_only = NewDownload {
+        request,
+        ..NewDownload::new(url)
+    };
     match link.kind {
         DownloadKind::Ytdlp => {}
         DownloadKind::Gallerydl => {
@@ -573,13 +638,13 @@ fn new_download(link: &GrabbedLink) -> Option<NewDownload> {
                 files_total: gallery.known_total().filter(|_| whole),
                 size: link.size.filter(|_| whole),
                 gallerydl: Some(options),
-                ..NewDownload::new(url)
+                ..url_only
             });
         }
         DownloadKind::Http => {
             return Some(NewDownload {
                 filename: link.filename.clone(),
-                ..NewDownload::new(url)
+                ..url_only
             });
         }
     }
@@ -595,7 +660,7 @@ fn new_download(link: &GrabbedLink) -> Option<NewDownload> {
         kind: DownloadKind::Ytdlp,
         ytdlp: Some(link.ytdlp.clone().unwrap_or_default()),
         title,
-        ..NewDownload::new(url)
+        ..url_only
     })
 }
 
@@ -621,6 +686,7 @@ async fn probe_link(
     inner: &Inner,
     id: LinkId,
     url: &str,
+    request: &RequestContext,
     default_package: Option<&str>,
 ) -> Result<()> {
     let _permit = Arc::clone(&inner.probes)
@@ -640,7 +706,10 @@ async fn probe_link(
 
     let parsed = Url::parse(url).map_err(|e| Error::InvalidUrl(e.to_string()));
     let result = match &parsed {
-        Ok(parsed) => http::probe(&inner.client, &DownloadSpec::new(parsed.clone())).await,
+        Ok(parsed) => {
+            let spec = DownloadSpec::with_request(parsed.clone(), request.clone());
+            http::probe(&inner.client, &spec).await
+        }
         Err(e) => Err(Error::InvalidUrl(e.to_string())),
     };
     if let Ok(parsed) = &parsed
@@ -652,7 +721,7 @@ async fn probe_link(
         // other one succeeds.
         let mut failure: Option<(DownloadKind, String)> = None;
         let mut generic = None;
-        match media::lookup(inner, parsed).await {
+        match media::lookup(inner, parsed, request).await {
             Ok(media::Lookup::Found(found)) if media::is_generic(&found) => generic = Some(found),
             Ok(media::Lookup::Found(found)) => {
                 match media::record(inner, id, found, default_package).await? {
@@ -666,7 +735,7 @@ async fn probe_link(
             Ok(media::Lookup::Failed(message)) => failure = Some((DownloadKind::Ytdlp, message)),
             Err(e) => tracing::warn!(link = id, error = %e, "yt-dlp check failed"),
         }
-        match gallery::resolve_link(inner, id, parsed, default_package).await {
+        match gallery::resolve_link(inner, id, parsed, request, default_package).await {
             Ok(media::Verdict::Handled) => return updated(inner, id).await,
             Ok(media::Verdict::NotMedia) => {}
             Ok(media::Verdict::Failed(message)) => {

@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::process::{self, Line, Running};
+use crate::request::{CookieFile, RequestContext};
 use crate::{Error, Result};
 
 pub use options::{FormatPreset, YtDlpOptions};
@@ -48,9 +49,19 @@ const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Look up what `url` points to. A playlist comes back flat: its entries have
 /// titles and URLs but no formats.
-pub async fn resolve(exe: &Path, url: &Url, cancel: &CancellationToken) -> Result<Media> {
+pub async fn resolve(
+    exe: &Path,
+    url: &Url,
+    request: &RequestContext,
+    cancel: &CancellationToken,
+) -> Result<Media> {
+    let cookies = CookieFile::create(request)?;
     let mut cmd = process::command(exe);
     cmd.args(base_args())
+        .args(request_args(
+            request,
+            cookies.as_ref().map(CookieFile::path),
+        ))
         .args(["-J", "--flat-playlist", "--"])
         .arg(url.as_str());
     let out = process::output(cmd, RESOLVE_TIMEOUT, cancel).await?;
@@ -58,6 +69,22 @@ pub async fn resolve(exe: &Path, url: &Url, cancel: &CancellationToken) -> Resul
         return Err(Error::Tool(out.error_message()));
     }
     parse::media(&out.stdout)
+}
+
+/// Referer, user agent and cookies (a `cookies.txt` at `cookies`) as yt-dlp
+/// options.
+fn request_args(request: &RequestContext, cookies: Option<&Path>) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(referer) = &request.referer {
+        args.extend(["--add-header".into(), format!("Referer:{referer}")]);
+    }
+    if let Some(ua) = &request.user_agent {
+        args.extend(["--add-header".into(), format!("User-Agent:{ua}")]);
+    }
+    if let Some(path) = cookies {
+        args.extend(["--cookies".into(), path.to_string_lossy().into_owned()]);
+    }
+    args
 }
 
 /// What to download and where.
@@ -71,6 +98,10 @@ pub struct RunSpec {
     /// Output name without extension; `None` uses title and id.
     pub name: Option<String>,
     pub options: YtDlpOptions,
+    /// Referer, user agent and cookies from the browser.
+    pub request: RequestContext,
+    /// The cookies written out for this run; [`download`] fills it in.
+    pub cookie_file: Option<PathBuf>,
 }
 
 impl RunSpec {
@@ -108,6 +139,7 @@ impl RunSpec {
             args.push(dir.to_string_lossy().into_owned());
         }
         args.extend(self.options.format_args());
+        args.extend(request_args(&self.request, self.cookie_file.as_deref()));
         args.push("--".into());
         args.push(self.url.to_string());
         args
@@ -143,8 +175,10 @@ pub async fn download(
 ) -> Result<RunOutcome> {
     // yt-dlp reports paths relative to its working folder, so a relative
     // destination (even a drive-relative `C:dir`) would be resolved twice.
+    let cookies = CookieFile::create(&spec.request)?;
     let spec = &RunSpec {
         dest_dir: std::path::absolute(&spec.dest_dir)?,
+        cookie_file: cookies.as_ref().map(|c| c.path().to_owned()),
         ..spec.clone()
     };
     tokio::fs::create_dir_all(&spec.dest_dir).await?;
@@ -355,8 +389,11 @@ mod tests {
             dest_dir: r"C:\dl".into(),
             name: Some("100% Fun.mp4".into()),
             options: YtDlpOptions::default(),
+            request: RequestContext::default(),
+            cookie_file: None,
         };
         let args = spec.args();
+        assert!(!args.iter().any(|a| a == "--cookies" || a == "--add-header"));
         let after = |flag: &str| {
             let i = args.iter().position(|a| a == flag).unwrap();
             args[i + 1].clone()
@@ -365,6 +402,30 @@ mod tests {
         assert_eq!(after("-P"), r"C:\dl");
         assert_eq!(after("--ffmpeg-location"), r"C:\tools\ffmpeg");
         assert_eq!(args.last().unwrap(), "https://example.com/watch?v=1");
+        assert_eq!(args[args.len() - 2], "--");
+    }
+
+    #[test]
+    fn args_pass_the_browser_request() {
+        let spec = RunSpec {
+            exe: "yt-dlp.exe".into(),
+            ffmpeg_dir: None,
+            url: Url::parse("https://example.com/watch?v=1").unwrap(),
+            dest_dir: r"C:\dl".into(),
+            name: None,
+            options: YtDlpOptions::default(),
+            request: RequestContext {
+                referer: Some("https://example.com/page".into()),
+                user_agent: Some("TestBrowser/1".into()),
+                cookies: Vec::new(),
+            },
+            cookie_file: Some(r"C:\tmp\c.txt".into()),
+        };
+        let args = spec.args();
+        let joined = args.join(" ");
+        assert!(joined.contains("--add-header Referer:https://example.com/page"));
+        assert!(joined.contains("--add-header User-Agent:TestBrowser/1"));
+        assert!(joined.contains(r"--cookies C:\tmp\c.txt"));
         assert_eq!(args[args.len() - 2], "--");
     }
 

@@ -11,6 +11,7 @@ use super::types::{
 use crate::Result;
 use crate::db::Pool;
 use crate::http::Segment;
+use crate::request::RequestContext;
 
 /// A download row with the fields the job runner needs beyond [`Download`].
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -31,6 +32,7 @@ pub(crate) struct DownloadRow {
     pub title: Option<String>,
     pub files_done: Option<i64>,
     pub files_total: Option<i64>,
+    pub request_json: Option<String>,
 }
 
 impl DownloadRow {
@@ -54,6 +56,11 @@ impl DownloadRow {
 
     pub fn gallerydl_options(&self) -> Option<crate::gallerydl::GalleryDlOptions> {
         self.options(DownloadKind::Gallerydl)
+    }
+
+    /// Referer, user agent and cookies to send.
+    pub fn request(&self) -> RequestContext {
+        RequestContext::from_json(self.request_json.as_deref())
     }
 
     pub fn files(&self) -> Option<FileCount> {
@@ -144,8 +151,8 @@ pub(crate) async fn insert_package(pool: &Pool, new: &NewPackage) -> Result<Pack
         };
         sqlx::query(
             "INSERT INTO downloads (package_id, kind, source_url, filename, handler_opts_json, title,
-                 files_total, size, position)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 files_total, size, request_json, position)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id)
         .bind(download.kind.as_str())
@@ -155,6 +162,7 @@ pub(crate) async fn insert_package(pool: &Pool, new: &NewPackage) -> Result<Pack
         .bind(download.title.as_deref())
         .bind(download.files_total.map(i64::from))
         .bind(download.size.map(|s| s as i64))
+        .bind(download.request.clone().cleaned().to_json()?)
         .bind(position as i64)
         .execute(&mut *tx)
         .await?;
@@ -448,7 +456,7 @@ pub(crate) async fn mark_completed(pool: &Pool, id: DownloadId, size: u64) -> Re
         .await?;
     sqlx::query(
         "UPDATE downloads SET status = 'completed', error = NULL, size = ?1, downloaded = ?1,
-             finished_at = CAST(unixepoch('subsec') * 1000 AS INTEGER)
+             request_json = NULL, finished_at = CAST(unixepoch('subsec') * 1000 AS INTEGER)
          WHERE id = ?2",
     )
     .bind(size as i64)

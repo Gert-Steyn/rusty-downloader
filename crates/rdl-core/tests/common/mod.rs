@@ -6,7 +6,7 @@
 
 use std::convert::Infallible;
 use std::io;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -28,6 +28,9 @@ pub struct Server {
     pub etag: Mutex<String>,
     pub bytes_served: AtomicU64,
     pub flaky_drops_left: AtomicUsize,
+    pub port: AtomicU16,
+    /// `Cookie` header of every request to `/private` (`None`: none sent).
+    pub private_cookies: Mutex<Vec<Option<String>>>,
 }
 
 impl Server {
@@ -52,7 +55,9 @@ enum Mode {
 }
 
 /// Routes: `/file` `/slow` `/flaky` `/named/{name}` (ranged, same bytes and ETag), `/plain`
-/// (ignores Range), `/chunked` (no length), `/redirect` → `/file`, `/gone` (410).
+/// (ignores Range), `/chunked` (no length), `/redirect` → `/file`, `/gone` (410),
+/// `/private` (like `/file`, but 403 without cookie `sid=ok` and a referer),
+/// `/to-localhost` → `/private` on `localhost` instead of 127.0.0.1.
 pub async fn spawn_server() -> (Url, Arc<Server>) {
     let mut data = vec![0u8; SIZE];
     fastrand::Rng::with_seed(42).fill(&mut data);
@@ -61,6 +66,8 @@ pub async fn spawn_server() -> (Url, Arc<Server>) {
         etag: Mutex::new("\"v1\"".into()),
         bytes_served: AtomicU64::new(0),
         flaky_drops_left: AtomicUsize::new(3),
+        port: AtomicU16::new(0),
+        private_cookies: Mutex::new(Vec::new()),
     });
 
     let app = Router::new()
@@ -72,10 +79,19 @@ pub async fn spawn_server() -> (Url, Arc<Server>) {
         .route("/chunked", get(chunked))
         .route("/redirect", get(|| async { Redirect::temporary("/file") }))
         .route("/gone", get(|| async { StatusCode::GONE }))
+        .route("/private", get(private))
+        .route(
+            "/to-localhost",
+            get(|State(s): State<Arc<Server>>| async move {
+                let port = s.port.load(Ordering::SeqCst);
+                Redirect::temporary(&format!("http://localhost:{port}/private"))
+            }),
+        )
         .with_state(Arc::clone(&server));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    server.port.store(addr.port(), Ordering::SeqCst);
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (Url::parse(&format!("http://{addr}/")).unwrap(), server)
 }
@@ -171,6 +187,19 @@ async fn ranged(State(server): State<Arc<Server>>, headers: HeaderMap, mode: Mod
         )
             .into_response(),
     }
+}
+
+async fn private(State(server): State<Arc<Server>>, headers: HeaderMap) -> Response {
+    let cookie = headers
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    server.private_cookies.lock().unwrap().push(cookie.clone());
+    let signed_in = cookie.is_some_and(|c| c.split("; ").any(|c| c == "sid=ok"));
+    if !signed_in || !headers.contains_key(header::REFERER) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    ranged(State(server), headers, Mode::Normal).await
 }
 
 /// Ignores Range entirely.

@@ -36,6 +36,9 @@ pub enum Error {
     #[error("the server did not honour the byte-range request")]
     RangeNotHonored,
 
+    #[error("too many redirects (last one to {0})")]
+    TooManyRedirects(String),
+
     #[error("connection closed before the data was complete")]
     Incomplete,
 

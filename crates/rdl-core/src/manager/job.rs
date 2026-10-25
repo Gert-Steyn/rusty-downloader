@@ -83,7 +83,7 @@ async fn execute(
         .ok_or_else(|| Error::NotFound(format!("package {}", row.package_id)))?;
     let url = Url::parse(&row.source_url)
         .map_err(|e| Error::InvalidUrl(format!("{}: {e}", row.source_url)))?;
-    let spec = DownloadSpec::new(url);
+    let spec = DownloadSpec::with_request(url, row.request());
 
     let probe = tokio::select! {
         _ = cancel.cancelled() => return Ok(Outcome::Paused),

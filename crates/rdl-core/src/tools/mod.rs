@@ -297,7 +297,7 @@ impl Tools {
         let (events, _) = broadcast::channel(64);
         let tools = Self {
             inner: Arc::new(Inner {
-                client: crate::http::client(None)?,
+                client: crate::http::api_client()?,
                 pool,
                 dir,
                 config,

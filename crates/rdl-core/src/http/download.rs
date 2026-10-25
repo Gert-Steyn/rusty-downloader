@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
-use reqwest::header::{ACCEPT_ENCODING, CONTENT_RANGE, IF_RANGE, RANGE};
+use reqwest::header::{ACCEPT_ENCODING, CONTENT_RANGE, HeaderMap, HeaderValue, IF_RANGE, RANGE};
 use reqwest::{Client, StatusCode};
 use tokio::fs::{self, File, OpenOptions};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
@@ -307,18 +307,19 @@ async fn fetch_range(shared: &Shared, idx: usize) -> Result<()> {
         (seg.next_offset(), seg.end)
     };
 
-    let mut request = job
-        .client
-        .get(job.probe.final_url.clone())
-        .headers(job.spec.headers.clone())
-        .header(RANGE, format!("bytes={offset}-{end}"))
-        .header(ACCEPT_ENCODING, "identity");
-    if let Some(validator) = job.probe.validator() {
-        request = request.header(IF_RANGE, validator);
+    let mut extra = identity();
+    let range = HeaderValue::from_str(&format!("bytes={offset}-{end}")).expect("digits are valid");
+    extra.insert(RANGE, range);
+    if let Some(validator) = job
+        .probe
+        .validator()
+        .and_then(|v| HeaderValue::from_str(v).ok())
+    {
+        extra.insert(IF_RANGE, validator);
     }
     let response = tokio::select! {
         _ = job.cancel.cancelled() => return Ok(()),
-        r = request.send() => r?,
+        r = super::get(&job.client, &job.spec, &job.probe.final_url, &extra) => r?,
     };
 
     let status = response.status();
@@ -371,6 +372,13 @@ async fn fetch_range(shared: &Shared, idx: usize) -> Result<()> {
     result
 }
 
+/// Ask for the bytes as stored, never compressed.
+fn identity() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
+    headers
+}
+
 fn backoff(base: Duration, attempt: u32) -> Duration {
     let exp = base.saturating_mul(1 << attempt.saturating_sub(1).min(6));
     let capped = exp.min(Duration::from_secs(30));
@@ -400,14 +408,10 @@ async fn single_stream(job: Job, progress: &watch::Sender<Progress>) -> Result<O
 }
 
 async fn stream_once(job: &Job, progress: &watch::Sender<Progress>) -> Result<Outcome> {
+    let extra = identity();
     let response = tokio::select! {
         _ = job.cancel.cancelled() => return Ok(Outcome::Paused),
-        r = job
-            .client
-            .get(job.probe.final_url.clone())
-            .headers(job.spec.headers.clone())
-            .header(ACCEPT_ENCODING, "identity")
-            .send() => r?,
+        r = super::get(&job.client, &job.spec, &job.probe.final_url, &extra) => r?,
     };
     check_status(response.status(), response.url())?;
 

@@ -11,6 +11,7 @@ use url::Url;
 use super::{Availability, GrabberEvent, Inner, LinkId, LinkRow, LinkSource};
 use crate::http::{ProbeResult, filename};
 use crate::manager::DownloadKind;
+use crate::request::RequestContext;
 use crate::tools::ToolName;
 
 use crate::ytdlp::{self, Media, MediaInfo, YtDlpOptions};
@@ -88,7 +89,7 @@ pub(super) enum Lookup {
 }
 
 /// Ask yt-dlp about `url`. Installs yt-dlp on first use.
-pub(super) async fn lookup(inner: &Inner, url: &Url) -> Result<Lookup> {
+pub(super) async fn lookup(inner: &Inner, url: &Url, request: &RequestContext) -> Result<Lookup> {
     let Some(tools) = &inner.tools else {
         return Ok(Lookup::NotMedia);
     };
@@ -99,7 +100,7 @@ pub(super) async fn lookup(inner: &Inner, url: &Url) -> Result<Lookup> {
             return Ok(Lookup::NotMedia);
         }
     };
-    match ytdlp::resolve(&exe, url, &CancellationToken::new()).await {
+    match ytdlp::resolve(&exe, url, request, &CancellationToken::new()).await {
         Ok(media) => Ok(Lookup::Found(media)),
         Err(Error::Tool(message)) if is_unsupported(&message) => Ok(Lookup::NotMedia),
         Err(Error::Tool(message)) => Ok(Lookup::Failed(message)),
@@ -257,8 +258,9 @@ async fn expand_playlist(
         };
         let link: LinkRow = sqlx::query_as(
             "INSERT INTO link_grabber
-                 (source_url, kind, filename, availability, proposed_package, dest_dir, handler_opts_json, info_json)
-             VALUES (?, 'ytdlp', ?, 'online', ?, ?, ?, ?) RETURNING *",
+                 (source_url, kind, filename, availability, proposed_package, dest_dir, handler_opts_json,
+                  info_json, request_json)
+             VALUES (?, 'ytdlp', ?, 'online', ?, ?, ?, ?, ?) RETURNING *",
         )
         .bind(url.as_str())
         .bind(title.as_deref().map(filename::sanitize))
@@ -266,6 +268,8 @@ async fn expand_playlist(
         .bind(original.dest_dir.as_deref())
         .bind(&options)
         .bind(serde_json::to_string(&info)?)
+        // Entries are on the same site and need the same cookies.
+        .bind(original.request_json.as_deref())
         .fetch_one(&mut *tx)
         .await?;
         added.push(link.into_link());

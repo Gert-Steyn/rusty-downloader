@@ -10,6 +10,7 @@ use super::{Inner, LinkId};
 use crate::gallerydl::{self, Gallery, GalleryDlOptions};
 use crate::http::filename;
 use crate::manager::DownloadKind;
+use crate::request::RequestContext;
 use crate::tools::ToolName;
 use crate::{Error, Result};
 
@@ -19,6 +20,7 @@ pub(super) async fn resolve_link(
     inner: &Inner,
     id: LinkId,
     url: &Url,
+    request: &RequestContext,
     default_package: Option<&str>,
 ) -> Result<Verdict> {
     let Some(tools) = &inner.tools else {
@@ -31,7 +33,7 @@ pub(super) async fn resolve_link(
             return Ok(Verdict::NotMedia);
         }
     };
-    let resolved = match gallerydl::resolve(&exe, url, &CancellationToken::new()).await {
+    let resolved = match gallerydl::resolve(&exe, url, request, &CancellationToken::new()).await {
         Ok(r) => r,
         Err(Error::Tool(message)) if gallerydl::is_unsupported(&message) => {
             return Ok(Verdict::NotMedia);

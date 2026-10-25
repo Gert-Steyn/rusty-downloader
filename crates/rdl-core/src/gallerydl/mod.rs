@@ -20,6 +20,7 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::process::{self, Line, Running};
+use crate::request::{CookieFile, RequestContext};
 use crate::{Error, Result};
 
 pub use options::{
@@ -39,9 +40,21 @@ const NO_EXTRACTOR: i32 = 64;
 /// Look up what `url` holds. An unsupported URL is an `Error::Tool` that
 /// [`is_unsupported`] recognises. A gallery that takes too long to list
 /// comes back `partial`, with whatever is known.
-pub async fn resolve(exe: &Path, url: &Url, cancel: &CancellationToken) -> Result<Resolved> {
+pub async fn resolve(
+    exe: &Path,
+    url: &Url,
+    request: &RequestContext,
+    cancel: &CancellationToken,
+) -> Result<Resolved> {
+    let cookies = CookieFile::create(request)?;
     let mut cmd = process::command(exe);
-    cmd.args(["--config-ignore", "-j", "--range"])
+    cmd.arg("--config-ignore")
+        .args(request_args(
+            request,
+            cookies.as_ref().map(CookieFile::path),
+            &GalleryDlOptions::default(),
+        ))
+        .args(["-j", "--range"])
         .arg(format!("1-{RESOLVE_LIMIT}"))
         .arg("--")
         .arg(url.as_str());
@@ -110,6 +123,30 @@ pub async fn supported_flags(exe: &Path) -> Result<Arc<HashSet<String>>> {
     Ok(flags)
 }
 
+/// The browser's user agent and cookies (a `cookies.txt` at `cookies`) as
+/// gallery-dl options, unless `options` already pick their own. The referer
+/// isn't passed: extractors set the one their site expects.
+fn request_args(
+    request: &RequestContext,
+    cookies: Option<&Path>,
+    options: &GalleryDlOptions,
+) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(ua) = &request.user_agent
+        && !options.is_set("user-agent")
+        && !options.is_set("browser-user-agent")
+    {
+        args.extend(["--user-agent".into(), ua.clone()]);
+    }
+    if let Some(path) = cookies
+        && !options.is_set("cookies")
+        && !options.is_set("cookies-from-browser")
+    {
+        args.extend(["--cookies".into(), path.to_string_lossy().into_owned()]);
+    }
+    args
+}
+
 /// What to download and where.
 #[derive(Debug, Clone)]
 pub struct RunSpec {
@@ -124,6 +161,10 @@ pub struct RunSpec {
     pub options: GalleryDlOptions,
     /// Flags the installed version knows; others are dropped.
     pub available: Option<Arc<HashSet<String>>>,
+    /// User agent and cookies from the browser.
+    pub request: RequestContext,
+    /// The cookies written out for this run; [`download`] fills it in.
+    pub cookie_file: Option<PathBuf>,
 }
 
 impl RunSpec {
@@ -142,6 +183,11 @@ impl RunSpec {
             self.options
                 .flag_args(schema(), self.available.as_deref())?,
         );
+        args.extend(request_args(
+            &self.request,
+            self.cookie_file.as_deref(),
+            &self.options,
+        ));
         args.push("--".into());
         args.push(self.url.to_string());
         Ok(args)
@@ -174,8 +220,10 @@ pub async fn download(
     events: &mpsc::UnboundedSender<RunEvent>,
     cancel: &CancellationToken,
 ) -> Result<RunOutcome> {
+    let cookies = CookieFile::create(&spec.request)?;
     let spec = &RunSpec {
         dir: std::path::absolute(&spec.dir)?,
+        cookie_file: cookies.as_ref().map(|c| c.path().to_owned()),
         ..spec.clone()
     };
     tokio::fs::create_dir_all(&spec.dir).await?;
@@ -307,8 +355,11 @@ mod tests {
             archive: Some(r"C:\data\archives\gallery-dl\imgur.com.sqlite3".into()),
             options: GalleryDlOptions::default(),
             available: None,
+            request: RequestContext::default(),
+            cookie_file: None,
         };
         let args = spec.args().unwrap();
+        assert!(!args.iter().any(|a| a == "--cookies" || a == "--user-agent"));
         let after = |args: &[String], flag: &str| {
             let i = args.iter().position(|a| a == flag).unwrap();
             args[i + 1].clone()
@@ -326,6 +377,39 @@ mod tests {
                 .iter()
                 .any(|a| a == "--download-archive" || a == "--config-ignore")
         );
+    }
+
+    #[test]
+    fn browser_cookies_and_agent_yield_to_chosen_options() {
+        let request = RequestContext {
+            referer: Some("https://example.com/page".into()),
+            user_agent: Some("TestBrowser/1".into()),
+            cookies: Vec::new(),
+        };
+        let cookies = Path::new(r"C:\tmp\c.txt");
+        let mut options = GalleryDlOptions::default();
+        assert_eq!(
+            request_args(&request, Some(cookies), &options),
+            [
+                "--user-agent",
+                "TestBrowser/1",
+                "--cookies",
+                r"C:\tmp\c.txt"
+            ]
+        );
+        options
+            .flags
+            .insert("cookies".into(), r"D:\mine.txt".into());
+        options
+            .flags
+            .insert("browser-user-agent".into(), "true".into());
+        assert!(request_args(&request, Some(cookies), &options).is_empty());
+        // Switched off or blank counts as not chosen.
+        options.flags.insert("cookies".into(), " ".into());
+        options
+            .flags
+            .insert("browser-user-agent".into(), "false".into());
+        assert_eq!(request_args(&request, Some(cookies), &options).len(), 4);
     }
 
     #[test]

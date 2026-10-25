@@ -116,16 +116,21 @@ impl Default for GalleryDlOptions {
 }
 
 impl GalleryDlOptions {
+    /// Whether the flag with schema id `id` has a value (a switch: is on).
+    pub fn is_set(&self, id: &str) -> bool {
+        self.flags
+            .get(id)
+            .is_some_and(|v| !v.trim().is_empty() && v != "false")
+    }
+
     /// Whether these settings may fetch fewer files than resolving counted:
     /// any Selection option set (`--range`, filters, size and date limits),
     /// or raw arguments, which could hold anything.
     pub fn narrows(&self, schema: &FlagSchema) -> bool {
         let selection = schema.groups.iter().filter(|g| g.id == "selection");
-        let set = selection.flat_map(|g| &g.flags).any(|def| {
-            self.flags
-                .get(&def.id)
-                .is_some_and(|v| !v.trim().is_empty() && v != "false")
-        });
+        let set = selection
+            .flat_map(|g| &g.flags)
+            .any(|def| self.is_set(&def.id));
         set || self
             .raw_args
             .as_deref()

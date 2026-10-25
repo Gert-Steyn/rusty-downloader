@@ -90,6 +90,8 @@ pub(super) async fn execute(
         dir: dir.clone(),
         options: row.gallerydl_options().unwrap_or_default(),
         available,
+        request: row.request(),
+        cookie_file: None,
     };
     let (tx, rx) = mpsc::unbounded_channel();
     let total = row.files_total.map(|t| t as u32);

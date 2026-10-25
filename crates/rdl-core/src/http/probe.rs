@@ -4,26 +4,32 @@
 
 use reqwest::header::{
     ACCEPT_ENCODING, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG,
-    HeaderMap, LAST_MODIFIED, RANGE,
+    HeaderMap, HeaderValue, LAST_MODIFIED, RANGE,
 };
 use reqwest::{Client, StatusCode, Url};
 
 use super::{check_status, filename, parse_content_range};
 use crate::Result;
+use crate::request::RequestContext;
 
-/// What to fetch and with which extra headers (cookies, referer, auth).
+/// What to fetch, and what the browser would send with it (referer, user
+/// agent, cookies).
 #[derive(Debug, Clone)]
 pub struct DownloadSpec {
     pub url: Url,
-    pub headers: HeaderMap,
+    pub request: RequestContext,
 }
 
 impl DownloadSpec {
     pub fn new(url: Url) -> Self {
         Self {
             url,
-            headers: HeaderMap::new(),
+            request: RequestContext::default(),
         }
+    }
+
+    pub fn with_request(url: Url, request: RequestContext) -> Self {
+        Self { url, request }
     }
 }
 
@@ -57,13 +63,10 @@ impl ProbeResult {
 }
 
 pub async fn probe(client: &Client, spec: &DownloadSpec) -> Result<ProbeResult> {
-    let response = client
-        .get(spec.url.clone())
-        .headers(spec.headers.clone())
-        .header(RANGE, "bytes=0-0")
-        .header(ACCEPT_ENCODING, "identity")
-        .send()
-        .await?;
+    let mut extra = HeaderMap::new();
+    extra.insert(RANGE, HeaderValue::from_static("bytes=0-0"));
+    extra.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
+    let response = super::get(client, spec, &spec.url, &extra).await?;
     let status = response.status();
     let final_url = response.url().clone();
     check_status(status, &final_url)?;
