@@ -25,7 +25,8 @@ const SOURCE_LABEL: Record<LinkSource, string> = {
 	manual: '',
 	clipboard: ' from the clipboard',
 	drop: ' from the drop',
-	playlist: ' from the playlist'
+	playlist: ' from the playlist',
+	browser: ' from the browser'
 };
 
 function plural(n: number, word: string) {

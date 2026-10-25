@@ -8,7 +8,7 @@ A full-featured download manager for Windows, modeled on **JDownloader**. It has
 
 ## 0. Current Status (updated 2026-10-25)
 
-**Where we are:** Phase 0 and **all of Phase 1 (1a–1g) are done**. Phase 2 has started: **2a (per-download referer, user agent and cookies) is done** (see "How 2a works"). **Next up: 2b, the named-pipe server.**
+**Where we are:** Phase 0 and **all of Phase 1 (1a–1g) are done**. Phase 2 has started: **2a (per-download referer, user agent and cookies) and 2b (the app's named-pipe server) are done** (see "How 2a works" and "How 2b works"). **Next up: 2c, `rdl-native-host`.**
 
 The app works as an HTTP(S), video and gallery download manager that lives in the tray. You can paste, drop or copy links into the LinkGrabber (optionally "ask first", with ignore patterns), review and rename them, pick a video format or gallery options, and start them. Links you downloaded before are flagged. Plain files download segmented and resumable. Pages from sites yt-dlp supports are recognised automatically, and playlists expand into one link per video. Pages yt-dlp doesn't know (or can't read) go to gallery-dl, and a gallery becomes one download into its own folder. yt-dlp, gallery-dl and ffmpeg install themselves on first use. Finished downloads go into History; Windows notifications report finished packages and failures. Settings cover the download folder, limits, clipboard, start with Windows and the tray. Everything survives an app restart.
 
@@ -26,8 +26,9 @@ The app works as an HTTP(S), video and gallery download manager that lives in th
 | 1f – gallery-dl | `ba04aa8` | gallery-dl from Codeberg (stable) or `gdl-org/builds` (nightly), `-j` resolve into one gallery link, native download with file-count progress, managed per-site archives, flag schema + `--help` self-check, options dialog with impersonation and raw args, migration 4 |
 | 1g – Desktop polish | `804ae23` | Settings page, history + duplicate warnings, tray icon and menu, close to tray, start with Windows (in the tray), Windows notifications with buttons, clipboard "ask first" + ignore patterns, right-click menu and drag-to-reorder in Downloads, migration 5 |
 | 2a – Request context | `ab1cc74` | `rdl-core::request` (referer, user agent, browser-shaped cookies with RFC 6265 matching), redirects followed by hand so each hop gets its own cookies, temporary Netscape cookie files for yt-dlp and gallery-dl (checking and downloading), LinkGrabber `add_with_request`, migration 6 |
+| 2b – Pipe server | (uncommitted) | `rdl-bridge` crate (protocol v1: `ping`, `status`, `add`; native-messaging framing; pipe server and client), app handler sending links to the LinkGrabber or the queue with their request context, `browser` link source, Windows notification for browser links, `tools/dev/pipe.mjs` |
 
-Tests: 144 Rust tests (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
+Tests: 158 Rust tests (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; pipe suite against real named pipes; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
 
 ### How 1e works
 
@@ -58,9 +59,24 @@ Tests: 144 Rust tests (unit tests; engine, manager and LinkGrabber suites agains
 - **Storage** (migration 6): `downloads.request_json` and `link_grabber.request_json`, NULL when empty. A download's copy is cleared when it completes, so cookies don't outlive their use (a failed or paused one keeps them for the retry). Playlist entries inherit their playlist link's. The UI never sees cookies: they aren't on `Download` or `GrabbedLink`, and `bindings.ts` is unchanged.
 - **HTTP:** the engine client no longer follows redirects; `http::get` does, up to 10, and picks the headers again for each hop (`RequestContext::headers_for`). So a redirect to another host (or a CDN subdomain the cookie doesn't cover) gets no cookies, as in a browser. The probe and every segment / stream request go through it. The tool manager uses `http::api_client()`, which still follows redirects itself. Too many redirects is `Error::TooManyRedirects`.
 - **Cookie matching:** RFC 6265: host-only cookies match their host exactly, others also subdomains; IPs only exactly; path prefix on `/` boundaries; `Secure` only over https; longer paths first in the header.
-- **Tools:** `CookieFile` writes a Netscape `cookies.txt` (`#HttpOnly_` prefix, empty expiry for session cookies, which both tools read as session cookies) to `%TEMP%dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has ended. Files older than a day left by a crash are swept when the manager starts. yt-dlp gets `--add-header Referer:…`, `--add-header User-Agent:…` and `--cookies`, when resolving and downloading. gallery-dl gets `--user-agent` and `--cookies`, unless the download's own options already set a cookies file / cookies-from-browser or a user agent (`GalleryDlOptions::is_set`); no referer (extractors send the one their site wants).
+- **Tools:** `CookieFile` writes a Netscape `cookies.txt` (`#HttpOnly_` prefix, empty expiry for session cookies, which both tools read as session cookies) to `%TEMP%
+dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has ended. Files older than a day left by a crash are swept when the manager starts. yt-dlp gets `--add-header Referer:…`, `--add-header User-Agent:…` and `--cookies`, when resolving and downloading. gallery-dl gets `--user-agent` and `--cookies`, unless the download's own options already set a cookies file / cookies-from-browser or a user agent (`GalleryDlOptions::is_set`); no referer (extractors send the one their site wants).
 - **Entry points:** `LinkGrabber::add_with_request(urls, source, request)` (checking uses the request; confirming copies it onto the downloads) and `NewDownload.request`. Nothing in the app passes a request yet; the pipe server (2b) will.
 - **Tests:** unit tests for matching, cleaning, the header, the file format and its removal; a manager test against a `/private` route (403 without cookie and referer) that also checks a redirect to `localhost` arrives without the cookie and that `request_json` is cleared on completion; a gallery-dl test where the fake tool proves it got the cookie file both when resolving and when downloading through LinkGrabber → Manager.
+
+### How 2b works
+
+- **`rdl-bridge`** (new crate, no dependency on `rdl-core`, so the native host stays small): `protocol` (messages), `frame` (little-endian `u32` length + UTF-8 JSON, exactly native messaging's framing, at most 4 MiB), `pipe` (server and client, Windows only).
+- **Protocol v1:** every message is `{"v":1, "id":<optional u64, echoed>, "type":…}`.
+  - `ping` → `pong {app, version, protocol}`; `status` → `status {active, queued, grabber}`.
+  - `add {links, target: "grabber"|"queue", referer?, userAgent?, cookies?, filename?, package?}` → `added {target, added, duplicates, rejected}`. Cookies are `chrome.cookies.Cookie` objects as the browser returns them (`expirationDate` in fractional seconds, `session`).
+  - At most 1,000 links per `add`. Unknown fields are ignored, so the extension can send more than the app reads. A wrong `v`, an unknown `type`, bad JSON or no links get an `error {message}` reply and the connection stays open; a bad length gets an error reply, then the connection is closed (the stream can't be resynced).
+- **Pipe:** `\\.\pipe\rusty-downloader-<USERNAME>` (per user, so two signed-in users each reach their own app). Bound with `first_pipe_instance` (if anything else holds the name, the app logs an error and runs without the bridge) and `reject_remote_clients`. Up to 8 connections at once, any number of requests per connection, closed after 60 s idle. Logs record the request type, never cookies. `pipe::connect` waits up to 5 s while the pipe is busy; `NotFound` means the app isn't running (2c will start it then).
+- **App** (`src-tauri/src/bridge.rs`): started from `setup`; the bind happens inside the async runtime (binding outside it panicked at start, found in the app). Links are checked again (http/https only; others come back in `rejected`) and the request context goes through `RequestContext::cleaned()`.
+  - `grabber`: `LinkGrabber::add_with_request` with the new `LinkSource::Browser` ("1 link added from the browser" in the app). When the window isn't in front, a Windows notification "N links from the browser" with a Review button that opens the LinkGrabber.
+  - `queue`: one package (the given name, else the usual default) in the default download folder, each download carrying the request context; the browser's `filename` is used only for a single link.
+- **Dev tool:** `node tools/dev/pipe.mjs '{"type":"ping"}' …` sends messages to the running app and prints the replies (`--raw` sends text as is).
+- **Checked in the app (2026-10-25):** ping and status; an `add` with a cookie, referer and a `javascript:` link (rejected) landed in the LinkGrabber and was checked online, and its `request_json` held the cleaned context (browser-only fields like `sameSite` dropped); the same link again came back as a duplicate; a `queue` add downloaded `report-from-browser.bin` into the chosen folder and its cookies were cleared on completion; unknown type, non-http links and bad JSON got error replies; the in-app toast and the Windows notification ("1 link from the browser", read back from the toast history) both showed. Not checked: clicking Review (notification buttons can't be driven). Cleaned up afterwards: settings back to defaults, test package, history entry, LinkGrabber links and notifications removed.
 
 ### How 1g works
 
@@ -75,8 +91,8 @@ Tests: 144 Rust tests (unit tests; engine, manager and LinkGrabber suites agains
 
 ### Resume here
 
-- **Repo state:** 2a is committed on `main` (`ab1cc74`) plus this PLAN update. Check `git status -sb` for whether it has been pushed.
-- **Checked in the app (2026-10-25):**
+- **Repo state:** 2a is committed and pushed (`ab1cc74`). 2b is written and tested but not committed yet.
+- **Checked in the app for 1g (2026-10-25)** (2b's checks are in "How 2b works"):
   - DB migrated to schema 5; the window starts hidden and is shown in setup.
   - Settings: a valid change saves ("Saved"), an invalid one (0 at once) shows the error and the field reverts; a relative folder is refused; the chosen folder is used by Add links.
   - History: two downloads from a local server were recorded; search narrows; the page lists name, link, package, size, date.
@@ -88,15 +104,15 @@ Tests: 144 Rust tests (unit tests; engine, manager and LinkGrabber suites agains
   - Downloads: the right-click menu (with Move to bottom disabled on the last package), Move to top, and dragging a package (indicator shown, link overlay not) reordered as expected.
   - Not checked: clicking the tray menu items and the notification buttons (neither can be driven from DevTools); the Mica background.
   - Cleaned up: test downloads (with files), LinkGrabber, history and notifications cleared, settings back to defaults, no `Run` entry. The test overwrote the clipboard (it held no text before) and cleared it afterwards.
-- **Your machine:** yt-dlp 2026.10.21, gallery-dl 1.32.17 and ffmpeg N-128018 are in `%APPDATA%\rusty-downloader\tools`. The app's DB is at schema `20261026000005` (migration 6, `20261027000006`, applies on the next start) with empty downloads, LinkGrabber and history. The notification registration (`HKCU\Software\Classes\AppUserModelId\dev.rustydownloader.app`) stays; it's what the app writes on every start.
-- **Sanity check before starting:** `cargo test --workspace` (144 pass), `pnpm -C ui check`, then `pnpm dev` and open Settings.
+- **Your machine:** yt-dlp 2026.10.21, gallery-dl 1.32.17 and ffmpeg N-128018 are in `%APPDATA%\rusty-downloader\tools`. The app's DB is at schema `20261027000006` with empty downloads, LinkGrabber and history. The notification registration (`HKCU\Software\Classes\AppUserModelId\dev.rustydownloader.app`) stays; it's what the app writes on every start.
+- **Sanity check before starting:** `cargo test --workspace` (158 pass), `pnpm -C ui check`, then `pnpm dev` and open Settings.
 - **Optional, real network:** `RDL_LIVE_DIR=<some folder> cargo test -p rdl-core --test tools_live -- --ignored --nocapture` (about 135 MB of tools on the first run, reused after).
 
 ### Next: Phase 2 – browser integration (suggested order)
 
 1. ~~**Per-download headers and cookies**~~ done as 2a (see "How 2a works").
-2. **App side of the bridge (2b):** a named-pipe server (`\\.\pipe\rusty-downloader`) with a small versioned JSON protocol: `add` (links + cookies + referer, to the LinkGrabber or straight to the queue), `ping`, `status`. Reject anything else; the pipe is local but still untrusted input.
-3. **`rdl-native-host`:** a tiny exe that speaks Chrome/Firefox native messaging (length-prefixed JSON on stdio) and relays to the pipe, starting the app (`--minimized`) if it isn't running.
+2. ~~**App side of the bridge**~~ done as 2b (see "How 2b works").
+3. **`rdl-native-host` (2c):** a tiny exe on `rdl-bridge` that speaks Chrome/Firefox native messaging on stdio and relays each message to the pipe (`pipe::connect` + `pipe::exchange`), starting the app (`--minimized`) when the pipe is `NotFound` and retrying for a few seconds. Native messaging sends at most 1 MB from host to browser; replies are far smaller. Before sending cookies it should check who owns the pipe (see the squatting gap below).
 4. **MV3 extension** (`extension/`, Chromium first, then a Firefox manifest): context menus (download link, all links on page, selection, send page to yt-dlp / gallery-dl), download interception by size/extension/site rules with a modifier to bypass, `chrome.cookies` for the link's site, and a popup with connection status and a pause switch.
 5. **Registration:** native-host manifests under `HKCU\Software\Google\Chrome\NativeMessagingHosts`, `…\Microsoft\Edge\…` and `…\Mozilla\NativeMessagingHosts`, written by the NSIS installer and by a dev script (`tools/dev/`), with the extension id pinned via a manifest `key`.
 
@@ -119,6 +135,13 @@ Tests: 144 Rust tests (unit tests; engine, manager and LinkGrabber suites agains
   - Cookies sit in the SQLite DB in plain text until the download completes (same protection as the rest of `%APPDATA%`). DPAPI encryption would be the next step if that matters.
   - No UI shows that a link carries browser cookies, and there's no way to add or clear them by hand (a `cookies.txt` import belongs to Phase 4 accounts).
   - The yt-dlp cookie file is written back by yt-dlp at exit; harmless, since it's deleted right after.
+- **Browser pipe (2b follow-ups):**
+  - **Pipe squatting:** any process of any user can create `\\.\pipe\rusty-downloader-<USERNAME>` before the app does. The app then fails to bind (and logs it), but a native host would hand cookies to the impostor. The host (2c) should check the server's process (`GetNamedPipeServerProcessId`, then its image path and user) before sending an `add`. That needs the `windows` crate and `unsafe`, which the workspace currently denies; allow it in `rdl-native-host` only.
+  - The pipe keeps Windows' default security (read for everyone, full access for the owner, SYSTEM and administrators). Other users can't send requests, but an explicit DACL for the current user only would be tighter.
+  - Any program the user runs can send links, including to the queue, which starts downloading without asking. That's no more than such a program could do itself, but a "confirm downloads from the browser" setting may be wanted.
+  - No forcing of a handler (yt-dlp / gallery-dl / plain) from the browser yet; "send page to yt-dlp / gallery-dl" needs it (it's also a 1f gap).
+  - `status` lists every package and LinkGrabber link to count them; fine for now, slow with very large lists.
+  - The app has no Settings switch to turn the bridge off.
 - **Windows 10:** the transparent window shows the desktop through it, because Mica is Windows 11 only. A fallback is needed if Windows 10 ever matters.
 - **Tool and plugin kinds:** `http`, `ytdlp` and `gallerydl` downloads run; the rest later.
 - **gallery-dl (1f follow-ups):**
@@ -181,6 +204,9 @@ The native window can't be clicked from automation, but WebView2 exposes Chrome 
 4. **Video tests:** use the archive.org and SoundCloud URLs above. YouTube and Vimeo want a sign-in from this machine.
 5. **Clean up.** Remove test packages with `remove_package(id, deleteFiles: true)`, and point test folders somewhere disposable, not your Downloads folder.
 6. **Clipboard tests use the real Windows clipboard.** Save it first and restore it afterwards. Restoring while watching is on re-adds any link in your own clipboard text.
+7. **Browser pipe:** `node tools/dev/pipe.mjs '{"type":"add","links":["http://127.0.0.1:8765/x"],"target":"queue"}'` plays the native host. Set a disposable download folder first: `queue` adds go to the default folder.
+8. **Reading the DB while the app runs:** another process sees only the state from before the app started (its WAL changes aren't visible from outside). Copy `rusty-downloader.db` and `-wal` somewhere else and read the copy, after closing the app.
+9. **Stopping `pnpm dev`** from a background shell can leave Vite on port 1420, and the next start fails with "Port 1420 is already in use". Stop that `node … vite dev` process first.
 
 ---
 
@@ -280,6 +306,7 @@ The native window can't be clicked from automation, but WebView2 exposes Chrome 
 rusty-downloader/
 ├─ Cargo.toml                  # workspace
 ├─ crates/
+│  ├─ rdl-bridge/             # named-pipe protocol shared by the app and the native host
 │  ├─ rdl-core/               # engine, storage, handlers, scheduler
 │  ├─ rdl-plugins/            # Rhai host + plugin API
 │  ├─ rdl-native-host/        # browser native-messaging bridge exe

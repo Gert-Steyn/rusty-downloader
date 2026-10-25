@@ -239,7 +239,7 @@ fn open_path(path: &Path) -> CommandResult<()> {
 }
 
 /// Split input into valid http(s) URLs and everything else (trimmed, blanks dropped).
-fn parse_links(inputs: &[String]) -> (Vec<Url>, Vec<String>) {
+pub(crate) fn parse_links(inputs: &[String]) -> (Vec<Url>, Vec<String>) {
     let mut urls = Vec::new();
     let mut rejected = Vec::new();
     for input in inputs.iter().map(|s| s.trim()).filter(|s| !s.is_empty()) {

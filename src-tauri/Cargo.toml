@@ -17,6 +17,7 @@ tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
 clipboard-win = "5.4.3"
+rdl-bridge = { version = "0.1.0", path = "../crates/rdl-bridge" }
 rdl-core = { version = "0.1.0", path = "../crates/rdl-core", features = ["specta"] }
 serde = { version = "1.0.229", features = ["derive"] }
 specta = { version = "=2.0.0-rc.26", features = ["derive"] }

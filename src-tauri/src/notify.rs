@@ -80,6 +80,32 @@ pub async fn watch(app: AppHandle, mut events: broadcast::Receiver<Event>) {
     }
 }
 
+/// Links came from the browser while the app is in the background.
+pub fn links_added(app: &AppHandle, count: usize) {
+    if count == 0 || in_view(app) {
+        return;
+    }
+    let (title, body) = if count == 1 {
+        (
+            "1 link from the browser".into(),
+            "It's in the LinkGrabber, being checked.",
+        )
+    } else {
+        (
+            format!("{count} links from the browser"),
+            "They're in the LinkGrabber, being checked.",
+        )
+    };
+    show(
+        app,
+        Note {
+            title,
+            body: body.into(),
+            buttons: vec![("Review".into(), "grabber:".into())],
+        },
+    );
+}
+
 /// The app is in front: the user sees what happened without a toast.
 fn in_view(app: &AppHandle) -> bool {
     app.get_webview_window("main")
@@ -265,6 +291,13 @@ fn activated(app: &AppHandle, action: Option<&str>) {
                     }
                 }
             });
+        }
+        "grabber" => {
+            crate::tray::show_main(app);
+            if let Some(window) = app.get_webview_window("main") {
+                // Navigate with the app's own link, so the router handles it.
+                let _ = window.eval(r#"document.querySelector('a[href="/linkgrabber"]')?.click()"#);
+            }
         }
         _ => crate::tray::show_main(app),
     }

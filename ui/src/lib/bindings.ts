@@ -556,7 +556,9 @@ export type HistoryEntry_Serialize = {
 /**  Where links came from, so the UI can say "3 links from the clipboard". */
 export type LinkSource = "manual" | "clipboard" | "drop" | 
 /**  Expanded from a playlist link already in the LinkGrabber. */
-"playlist";
+"playlist" | 
+/**  Sent by the browser extension. */
+"browser";
 
 /**  What the LinkGrabber shows about a video. */
 export type MediaSummary = MediaSummary_Serialize | MediaSummary_Deserialize;

@@ -1,3 +1,4 @@
+mod bridge;
 mod clipboard;
 mod commands;
 mod events;
@@ -146,6 +147,7 @@ pub fn run() {
                 tool_events,
             ));
             tauri::async_runtime::spawn(clipboard::watch(handle.clone()));
+            bridge::start(handle);
             Ok(())
         })
         .build(tauri::generate_context!())

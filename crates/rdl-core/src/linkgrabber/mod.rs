@@ -87,6 +87,8 @@ pub enum LinkSource {
     Drop,
     /// Expanded from a playlist link already in the LinkGrabber.
     Playlist,
+    /// Sent by the browser extension.
+    Browser,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
