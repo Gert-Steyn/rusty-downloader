@@ -17,5 +17,6 @@ pub mod pipe;
 pub mod protocol;
 
 pub use protocol::{
-    AddRequest, BrowserCookie, MAX_LINKS, Message, PROTOCOL_VERSION, Reply, Request, Target,
+    AddRequest, BrowserCookie, ErrorCode, MAX_LINKS, Message, PROTOCOL_VERSION, Reply, Request,
+    Target,
 };

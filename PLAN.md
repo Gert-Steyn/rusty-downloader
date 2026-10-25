@@ -8,7 +8,7 @@ A full-featured download manager for Windows, modeled on **JDownloader**. It has
 
 ## 0. Current Status (updated 2026-10-25)
 
-**Where we are:** Phase 0 and **all of Phase 1 (1a–1g) are done**. Phase 2 has started: **2a (per-download referer, user agent and cookies) and 2b (the app's named-pipe server) are done** (see "How 2a works" and "How 2b works"). **Next up: 2c, `rdl-native-host`.**
+**Where we are:** Phase 0 and **all of Phase 1 (1a–1g) are done**. Phase 2 is under way: **2a (per-download referer, user agent and cookies), 2b (the app's named-pipe server) and 2c (`rdl-native-host`) are done** (see "How 2a/2b/2c works"). **Next up: 2d, the MV3 extension.** Browsers can't reach the host until it's registered (2e), so the extension and registration are best built together.
 
 The app works as an HTTP(S), video and gallery download manager that lives in the tray. You can paste, drop or copy links into the LinkGrabber (optionally "ask first", with ignore patterns), review and rename them, pick a video format or gallery options, and start them. Links you downloaded before are flagged. Plain files download segmented and resumable. Pages from sites yt-dlp supports are recognised automatically, and playlists expand into one link per video. Pages yt-dlp doesn't know (or can't read) go to gallery-dl, and a gallery becomes one download into its own folder. yt-dlp, gallery-dl and ffmpeg install themselves on first use. Finished downloads go into History; Windows notifications report finished packages and failures. Settings cover the download folder, limits, clipboard, start with Windows and the tray. Everything survives an app restart.
 
@@ -27,8 +27,9 @@ The app works as an HTTP(S), video and gallery download manager that lives in th
 | 1g – Desktop polish | `804ae23` | Settings page, history + duplicate warnings, tray icon and menu, close to tray, start with Windows (in the tray), Windows notifications with buttons, clipboard "ask first" + ignore patterns, right-click menu and drag-to-reorder in Downloads, migration 5 |
 | 2a – Request context | `ab1cc74` | `rdl-core::request` (referer, user agent, browser-shaped cookies with RFC 6265 matching), redirects followed by hand so each hop gets its own cookies, temporary Netscape cookie files for yt-dlp and gallery-dl (checking and downloading), LinkGrabber `add_with_request`, migration 6 |
 | 2b – Pipe server | `f281838` | `rdl-bridge` crate (protocol v1: `ping`, `status`, `add`; native-messaging framing; pipe server and client), app handler sending links to the LinkGrabber or the queue with their request context, `browser` link source, Windows notification for browser links, `tools/dev/pipe.mjs` |
+| 2c – Native host | (uncommitted) | `rdl-native-host.exe`: relays native messages to the pipe, checks the pipe is served by `rusty-downloader.exe` from its own folder under the same user, starts the app in the tray for an `add`, keeps the browser's pipes out of the app; error replies gain a `code` (`notRunning`, `untrusted`, `unavailable`) |
 
-Tests: 158 Rust tests (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; pipe suite against real named pipes; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
+Tests: 165 Rust tests (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; pipe suite against real named pipes; native-host suite driving the real host binary over stdin/stdout; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
 
 ### How 1e works
 
@@ -78,6 +79,17 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
 - **Dev tool:** `node tools/dev/pipe.mjs '{"type":"ping"}' …` sends messages to the running app and prints the replies (`--raw` sends text as is).
 - **Checked in the app (2026-10-25):** ping and status; an `add` with a cookie, referer and a `javascript:` link (rejected) landed in the LinkGrabber and was checked online, and its `request_json` held the cleaned context (browser-only fields like `sameSite` dropped); the same link again came back as a duplicate; a `queue` add downloaded `report-from-browser.bin` into the chosen folder and its cookies were cleared on completion; unknown type, non-http links and bad JSON got error replies; the in-app toast and the Windows notification ("1 link from the browser", read back from the toast history) both showed. Not checked: clicking Review (notification buttons can't be driven). Cleaned up afterwards: settings back to defaults, test package, history entry, LinkGrabber links and notifications removed.
 
+### How 2c works
+
+- **`rdl-native-host`** (`crates/rdl-native-host`, binary `rdl-native-host.exe`, built next to `rusty-downloader.exe`): the browser starts it when the extension connects. It reads native-messaging frames from stdin, relays each one to the pipe unchanged, and writes the app's reply to stdout; it exits when the browser closes stdin. stdout is the protocol, so diagnostics go to stderr. Release builds have no settings at all; debug builds read `RDL_HOST_PIPE`, `RDL_HOST_APP` and `RDL_HOST_LAUNCH_WAIT_MS`, for the tests.
+- **What it reads of a message:** only `id` (to answer in the app's place) and `type`. Only an `add` may start the app: the popup's `ping`/`status` must not launch it, they get `error` with `code: "notRunning"`.
+- **Error codes** (new optional `code` on `error` replies in the protocol): `notRunning` (app not running, or started but not answering within 20 s), `untrusted` (the pipe isn't the app's; nothing was sent), `unavailable` (connected but no proper answer, 30 s per reply, or a reply over native messaging's 1 MB limit to the browser).
+- **Trust check** (`trust.rs`, one of two modules allowed `unsafe`): after connecting and before writing anything, `GetNamedPipeServerProcessId` → `OpenProcess` → `QueryFullProcessImageNameW` must name `rusty-downloader.exe` in the host's own folder (paths resolved, case ignored), and the server's token user must equal the host's (`EqualSid`). This closes the pipe-squatting gap from 2b: a squatter gets nothing. Checked on every (re)connect.
+- **Starting the app** (`launch.rs`, the other `unsafe` module): `rusty-downloader.exe --minimized`, detached, in a new process group, and out of the browser's job (`CREATE_BREAKAWAY_FROM_JOB`, retried without it if the job forbids that). First the host's own std handles are made non-inheritable: Rust's `Command` hands every inheritable handle to the child, and the app then held the browser's stdout pipe open, so the browser would wait forever for the host's output to end (found in the app; the launch test now checks stdout closes). Then it polls the pipe every 200 ms for up to 20 s.
+- **Connection:** one per browser session, reused. If writing to it fails (the app closed it after 60 s idle, or restarted), it reconnects and checks again. A message is never sent twice, so a lost reply can't add links twice.
+- **Checked against the real app (2026-10-25)**, with a script playing the browser and the debug binaries side by side: with the app off, `ping` answered `notRunning` without starting it; `add` started it in the tray (0.6 s warm, 4.9 s on the first run), passed the trust check, and the link reached the LinkGrabber with a "1 link from the browser" notification; a second host session reached the running app. Cleaned up afterwards.
+- **Not done here:** browsers can't find the host until 2e registers it (`HKCU\…\NativeMessagingHosts`).
+
 ### How 1g works
 
 - **Settings** (`rdl-core::settings::Settings`): one JSON value under the `app` key (missing fields get defaults; the old `linkgrabber.clipboard_watch` key is read once as a fallback). `AppState::update_settings` validates (limits 1–20 active, 1–32 connections, absolute folder, trimmed patterns), saves and applies: the main queue's `max_active`, `Manager::set_max_connections` (new downloads only), and the LinkGrabber's duplicate lookups. "Start with Windows" goes through `tauri-plugin-autostart` (HKCU `Run` entry with `--minimized`), and `get_settings` reports what Windows actually has. The Settings page saves each change at once and reloads on every visit, since the LinkGrabber's clipboard switch also writes settings.
@@ -91,7 +103,7 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
 
 ### Resume here
 
-- **Repo state:** 2b is committed on `main` (`f281838`) plus this PLAN update. Check `git status -sb` for whether it has been pushed.
+- **Repo state:** 2b is committed and pushed (`f281838`). 2c is written and tested but not committed yet.
 - **Checked in the app for 1g (2026-10-25)** (2b's checks are in "How 2b works"):
   - DB migrated to schema 5; the window starts hidden and is shown in setup.
   - Settings: a valid change saves ("Saved"), an invalid one (0 at once) shows the error and the field reverts; a relative folder is refused; the chosen folder is used by Add links.
@@ -105,16 +117,16 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
   - Not checked: clicking the tray menu items and the notification buttons (neither can be driven from DevTools); the Mica background.
   - Cleaned up: test downloads (with files), LinkGrabber, history and notifications cleared, settings back to defaults, no `Run` entry. The test overwrote the clipboard (it held no text before) and cleared it afterwards.
 - **Your machine:** yt-dlp 2026.10.21, gallery-dl 1.32.17 and ffmpeg N-128018 are in `%APPDATA%\rusty-downloader\tools`. The app's DB is at schema `20261027000006` with empty downloads, LinkGrabber and history. The notification registration (`HKCU\Software\Classes\AppUserModelId\dev.rustydownloader.app`) stays; it's what the app writes on every start.
-- **Sanity check before starting:** `cargo test --workspace` (158 pass), `pnpm -C ui check`, then `pnpm dev` and open Settings.
+- **Sanity check before starting:** `cargo test --workspace` (165 pass), `pnpm -C ui check`, then `pnpm dev` and open Settings.
 - **Optional, real network:** `RDL_LIVE_DIR=<some folder> cargo test -p rdl-core --test tools_live -- --ignored --nocapture` (about 135 MB of tools on the first run, reused after).
 
 ### Next: Phase 2 – browser integration (suggested order)
 
 1. ~~**Per-download headers and cookies**~~ done as 2a (see "How 2a works").
 2. ~~**App side of the bridge**~~ done as 2b (see "How 2b works").
-3. **`rdl-native-host` (2c):** a tiny exe on `rdl-bridge` that speaks Chrome/Firefox native messaging on stdio and relays each message to the pipe (`pipe::connect` + `pipe::exchange`), starting the app (`--minimized`) when the pipe is `NotFound` and retrying for a few seconds. Native messaging sends at most 1 MB from host to browser; replies are far smaller. Before sending cookies it should check who owns the pipe (see the squatting gap below).
-4. **MV3 extension** (`extension/`, Chromium first, then a Firefox manifest): context menus (download link, all links on page, selection, send page to yt-dlp / gallery-dl), download interception by size/extension/site rules with a modifier to bypass, `chrome.cookies` for the link's site, and a popup with connection status and a pause switch.
-5. **Registration:** native-host manifests under `HKCU\Software\Google\Chrome\NativeMessagingHosts`, `…\Microsoft\Edge\…` and `…\Mozilla\NativeMessagingHosts`, written by the NSIS installer and by a dev script (`tools/dev/`), with the extension id pinned via a manifest `key`.
+3. ~~**`rdl-native-host`**~~ done as 2c (see "How 2c works").
+4. **MV3 extension (2d)** (`extension/`, Chromium first, then a Firefox manifest). Talk to the host with `chrome.runtime.connectNative` (one host process per browser session), show `notRunning` / `untrusted` errors plainly, and send cookies only for the links' own sites: context menus (download link, all links on page, selection, send page to yt-dlp / gallery-dl), download interception by size/extension/site rules with a modifier to bypass, `chrome.cookies` for the link's site, and a popup with connection status and a pause switch.
+5. **Registration (2e):** native-host manifests under `HKCU\Software\Google\Chrome\NativeMessagingHosts`, `…\Microsoft\Edge\…` and `…\Mozilla\NativeMessagingHosts`, written by the NSIS installer and by a dev script (`tools/dev/`), with the extension id pinned via a manifest `key`.
 
 ### Deferred / known gaps (pick up in the milestone noted)
 
@@ -136,12 +148,17 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
   - No UI shows that a link carries browser cookies, and there's no way to add or clear them by hand (a `cookies.txt` import belongs to Phase 4 accounts).
   - The yt-dlp cookie file is written back by yt-dlp at exit; harmless, since it's deleted right after.
 - **Browser pipe (2b follow-ups):**
-  - **Pipe squatting:** any process of any user can create `\\.\pipe\rusty-downloader-<USERNAME>` before the app does. The app then fails to bind (and logs it), but a native host would hand cookies to the impostor. The host (2c) should check the server's process (`GetNamedPipeServerProcessId`, then its image path and user) before sending an `add`. That needs the `windows` crate and `unsafe`, which the workspace currently denies; allow it in `rdl-native-host` only.
+  - ~~**Pipe squatting**~~: handled by the host's trust check (2c). The app itself still can't serve the pipe when a squatter took the name first; it logs an error, and the host reports `untrusted`. Telling the user in the app would be better.
   - The pipe keeps Windows' default security (read for everyone, full access for the owner, SYSTEM and administrators). Other users can't send requests, but an explicit DACL for the current user only would be tighter.
   - Any program the user runs can send links, including to the queue, which starts downloading without asking. That's no more than such a program could do itself, but a "confirm downloads from the browser" setting may be wanted.
   - No forcing of a handler (yt-dlp / gallery-dl / plain) from the browser yet; "send page to yt-dlp / gallery-dl" needs it (it's also a 1f gap).
   - `status` lists every package and LinkGrabber link to count them; fine for now, slow with very large lists.
   - The app has no Settings switch to turn the bridge off.
+- **Native host (2c follow-ups):**
+  - The trust check trusts any `rusty-downloader.exe` in the host's folder; it doesn't check a signature (there is none yet, see Authenticode in Open Decisions).
+  - A portable copy has its own host next to it; whichever copy's host the browser registration points at is the one the browser uses (2e should register the copy that does the registering).
+  - The host's stderr goes to the browser's log only when the browser runs with logging on; there's no host log file.
+  - Not tried under a real browser yet (needs 2d and 2e), so the job breakaway and the stdin/stdout handling are only tested against a script.
 - **Windows 10:** the transparent window shows the desktop through it, because Mica is Windows 11 only. A fallback is needed if Windows 10 ever matters.
 - **Tool and plugin kinds:** `http`, `ytdlp` and `gallerydl` downloads run; the rest later.
 - **gallery-dl (1f follow-ups):**

@@ -146,7 +146,7 @@ async fn bad_messages_get_an_error_and_the_connection_stays_usable() {
     ] {
         let reply = pipe::exchange(&mut client, raw).await.unwrap();
         let reply: Message<Reply> = serde_json::from_slice(&reply).unwrap();
-        let Reply::Error { message } = reply.body else {
+        let Reply::Error { message, .. } = reply.body else {
             panic!("expected an error, got {reply:?}")
         };
         assert!(message.contains(wanted), "{message}");

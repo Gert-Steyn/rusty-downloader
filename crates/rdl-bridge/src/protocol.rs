@@ -151,13 +151,37 @@ pub enum Reply {
     },
     Error {
         message: String,
+        /// Set when the extension can act on the kind of failure.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<ErrorCode>,
     },
+}
+
+/// Failures the extension tells apart. These come from the native host,
+/// which answers for the app when it can't reach it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ErrorCode {
+    /// The app isn't running (and the request didn't start it).
+    NotRunning,
+    /// Something other than the app holds its pipe; nothing was sent to it.
+    Untrusted,
+    /// The app is running but didn't answer properly.
+    Unavailable,
 }
 
 impl Reply {
     pub fn error(message: impl Into<String>) -> Self {
         Reply::Error {
             message: message.into(),
+            code: None,
+        }
+    }
+
+    pub fn error_with(code: ErrorCode, message: impl Into<String>) -> Self {
+        Reply::Error {
+            message: message.into(),
+            code: Some(code),
         }
     }
 }
@@ -206,7 +230,7 @@ mod tests {
         match decode(json).unwrap_err() {
             Message {
                 id,
-                body: Reply::Error { message },
+                body: Reply::Error { message, .. },
                 ..
             } => (id, message),
             other => panic!("expected an error, got {other:?}"),
