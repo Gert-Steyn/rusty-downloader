@@ -30,7 +30,7 @@ The app works as an HTTP(S), video and gallery download manager that lives in th
 | 2c – Native host | `f7df5be` | `rdl-native-host.exe`: relays native messages to the pipe, checks the pipe is served by `rusty-downloader.exe` from its own folder under the same user, starts the app in the tray for an `add`, keeps the browser's pipes out of the app; error replies gain a `code` (`notRunning`, `untrusted`, `unavailable`) |
 | 2d – Extension | `8ad707b` | MV3 extension (`extension/`, plain JS, Chromium + generated Firefox build): right-click menus, download takeover by type/size/site rules, cookies per link site, popup with status and switch, options page; pinned id; unit tests in CI |
 | 2e – Registration | `8ad707b` | App registers the host for Chrome, Edge, Brave, Chromium and Firefox on every start; `pnpm dev` builds the host, `pnpm build` bundles it next to the app |
-| 3a – Keep-awake | (uncommitted) | A Windows power request ("system required") held while downloads run, released when none do; "Keep the computer awake while downloading" setting (on by default) |
+| 3a – Keep-awake | `744f4d3` | A Windows power request ("system required") held while downloads run, released when none do; "Keep the computer awake while downloading" setting (on by default) |
 
 Tests: 168 Rust tests and 9 extension tests (`pnpm ext:test`) (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; pipe suite against real named pipes; native-host suite driving the real host binary over stdin/stdout; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
 
@@ -142,7 +142,7 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
 
 ### Resume here
 
-- **Repo state:** 2d/2e are committed and pushed (`8ad707b`). 3a is written and tested but not committed yet.
+- **Repo state:** 3a is committed on `main` (`744f4d3`) plus this PLAN update. Check `git status -sb` for whether it has been pushed.
 - **Checked in the app for 1g (2026-10-25)** (2b's checks are in "How 2b works"):
   - DB migrated to schema 5; the window starts hidden and is shown in setup.
   - Settings: a valid change saves ("Saved"), an invalid one (0 at once) shows the error and the field reverts; a relative folder is refused; the chosen folder is used by Add links.
