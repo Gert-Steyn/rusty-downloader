@@ -24,7 +24,7 @@ The app works as an HTTP(S), video and gallery download manager that lives in th
 | 1d – LinkGrabber | `adba9eb` | Background probing + availability, archive-set grouping, inline renames, clipboard watcher, drag-drop, global paste |
 | 1e – Tools + yt-dlp | `462a74b` | Tool manager (install on first use, SHA-256 verified, versioned folders, rollback, daily yt-dlp auto-update), job-object subprocess runner, yt-dlp resolve/download, playlist expansion, format presets, Tools page |
 | 1f – gallery-dl | `ba04aa8` | gallery-dl from Codeberg (stable) or `gdl-org/builds` (nightly), `-j` resolve into one gallery link, native download with file-count progress, managed per-site archives, flag schema + `--help` self-check, options dialog with impersonation and raw args, migration 4 |
-| 1g – Desktop polish | see git log | Settings page, history + duplicate warnings, tray icon and menu, close to tray, start with Windows (in the tray), Windows notifications with buttons, clipboard "ask first" + ignore patterns, right-click menu and drag-to-reorder in Downloads, migration 5 |
+| 1g – Desktop polish | `804ae23` | Settings page, history + duplicate warnings, tray icon and menu, close to tray, start with Windows (in the tray), Windows notifications with buttons, clipboard "ask first" + ignore patterns, right-click menu and drag-to-reorder in Downloads, migration 5 |
 
 Tests: 133 Rust tests (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
 
@@ -64,7 +64,7 @@ Tests: 133 Rust tests (unit tests; engine, manager and LinkGrabber suites agains
 
 ### Resume here
 
-- **Repo state:** 1g is committed on `main` (see "Done so far"). Check `git status -sb` for whether it has been pushed.
+- **Repo state:** 1g is committed on `main` (`804ae23`) plus this PLAN update. Check `git status -sb` for whether it has been pushed.
 - **Checked in the app (2026-10-25):**
   - DB migrated to schema 5; the window starts hidden and is shown in setup.
   - Settings: a valid change saves ("Saved"), an invalid one (0 at once) shows the error and the field reverts; a relative folder is refused; the chosen folder is used by Add links.
@@ -469,7 +469,7 @@ Each milestone is a commit or series of commits that leaves the app working.
 | 1e | Tool manager + yt-dlp | Tool layout, version check/update with checksum verification, yt-dlp resolve (`-J`), format picker, JSON progress parsing. | ✅ `462a74b` |
 | 1f | gallery-dl | Resolve with `-j`, native download with stdout progress, flag schema + `--help` self-check, managed download archives, impersonation options. | ✅ `ba04aa8` |
 
-| 1g | Desktop polish | Tray icon/menu, toasts, history + duplicate warnings, settings page (folders, connections, clipboard, startup), right-click menu and drag-to-reorder. | ✅ |
+| 1g | Desktop polish | Tray icon/menu, toasts, history + duplicate warnings, settings page (folders, connections, clipboard, startup), right-click menu and drag-to-reorder. | ✅ `804ae23` |
 
 ---
 
