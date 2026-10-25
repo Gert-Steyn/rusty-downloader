@@ -32,7 +32,7 @@ The app works as an HTTP(S), video and gallery download manager that lives in th
 | 2e – Registration | `8ad707b` | App registers the host for Chrome, Edge, Brave, Chromium and Firefox on every start; `pnpm dev` builds the host, `pnpm build` bundles it next to the app |
 | 3a – Keep-awake | `744f4d3` | A Windows power request ("system required") held while downloads run, released when none do; "Keep the computer awake while downloading" setting (on by default) |
 | 3b – Speed limits | `3489fb7` | Token-bucket limiter in the engine; global limit (status bar switch), per-download limits (right-click, migration 7), weekly schedule rules in Settings; `--limit-rate` for yt-dlp / gallery-dl |
-| 3c – Queues | (uncommitted) | Queues page (add, rename, remove, downloads at once), weekly window per queue (stops and requeues at close), "when finished" action (sleep, hibernate, shut down, close the app) after a cancellable 60 s countdown, "Move to <queue>" in the package menu |
+| 3c – Queues | `45ee68e` | Queues page (add, rename, remove, downloads at once), weekly window per queue (stops and requeues at close), "when finished" action (sleep, hibernate, shut down, close the app) after a cancellable 60 s countdown, "Move to <queue>" in the package menu |
 
 Tests: 183 Rust tests and 9 extension tests (`pnpm ext:test`) (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; pipe suite against real named pipes; native-host suite driving the real host binary over stdin/stdout; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
 
@@ -180,7 +180,7 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
 
 *Last session ended 2026-10-25, after 3c. Read this first, then "Next: Phase 3".*
 
-- **Repo state:** `main` is clean and pushed; 3c is the last milestone (`<3c>`). CI on GitHub hasn't been checked since 1f (the 2d/2e push added the extension checks and the host to the installer build).
+- **Repo state:** `main` is clean and pushed; 3c is the last milestone (`45ee68e`). CI on GitHub hasn't been checked since 1f (the 2d/2e push added the extension checks and the host to the installer build).
 - **Start here: 3d, checksums** (the last part of Phase 3). Suggested shape:
   - `rdl-core::checksum`: MD5 / SHA-1 / SHA-256 / CRC32 of a finished file, streamed, off the async threads. `sha2` is already a dependency; add `md-5`, `sha1`, `crc32fast` (§3.2).
   - The columns exist since the first migration: `downloads.checksum_algo` (`md5`/`sha1`/`sha256`/`crc32`) and `checksum_value`. Add `Manager::set_checksum(id, algo, value)` and show it on `Download`.
