@@ -23,7 +23,7 @@ The app works today as an HTTP(S), video and gallery download manager. You can p
 | 1c – Downloads UI | `bea4e42` | tauri-specta typed IPC, batched events, virtualised treegrid, details panel, add/remove dialogs |
 | 1d – LinkGrabber | `adba9eb` | Background probing + availability, archive-set grouping, inline renames, clipboard watcher, drag-drop, global paste |
 | 1e – Tools + yt-dlp | `462a74b` | Tool manager (install on first use, SHA-256 verified, versioned folders, rollback, daily yt-dlp auto-update), job-object subprocess runner, yt-dlp resolve/download, playlist expansion, format presets, Tools page |
-| 1f – gallery-dl | see git log | gallery-dl from Codeberg (stable) or `gdl-org/builds` (nightly), `-j` resolve into one gallery link, native download with file-count progress, managed per-site archives, flag schema + `--help` self-check, options dialog with impersonation and raw args, migration 4 |
+| 1f – gallery-dl | `ba04aa8` | gallery-dl from Codeberg (stable) or `gdl-org/builds` (nightly), `-j` resolve into one gallery link, native download with file-count progress, managed per-site archives, flag schema + `--help` self-check, options dialog with impersonation and raw args, migration 4 |
 
 Tests: 123 Rust tests (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Milestones 1a–1e were also verified end to end in the running app (see "How to test in the real app" below); 1f's UI was checked in the browser with mock data only.
 
@@ -51,7 +51,7 @@ Tests: 123 Rust tests (unit tests; engine, manager and LinkGrabber suites agains
 
 ### Resume here
 
-- **Repo state:** 1f is committed on `main` (see "Done so far"). Check `git status -sb` for whether it has been pushed.
+- **Repo state:** 1f is committed on `main` (`ba04aa8`) plus this PLAN update. Check `git status -sb` for whether it has been pushed.
 - **Checked against real gallery-dl 1.32.17 (2026-10-25):**
   - Install from Codeberg with its `SHA256SUMS` works.
   - Every schema flag is in `--help`. The check found that `--chapter-range/--chapter-filter` are now `--child-range/--child-filter`, that `--abort` takes `N[:TARGET]`, and that `--ugoira` has no `mkv`; all three are fixed.
@@ -457,7 +457,7 @@ Each milestone is a commit or series of commits that leaves the app working.
 | 1c | Downloads UI | Typed IPC (tauri-specta), batched progress events, virtualised downloads table with package rows, add-links dialog, details panel. | ✅ `bea4e42` |
 | 1d | LinkGrabber | Paste / clipboard watcher / drag-drop, background probing, availability badges, package grouping, confirm to queue. | ✅ `adba9eb` |
 | 1e | Tool manager + yt-dlp | Tool layout, version check/update with checksum verification, yt-dlp resolve (`-J`), format picker, JSON progress parsing. | ✅ `462a74b` |
-| 1f | gallery-dl | Resolve with `-j`, native download with stdout progress, flag schema + `--help` self-check, managed download archives, impersonation options. | ✅ (verified with the real tool and in the app) |
+| 1f | gallery-dl | Resolve with `-j`, native download with stdout progress, flag schema + `--help` self-check, managed download archives, impersonation options. | ✅ `ba04aa8` |
 
 | 1g | Desktop polish | Tray icon/menu, toasts, history + duplicate warnings, settings page (folders, connections, clipboard, startup). Toasts already exist for the LinkGrabber. | ▶️ Next |
 
