@@ -28,8 +28,8 @@ The app works as an HTTP(S), video and gallery download manager that lives in th
 | 2a – Request context | `ab1cc74` | `rdl-core::request` (referer, user agent, browser-shaped cookies with RFC 6265 matching), redirects followed by hand so each hop gets its own cookies, temporary Netscape cookie files for yt-dlp and gallery-dl (checking and downloading), LinkGrabber `add_with_request`, migration 6 |
 | 2b – Pipe server | `f281838` | `rdl-bridge` crate (protocol v1: `ping`, `status`, `add`; native-messaging framing; pipe server and client), app handler sending links to the LinkGrabber or the queue with their request context, `browser` link source, Windows notification for browser links, `tools/dev/pipe.mjs` |
 | 2c – Native host | `f7df5be` | `rdl-native-host.exe`: relays native messages to the pipe, checks the pipe is served by `rusty-downloader.exe` from its own folder under the same user, starts the app in the tray for an `add`, keeps the browser's pipes out of the app; error replies gain a `code` (`notRunning`, `untrusted`, `unavailable`) |
-| 2d – Extension | (uncommitted) | MV3 extension (`extension/`, plain JS, Chromium + generated Firefox build): right-click menus, download takeover by type/size/site rules, cookies per link site, popup with status and switch, options page; pinned id; unit tests in CI |
-| 2e – Registration | (uncommitted) | App registers the host for Chrome, Edge, Brave, Chromium and Firefox on every start; `pnpm dev` builds the host, `pnpm build` bundles it next to the app |
+| 2d – Extension | `8ad707b` | MV3 extension (`extension/`, plain JS, Chromium + generated Firefox build): right-click menus, download takeover by type/size/site rules, cookies per link site, popup with status and switch, options page; pinned id; unit tests in CI |
+| 2e – Registration | `8ad707b` | App registers the host for Chrome, Edge, Brave, Chromium and Firefox on every start; `pnpm dev` builds the host, `pnpm build` bundles it next to the app |
 
 Tests: 167 Rust tests and 9 extension tests (`pnpm ext:test`) (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; pipe suite against real named pipes; native-host suite driving the real host binary over stdin/stdout; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
 
@@ -132,7 +132,7 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
 
 ### Resume here
 
-- **Repo state:** 2c is committed and pushed (`f7df5be`). 2d and 2e are written and tested but not committed yet.
+- **Repo state:** 2d and 2e are committed on `main` (`8ad707b`) plus this PLAN update. Check `git status -sb` for whether it has been pushed.
 - **Checked in the app for 1g (2026-10-25)** (2b's checks are in "How 2b works"):
   - DB migrated to schema 5; the window starts hidden and is shown in setup.
   - Settings: a valid change saves ("Saved"), an invalid one (0 at once) shows the error and the field reverts; a relative folder is refused; the chosen folder is used by Add links.
