@@ -11,6 +11,7 @@
 	} from '#lib/format.js';
 	import { changedCount } from '#lib/gallerydl.js';
 	import { presetLabel } from '#lib/media.js';
+	import { queues } from '#lib/queues.svelte.js';
 	import Icon from './Icon.svelte';
 	import type { Selection } from './DownloadsTable.svelte';
 
@@ -127,6 +128,10 @@
 			<dd>{formatBytes(s.downloaded)} of {formatBytes(s.size)}</dd>
 			<dt>Files</dt>
 			<dd>{pkg.downloads.length}</dd>
+			{#if queues.list.length > 1}
+				<dt>Queue</dt>
+				<dd>{queues.list.find((q) => q.id === pkg.queueId)?.name ?? '—'}</dd>
+			{/if}
 			<dt>Folder</dt>
 			<dd class="wide mono selectable">{pkg.destDir}</dd>
 		</dl>

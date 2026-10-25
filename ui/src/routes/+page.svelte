@@ -9,6 +9,7 @@
 	import SpeedLimitDialog from '#lib/components/SpeedLimitDialog.svelte';
 	import { downloads } from '#lib/downloads.svelte.js';
 	import { formatSpeed } from '#lib/format.js';
+	import { queues } from '#lib/queues.svelte.js';
 
 	let selection = $state<Selection>(null);
 	let adding = $state(false);
@@ -125,8 +126,21 @@
 				disabled: at === ids.length - 1,
 				action: () => downloads.movePackage(id, null)
 			},
+			...moveToQueue(id, p.queueId),
 			'separator',
 			{ label: 'Remove…', icon: 'trash', danger: true, action: askRemove }
+		];
+	}
+
+	/** "Move to <queue>" for every other queue, when there is more than one. */
+	function moveToQueue(id: number, current: number): MenuItem[] {
+		const others = queues.list.filter((q) => q.id !== current);
+		if (others.length === 0) return [];
+		return [
+			'separator',
+			...others.map(
+				(q): MenuItem => ({ label: `Move to ${q.name}`, icon: 'queues', action: () => queues.movePackage(id, q.id) })
+			)
 		];
 	}
 

@@ -7,6 +7,7 @@ import type {
 	GrabbedLink,
 	HistoryEntry,
 	Package,
+	Queue,
 	Settings,
 	Status,
 	ToolInfo
@@ -291,6 +292,25 @@ export function live(): Record<number, Live> {
 		1: { speedBps: 18.4 * MB, connections: 8 },
 		3: { speedBps: 6.1 * MB, connections: 4 }
 	};
+}
+
+export function queues(): Queue[] {
+	const schedule = { enabled: false, days: [0, 1, 2, 3, 4, 5, 6], start: '01:00', stop: '07:00' };
+	return [
+		{ id: 1, name: 'Main', maxActive: 3, schedule, onComplete: 'none', open: true, packages: 3, active: 2, queued: 1, paused: 1 },
+		{
+			id: 2,
+			name: 'Overnight',
+			maxActive: 2,
+			schedule: { ...schedule, enabled: true },
+			onComplete: 'shutdown',
+			open: false,
+			packages: 1,
+			active: 0,
+			queued: 4,
+			paused: 0
+		}
+	];
 }
 
 export function settings(): Settings {

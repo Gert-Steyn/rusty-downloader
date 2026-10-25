@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use url::Url;
 
+use super::queues::OnComplete;
 use crate::gallerydl::GalleryDlOptions;
 use crate::request::RequestContext;
 use crate::ytdlp::YtDlpOptions;
@@ -193,6 +194,14 @@ pub enum Event {
     /// Packages in the queue changed order; re-read the list.
     PackagesReordered {
         queue_id: QueueId,
+    },
+    /// Queues were added, changed or removed, or a package moved between
+    /// them; re-read them.
+    QueuesChanged,
+    /// Everything in the queue is done; `on_complete` says what it wants done now.
+    QueueFinished {
+        queue_id: QueueId,
+        on_complete: OnComplete,
     },
 
     DownloadRemoved {

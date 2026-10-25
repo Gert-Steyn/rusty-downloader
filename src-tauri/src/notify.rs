@@ -80,6 +80,31 @@ pub async fn watch(app: AppHandle, mut events: broadcast::Receiver<Event>) {
     }
 }
 
+/// A queue's "when finished" countdown, with a Cancel button. Shown even
+/// with the window in front: it's about the whole computer.
+pub fn countdown(app: &AppHandle, title: String, body: String) {
+    show(
+        app,
+        Note {
+            title,
+            body,
+            buttons: vec![("Cancel".into(), "cancel-complete:".into())],
+        },
+    );
+}
+
+/// A plain notice, without buttons.
+pub fn message(app: &AppHandle, title: String, body: String) {
+    show(
+        app,
+        Note {
+            title,
+            body,
+            buttons: Vec::new(),
+        },
+    );
+}
+
 /// Links came from the browser while the app is in the background.
 pub fn links_added(app: &AppHandle, count: usize) {
     if count == 0 || in_view(app) {
@@ -291,6 +316,9 @@ fn activated(app: &AppHandle, action: Option<&str>) {
                     }
                 }
             });
+        }
+        "cancel-complete" => {
+            crate::on_complete::cancel(app);
         }
         "grabber" => {
             crate::tray::show_main(app);

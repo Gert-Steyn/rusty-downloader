@@ -6,6 +6,8 @@ mod grabber_commands;
 mod keep_awake;
 mod native_host;
 mod notify;
+mod on_complete;
+mod queue_commands;
 mod settings_commands;
 mod speed;
 mod state;
@@ -71,13 +73,21 @@ fn specta_builder() -> Builder<tauri::Wry> {
             speed::speed_limit_status,
             speed::set_speed_limit_on,
             commands::set_download_speed_limit,
+            queue_commands::list_queues,
+            queue_commands::add_queue,
+            queue_commands::update_queue,
+            queue_commands::remove_queue,
+            queue_commands::move_package_to_queue,
+            on_complete::on_complete_pending,
+            on_complete::cancel_on_complete,
         ])
         .events(collect_events![
             events::DownloadEvents,
             events::GrabberEvents,
             events::ToolEvents,
             clipboard::ClipboardOffer,
-            speed::SpeedLimitStatus
+            speed::SpeedLimitStatus,
+            on_complete::OnCompleteCountdown
         ])
         // Sizes and ids are far below 2^53, so plain numbers are safe in JS.
         .dangerously_cast_bigints_to_number()
@@ -127,9 +137,11 @@ pub fn run() {
             let tool_events = state.tools.subscribe();
             let tray_events = state.downloads.subscribe();
             let notify_events = state.downloads.subscribe();
+            let finished_events = state.downloads.subscribe();
             let hidden =
                 state.settings().start_minimized && std::env::args().any(|a| a == MINIMIZED_ARG);
             app.manage(state);
+            app.manage(on_complete::Countdown::default());
             let handle = app.handle();
             tray::create(handle)?;
             notify::register(handle);
@@ -158,6 +170,7 @@ pub fn run() {
             bridge::start(handle);
             tauri::async_runtime::spawn(keep_awake::watch(handle.clone()));
             tauri::async_runtime::spawn(speed::follow_schedule(handle.clone()));
+            tauri::async_runtime::spawn(on_complete::watch(handle.clone(), finished_events));
             Ok(())
         })
         .build(tauri::generate_context!())

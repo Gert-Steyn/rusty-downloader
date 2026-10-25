@@ -11,7 +11,8 @@ use common::{KIB, SIZE, Server, spawn_server};
 use rdl_core::db::{self, Pool};
 use rdl_core::http::SegmentConfig;
 use rdl_core::manager::{
-    DEFAULT_QUEUE, DownloadId, Event, Manager, ManagerConfig, NewDownload, NewPackage, Status,
+    DEFAULT_QUEUE, DownloadId, Event, Manager, ManagerConfig, NewDownload, NewPackage, OnComplete,
+    QueueChanges, QueueSchedule, Status,
 };
 use rdl_core::request::{Cookie, RequestContext};
 use reqwest::Url;
@@ -610,5 +611,199 @@ async fn a_downloads_own_limit_changes_while_it_runs() {
             .await
             .is_err()
     );
+    fx.manager.shutdown().await;
+}
+
+/// `HH:MM` for now plus `minutes` (wrapping round midnight), local time.
+fn local_time_plus(minutes: i64) -> String {
+    use chrono::Timelike;
+    let now = chrono::Local::now();
+    let total = (i64::from(now.hour() * 60 + now.minute()) + minutes).rem_euclid(24 * 60);
+    format!("{:02}:{:02}", total / 60, total % 60)
+}
+
+/// Every day, from `from` to `to` minutes from now.
+fn window(from: i64, to: i64) -> QueueSchedule {
+    QueueSchedule {
+        enabled: true,
+        days: (0..7).collect(),
+        start: local_time_plus(from),
+        stop: local_time_plus(to),
+    }
+}
+
+fn changes(name: &str, schedule: QueueSchedule, on_complete: OnComplete) -> QueueChanges {
+    QueueChanges {
+        name: name.into(),
+        max_active: 3,
+        schedule,
+        on_complete,
+    }
+}
+
+impl Fixture {
+    /// One package with the given URLs in `queue`; returns the download ids.
+    async fn add_to(&self, queue: i64, urls: &[Url]) -> Vec<DownloadId> {
+        let package = self
+            .manager
+            .add_package(NewPackage {
+                name: "queued".into(),
+                dest_dir: self.dest_dir(),
+                queue_id: queue,
+                downloads: urls.iter().cloned().map(NewDownload::new).collect(),
+            })
+            .await
+            .unwrap();
+        let packages = self.manager.list().await.unwrap();
+        let package = packages.iter().find(|p| p.id == package).unwrap();
+        package.downloads.iter().map(|d| d.id).collect()
+    }
+}
+
+#[tokio::test]
+async fn queues_are_added_changed_moved_into_and_removed() {
+    let (base, _server) = spawn_server().await;
+    let fx = Fixture::new().await;
+    let night = fx.manager.add_queue(" Night ").await.unwrap();
+    assert!(
+        fx.manager.add_queue("Night").await.is_err(),
+        "names are unique"
+    );
+    assert!(fx.manager.add_queue("   ").await.is_err());
+
+    fx.manager
+        .update_queue(
+            night,
+            changes("Overnight", window(60, 120), OnComplete::Shutdown),
+        )
+        .await
+        .unwrap();
+    let queues = fx.manager.list_queues().await.unwrap();
+    assert_eq!(
+        queues.iter().map(|q| q.name.as_str()).collect::<Vec<_>>(),
+        ["Main", "Overnight"]
+    );
+    let q = &queues[1];
+    assert_eq!(
+        (q.on_complete, q.open, q.packages),
+        (OnComplete::Shutdown, false, 0)
+    );
+
+    // A package moves in, and back to Main when its queue is removed.
+    let id = fx.add(&[url(&base, "slow")]).await[0];
+    let package = fx.manager.get(id).await.unwrap().package_id;
+    fx.manager.pause(id).await.unwrap();
+    fx.manager
+        .move_package_to_queue(package, night)
+        .await
+        .unwrap();
+    let q = fx.manager.list_queues().await.unwrap().remove(1);
+    assert_eq!((q.packages, q.paused), (1, 1));
+    assert!(
+        fx.manager
+            .move_package_to_queue(package, 999)
+            .await
+            .is_err()
+    );
+
+    assert!(fx.manager.remove_queue(DEFAULT_QUEUE).await.is_err());
+    fx.manager.remove_queue(night).await.unwrap();
+    let queues = fx.manager.list_queues().await.unwrap();
+    assert_eq!(queues.len(), 1);
+    assert_eq!(queues[0].packages, 1, "the package went back to Main");
+    fx.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_queue_runs_only_inside_its_window() {
+    let (base, _server) = spawn_server().await;
+    let mut fx = Fixture::new().await;
+    let night = fx.manager.add_queue("Night").await.unwrap();
+    fx.manager
+        .update_queue(night, changes("Night", window(120, 180), OnComplete::None))
+        .await
+        .unwrap();
+    let id = fx.add_to(night, &[url(&base, "slow")]).await[0];
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(
+        fx.manager.get(id).await.unwrap().status,
+        Status::Queued,
+        "closed: waits"
+    );
+
+    // The window opens: it starts.
+    fx.manager
+        .update_queue(night, changes("Night", window(-60, 60), OnComplete::None))
+        .await
+        .unwrap();
+    fx.wait_status(id, Status::Active).await;
+    fx.wait_progress_over(id, 128 * KIB).await;
+
+    // The window closes: it stops and waits for the next one, keeping its progress.
+    fx.manager
+        .update_queue(night, changes("Night", window(120, 180), OnComplete::None))
+        .await
+        .unwrap();
+    fx.wait_status(id, Status::Queued).await;
+    let waiting = fx.manager.get(id).await.unwrap();
+    assert!(waiting.downloaded > 0);
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(fx.manager.get(id).await.unwrap().status, Status::Queued);
+    fx.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_queue_reports_once_when_its_downloads_are_done() {
+    let (base, _server) = spawn_server().await;
+    let mut fx = Fixture::new().await;
+    let q = fx.manager.add_queue("Then shut down").await.unwrap();
+    fx.manager
+        .update_queue(
+            q,
+            changes(
+                "Then shut down",
+                QueueSchedule::default(),
+                OnComplete::Shutdown,
+            ),
+        )
+        .await
+        .unwrap();
+    let ids = fx
+        .add_to(
+            q,
+            &[url(&base, "named/one.bin"), url(&base, "named/two.bin")],
+        )
+        .await;
+    let event = fx
+        .wait_for(|e| matches!(e, Event::QueueFinished { .. }))
+        .await;
+    assert_eq!(
+        event,
+        Event::QueueFinished {
+            queue_id: q,
+            on_complete: OnComplete::Shutdown
+        }
+    );
+    for id in ids {
+        assert_eq!(fx.manager.get(id).await.unwrap().status, Status::Completed);
+    }
+
+    // Failures end a queue too: a night of broken links still shuts down.
+    fx.add_to(q, &[url(&base, "gone")]).await;
+    let event = fx
+        .wait_for(|e| matches!(e, Event::QueueFinished { .. }))
+        .await;
+    assert!(matches!(event, Event::QueueFinished { queue_id, .. } if queue_id == q));
+
+    // Something paused is still to do: no second report.
+    let id = fx.add_to(q, &[url(&base, "slow")]).await[0];
+    fx.manager.pause(id).await.unwrap();
+    fx.wait_status(id, Status::Paused).await;
+    let quiet = tokio::time::timeout(
+        Duration::from_millis(800),
+        fx.wait_for(|e| matches!(e, Event::QueueFinished { .. })),
+    )
+    .await;
+    assert!(quiet.is_err(), "a paused queue isn't finished");
     fx.manager.shutdown().await;
 }

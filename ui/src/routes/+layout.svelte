@@ -10,6 +10,8 @@
 	import { formatSpeed } from '#lib/format.js';
 	import { grabber } from '#lib/linkgrabber.svelte.js';
 	import { speed } from '#lib/speed.svelte.js';
+	import { countdown, countdownText } from '#lib/countdown.svelte.js';
+	import { queues } from '#lib/queues.svelte.js';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import type { LayoutProps } from './$types';
@@ -28,6 +30,8 @@
 	downloads.start();
 	grabber.start();
 	speed.start();
+	queues.start();
+	countdown.start();
 
 	const limitText = $derived.by(() => {
 		const { limit, source, until } = speed.active;
@@ -124,6 +128,16 @@
 	</nav>
 
 	<main class="content">
+		{#if countdown.pending}
+			<div class="countdown" role="alert">
+				<Icon name="queues" size={18} />
+				<span>
+					<strong>{countdown.pending.queueName} has finished.</strong>
+					{countdownText(countdown.pending.action, countdown.secondsLeft)}.
+				</span>
+				<button type="button" class="btn accent" onclick={() => countdown.cancel()}>Cancel</button>
+			</div>
+		{/if}
 		{@render children()}
 	</main>
 
@@ -257,6 +271,20 @@
 		gap: 4px;
 	}
 	.statusbar .spacer {
+		flex: 1;
+	}
+	.countdown {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		margin: 12px 20px 0;
+		padding: 10px 14px;
+		border-radius: var(--radius-control, 4px);
+		color: var(--text-primary);
+		background: color-mix(in srgb, var(--accent) 16%, var(--layer));
+		border: 1px solid var(--accent);
+	}
+	.countdown span {
 		flex: 1;
 	}
 	.statusbar .limit {

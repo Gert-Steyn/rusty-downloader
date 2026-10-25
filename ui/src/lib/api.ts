@@ -2,6 +2,9 @@
 import { isTauri } from '@tauri-apps/api/core';
 import type {
 	ActiveLimit_Serialize,
+	Queue_Serialize,
+	QueueChanges_Deserialize,
+	QueueSchedule_Serialize,
 	CommandError,
 	Download_Serialize,
 	DownloadEvents_Serialize,
@@ -29,6 +32,8 @@ export type {
 	Availability,
 	FormatPreset,
 	LinkSource,
+	OnComplete,
+	PendingAction,
 	Status,
 	SpeedRule,
 	ToolChannel,
@@ -56,6 +61,9 @@ export type ToolInfo = ToolInfo_Serialize;
 export type ToolTask = ToolTask_Serialize;
 export type ToolEventBatch = ToolEvents_Serialize;
 export type ActiveLimit = ActiveLimit_Serialize;
+export type Queue = Queue_Serialize;
+export type QueueChanges = QueueChanges_Deserialize;
+export type QueueSchedule = QueueSchedule_Serialize;
 
 type CommandResult<T> = { status: 'ok'; data: T } | { status: 'error'; error: CommandError };
 

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use sqlx::AssertSqlSafe;
 
+use super::queues::{OnComplete, QueueChanges, QueueSchedule};
 use super::types::{
     Download, DownloadId, DownloadKind, FileCount, NewPackage, Package, PackageId, QueueId, Status,
 };
@@ -110,10 +111,37 @@ pub(crate) struct PackageRow {
     pub priority: i64,
 }
 
-#[derive(Debug, Clone, Copy, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub(crate) struct QueueRow {
     pub id: i64,
+    pub name: String,
     pub max_active: i64,
+    pub schedule_json: Option<String>,
+    pub on_complete_action: String,
+}
+
+impl QueueRow {
+    /// The schedule; unreadable JSON counts as none.
+    pub fn schedule(&self) -> QueueSchedule {
+        self.schedule_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str(j).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn on_complete(&self) -> OnComplete {
+        OnComplete::parse(&self.on_complete_action)
+    }
+}
+
+/// Packages and downloads per state in one queue.
+#[derive(Debug, Clone, Copy, Default, sqlx::FromRow)]
+pub(crate) struct QueueCounts {
+    pub queue_id: i64,
+    pub packages: i64,
+    pub active: i64,
+    pub queued: i64,
+    pub paused: i64,
 }
 
 /// Facts learned from the first probe, stored so resume uses the same file.
@@ -243,11 +271,125 @@ pub(crate) async fn set_package_order(pool: &Pool, ids: &[PackageId]) -> Result<
 }
 
 pub(crate) async fn queues(pool: &Pool) -> Result<Vec<QueueRow>> {
-    Ok(
-        sqlx::query_as("SELECT id, max_active FROM queues ORDER BY position, id")
-            .fetch_all(pool)
-            .await?,
+    Ok(sqlx::query_as(
+        "SELECT id, name, max_active, schedule_json, on_complete_action FROM queues ORDER BY position, id",
     )
+    .fetch_all(pool)
+    .await?)
+}
+
+pub(crate) async fn queue(pool: &Pool, id: QueueId) -> Result<Option<QueueRow>> {
+    Ok(sqlx::query_as(
+        "SELECT id, name, max_active, schedule_json, on_complete_action FROM queues WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?)
+}
+
+pub(crate) async fn queue_counts(pool: &Pool) -> Result<Vec<QueueCounts>> {
+    Ok(sqlx::query_as(
+        "SELECT p.queue_id AS queue_id,
+                COUNT(DISTINCT p.id) AS packages,
+                COALESCE(SUM(d.status = 'active'), 0) AS active,
+                COALESCE(SUM(d.status = 'queued'), 0) AS queued,
+                COALESCE(SUM(d.status = 'paused'), 0) AS paused
+         FROM packages p LEFT JOIN downloads d ON d.package_id = p.id
+         GROUP BY p.queue_id",
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Downloads in the queue that still have something to do (running,
+/// waiting, or paused by the user).
+pub(crate) async fn pending_in_queue(pool: &Pool, queue: QueueId) -> Result<i64> {
+    Ok(sqlx::query_scalar(
+        "SELECT COUNT(*) FROM downloads d JOIN packages p ON p.id = d.package_id
+         WHERE p.queue_id = ? AND d.status IN ('active', 'queued', 'paused')",
+    )
+    .bind(queue)
+    .fetch_one(pool)
+    .await?)
+}
+
+/// A clash with an existing queue's name, as a message for the user.
+fn name_taken(e: sqlx::Error, name: &str) -> crate::Error {
+    if e.as_database_error()
+        .is_some_and(|d| d.is_unique_violation())
+    {
+        crate::Error::InvalidInput(format!("There is already a queue called \"{name}\"."))
+    } else {
+        e.into()
+    }
+}
+
+pub(crate) async fn insert_queue(pool: &Pool, name: &str, max_active: u32) -> Result<QueueId> {
+    sqlx::query_scalar(
+        "INSERT INTO queues (name, max_active, position)
+         VALUES (?, ?, (SELECT COALESCE(MAX(position) + 1, 0) FROM queues))
+         RETURNING id",
+    )
+    .bind(name)
+    .bind(i64::from(max_active))
+    .fetch_one(pool)
+    .await
+    .map_err(|e| name_taken(e, name))
+}
+
+/// Returns whether the queue exists.
+pub(crate) async fn update_queue(pool: &Pool, id: QueueId, c: &QueueChanges) -> Result<bool> {
+    let result = sqlx::query(
+        "UPDATE queues SET name = ?, max_active = ?, schedule_json = ?, on_complete_action = ?
+         WHERE id = ?",
+    )
+    .bind(&c.name)
+    .bind(i64::from(c.max_active))
+    .bind(serde_json::to_string(&c.schedule)?)
+    .bind(c.on_complete.as_str())
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| name_taken(e, &c.name))?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Move a queue's packages to `into` (after its own), then delete it.
+pub(crate) async fn delete_queue(pool: &Pool, id: QueueId, into: QueueId) -> Result<bool> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "UPDATE packages SET queue_id = ?1,
+             position = position + (SELECT COALESCE(MAX(position) + 1, 0) FROM packages WHERE queue_id = ?1)
+         WHERE queue_id = ?2",
+    )
+    .bind(into)
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+    let result = sqlx::query("DELETE FROM queues WHERE id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Put a package at the end of another queue.
+pub(crate) async fn set_package_queue(
+    pool: &Pool,
+    package: PackageId,
+    queue: QueueId,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE packages SET queue_id = ?1,
+             position = (SELECT COALESCE(MAX(position) + 1, 0) FROM packages WHERE queue_id = ?1)
+         WHERE id = ?2",
+    )
+    .bind(queue)
+    .bind(package)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 pub(crate) async fn set_queue_limit(pool: &Pool, queue: QueueId, max_active: u32) -> Result<bool> {

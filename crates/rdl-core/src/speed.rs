@@ -6,11 +6,12 @@
 //! not after its start runs overnight into the next day (22:00–06:00), and
 //! belongs to the day it starts on.
 
-use chrono::{Datelike, NaiveDateTime, Timelike};
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
 use crate::Result;
 use crate::ratelimit::MIN_RATE;
+use crate::timewindow;
 
 /// Most rules a schedule may have.
 pub const MAX_RULES: usize = 20;
@@ -52,43 +53,25 @@ pub enum LimitSource {
     Schedule,
 }
 
-/// Minutes since midnight of `HH:MM`.
-fn minutes(time: &str) -> Option<u32> {
-    let (h, m) = time.trim().split_once(':')?;
-    let (h, m): (u32, u32) = (h.parse().ok()?, m.parse().ok()?);
-    (h < 24 && m < 60 && time.trim().len() == 5).then_some(h * 60 + m)
-}
-
 impl SpeedRule {
     /// Whether the rule's window covers `now`.
     pub fn covers(&self, now: NaiveDateTime) -> bool {
-        let (Some(from), Some(to)) = (minutes(&self.from), minutes(&self.to)) else {
-            return false;
-        };
-        let day = now.weekday().num_days_from_monday() as u8;
-        let yesterday = (day + 6) % 7;
-        let at = now.hour() * 60 + now.minute();
-        if from < to {
-            self.days.contains(&day) && (from..to).contains(&at)
-        } else {
-            (self.days.contains(&day) && at >= from) || (self.days.contains(&yesterday) && at < to)
-        }
+        timewindow::covers(&self.days, &self.from, &self.to, now)
     }
 
     /// Check what the UI sent and tidy it (days sorted, without repeats).
     pub fn validated(mut self) -> Result<Self> {
         let invalid = |m: String| Err(crate::Error::InvalidInput(m));
-        if minutes(&self.from).is_none() || minutes(&self.to).is_none() {
+        if timewindow::minutes(&self.from).is_none() || timewindow::minutes(&self.to).is_none() {
             return invalid(format!(
                 "\"{}–{}\" isn't a time window like 08:00–18:00.",
                 self.from, self.to
             ));
         }
-        self.days.sort_unstable();
-        self.days.dedup();
-        if self.days.is_empty() || self.days.iter().any(|d| *d > 6) {
+        let Some(days) = timewindow::tidy_days(self.days) else {
             return invalid("Each scheduled limit needs at least one day.".into());
-        }
+        };
+        self.days = days;
         if self.limit < MIN_RATE {
             return invalid(format!(
                 "A speed limit must be at least {} KB/s.",

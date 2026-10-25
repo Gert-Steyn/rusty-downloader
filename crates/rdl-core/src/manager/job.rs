@@ -54,10 +54,17 @@ pub(super) async fn start(inner: &Arc<Inner>, row: DownloadRow, queue_id: i64) -
         let mut last = None;
         let result = execute(&inner, &row, &cancel, &limit, &mut last).await;
         let reason = *stop.lock().unwrap_or_else(|e| e.into_inner());
+        // Completed or failed: either way it's done, as far as its queue goes.
+        let ended = matches!(result, Ok(Outcome::Completed { .. }) | Err(_))
+            && reason != Some(StopReason::Remove);
         if let Err(e) = finalize(&inner, &row, result, reason, last).await {
             tracing::error!(download = row.id, error = %e, "could not record download outcome");
         }
-        inner.running().remove(&row.id);
+        // The queue it ended in: its package may have moved meanwhile.
+        let queue = inner.running().remove(&row.id).map(|job| job.queue_id);
+        if let (true, Some(queue)) = (ended, queue) {
+            inner.ended_in().insert(queue);
+        }
         let _ = finished_tx.send(true);
         inner.wake.notify_one();
     });
@@ -264,7 +271,9 @@ async fn finalize(
                 store::save_segments(pool, id, &progress.segments).await?;
             }
             let status = match reason {
-                Some(StopReason::Shutdown | StopReason::Requeue) => Status::Queued,
+                Some(StopReason::Shutdown | StopReason::Requeue | StopReason::ScheduleClosed) => {
+                    Status::Queued
+                }
                 _ => Status::Paused,
             };
             store::set_status(pool, id, status, None).await?;

@@ -9,11 +9,12 @@
 
 mod gallerydl_job;
 mod job;
+mod queues;
 mod store;
 mod types;
 mod ytdlp_job;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -29,6 +30,7 @@ use crate::ratelimit::{RateLimiter, Throttle};
 use crate::tools::Tools;
 use crate::{Error, Result, gallerydl, ytdlp};
 
+pub use queues::{OnComplete, Queue, QueueChanges, QueueSchedule};
 pub use types::{
     DEFAULT_QUEUE, Download, DownloadId, DownloadKind, Event, FileCount, NewDownload, NewPackage,
     Package, PackageId, QueueId, Status,
@@ -83,6 +85,8 @@ struct Inner {
     max_connections: AtomicUsize,
     /// The speed limit all downloads share.
     global_limit: Arc<RateLimiter>,
+    /// Queues where a download completed or failed since the queue last finished.
+    ended_in: Mutex<HashSet<QueueId>>,
 }
 
 struct RunningJob {
@@ -102,6 +106,8 @@ enum StopReason {
     Requeue,
     /// App exit: queue it so it resumes on the next start.
     Shutdown,
+    /// Its queue's schedule window closed: queue it for the next window.
+    ScheduleClosed,
     Remove,
 }
 
@@ -136,6 +142,26 @@ impl Inner {
 
     fn running(&self) -> MutexGuard<'_, HashMap<DownloadId, RunningJob>> {
         self.running.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn ended_in(&self) -> MutexGuard<'_, HashSet<QueueId>> {
+        self.ended_in.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Stop a running download for `reason` unless something else (a pause,
+    /// a removal) is already stopping it. Returns whether it was asked.
+    fn stop_if_undisturbed(&self, id: DownloadId, reason: StopReason) -> bool {
+        let running = self.running();
+        let Some(job) = running.get(&id) else {
+            return false;
+        };
+        let mut stop = job.stop.lock().unwrap_or_else(|e| e.into_inner());
+        if stop.is_some() {
+            return false;
+        }
+        *stop = Some(reason);
+        job.cancel.cancel();
+        true
     }
 
     /// Ask a running download to stop. Returns a handle to wait on, or `None`
@@ -173,6 +199,7 @@ impl Manager {
             wake: Notify::new(),
             shutdown: CancellationToken::new(),
             global_limit: Arc::new(RateLimiter::new(None)),
+            ended_in: Mutex::new(HashSet::new()),
         });
         tokio::spawn(scheduler(Arc::clone(&inner)));
         Ok(Self { inner })
@@ -206,6 +233,113 @@ impl Manager {
             download_id: id,
             speed_limit: limit,
         });
+        Ok(())
+    }
+
+    /// Every queue with its settings and what's in it, in order.
+    pub async fn list_queues(&self) -> Result<Vec<Queue>> {
+        let pool = &self.inner.pool;
+        let counts = store::queue_counts(pool).await?;
+        let now = chrono::Local::now().naive_local();
+        Ok(store::queues(pool)
+            .await?
+            .into_iter()
+            .map(|q| {
+                let c = counts
+                    .iter()
+                    .find(|c| c.queue_id == q.id)
+                    .copied()
+                    .unwrap_or_default();
+                let schedule = q.schedule();
+                Queue {
+                    id: q.id,
+                    name: q.name.clone(),
+                    max_active: q.max_active as u32,
+                    open: schedule.is_open(now),
+                    schedule,
+                    on_complete: q.on_complete(),
+                    packages: c.packages as u32,
+                    active: c.active as u32,
+                    queued: c.queued as u32,
+                    paused: c.paused as u32,
+                }
+            })
+            .collect())
+    }
+
+    /// A new queue, last in order, with no schedule and nothing to do when done.
+    pub async fn add_queue(&self, name: &str) -> Result<QueueId> {
+        let changes = QueueChanges {
+            name: name.to_owned(),
+            max_active: 3,
+            schedule: QueueSchedule::default(),
+            on_complete: OnComplete::None,
+        }
+        .validated()?;
+        let id = store::insert_queue(&self.inner.pool, &changes.name, changes.max_active).await?;
+        tracing::info!(queue = id, name = %changes.name, "queue added");
+        self.inner.emit(Event::QueuesChanged);
+        Ok(id)
+    }
+
+    pub async fn update_queue(&self, id: QueueId, changes: QueueChanges) -> Result<()> {
+        let changes = changes.validated()?;
+        if !store::update_queue(&self.inner.pool, id, &changes).await? {
+            return Err(Error::NotFound(format!("queue {id}")));
+        }
+        tracing::info!(queue = id, ?changes, "queue changed");
+        self.inner.emit(Event::QueuesChanged);
+        self.inner.wake.notify_one();
+        Ok(())
+    }
+
+    /// Delete a queue; its packages move to the main queue. The main queue
+    /// can't be deleted.
+    pub async fn remove_queue(&self, id: QueueId) -> Result<()> {
+        if id == DEFAULT_QUEUE {
+            return Err(Error::InvalidInput(
+                "The main queue can't be removed.".into(),
+            ));
+        }
+        if !store::delete_queue(&self.inner.pool, id, DEFAULT_QUEUE).await? {
+            return Err(Error::NotFound(format!("queue {id}")));
+        }
+        // Running downloads carry on, now counted in the main queue.
+        for job in self.inner.running().values_mut() {
+            if job.queue_id == id {
+                job.queue_id = DEFAULT_QUEUE;
+            }
+        }
+        tracing::info!(queue = id, "queue removed");
+        self.inner.emit(Event::QueuesChanged);
+        self.inner.emit(Event::PackagesReordered {
+            queue_id: DEFAULT_QUEUE,
+        });
+        self.inner.wake.notify_one();
+        Ok(())
+    }
+
+    /// Move a package to the end of another queue. Its running downloads
+    /// carry on and count towards the new queue from then on.
+    pub async fn move_package_to_queue(&self, id: PackageId, queue: QueueId) -> Result<()> {
+        let pool = &self.inner.pool;
+        if store::queue(pool, queue).await?.is_none() {
+            return Err(Error::NotFound(format!("queue {queue}")));
+        }
+        if store::get_package(pool, id).await?.is_none() {
+            return Err(Error::NotFound(format!("package {id}")));
+        }
+        store::set_package_queue(pool, id, queue).await?;
+        let downloads = store::package_download_ids(pool, id).await?;
+        for (download, job) in self.inner.running().iter_mut() {
+            if downloads.contains(download) {
+                job.queue_id = queue;
+            }
+        }
+        self.inner.emit(Event::QueuesChanged);
+        self.inner
+            .emit(Event::PackagesReordered { queue_id: queue });
+        self.inner.wake.notify_one();
         Ok(())
     }
 
@@ -448,22 +582,52 @@ async fn scheduler(inner: Arc<Inner>) {
     tracing::debug!("scheduler stopped");
 }
 
+/// One pass over the queues: stop what runs in a queue whose window has
+/// closed, fill free slots in open ones, and report queues that finished.
 async fn schedule_once(inner: &Arc<Inner>) -> Result<()> {
+    let now = chrono::Local::now().naive_local();
     for queue in store::queues(&inner.pool).await? {
         if inner.shutdown.is_cancelled() {
             return Ok(());
         }
-        let running = inner
+        let running: Vec<DownloadId> = inner
             .running()
-            .values()
-            .filter(|job| job.queue_id == queue.id)
-            .count();
-        let free = (queue.max_active.max(1) as usize).saturating_sub(running);
-        if free == 0 {
+            .iter()
+            .filter(|(_, job)| job.queue_id == queue.id)
+            .map(|(id, _)| *id)
+            .collect();
+        if !queue.schedule().is_open(now) {
+            for id in running {
+                if inner.stop_if_undisturbed(id, StopReason::ScheduleClosed) {
+                    tracing::info!(
+                        download = id,
+                        queue = queue.id,
+                        "queue's window closed; stopping"
+                    );
+                }
+            }
             continue;
         }
-        for row in store::next_queued(&inner.pool, queue.id, free).await? {
-            job::start(inner, row, queue.id).await?;
+        let free = (queue.max_active.max(1) as usize).saturating_sub(running.len());
+        let mut started = 0;
+        if free > 0 {
+            for row in store::next_queued(&inner.pool, queue.id, free).await? {
+                job::start(inner, row, queue.id).await?;
+                started += 1;
+            }
+        }
+        if started == 0
+            && running.is_empty()
+            && inner.ended_in().contains(&queue.id)
+            && store::pending_in_queue(&inner.pool, queue.id).await? == 0
+        {
+            inner.ended_in().remove(&queue.id);
+            let on_complete = queue.on_complete();
+            tracing::info!(queue = queue.id, ?on_complete, "queue finished");
+            inner.emit(Event::QueueFinished {
+                queue_id: queue.id,
+                on_complete,
+            });
         }
     }
     Ok(())

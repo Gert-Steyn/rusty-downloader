@@ -79,6 +79,19 @@ export const commands = {
 	setSpeedLimitOn: (on: boolean) => typedError<ActiveLimit_Serialize, CommandError>(__TAURI_INVOKE("set_speed_limit_on", { on })),
 	/**  A download's own speed limit in bytes per second; `None` removes it. */
 	setDownloadSpeedLimit: (id: number, limit: number | null) => typedError<null, CommandError>(__TAURI_INVOKE("set_download_speed_limit", { id, limit })),
+	listQueues: () => typedError<Queue_Serialize[], CommandError>(__TAURI_INVOKE("list_queues")),
+	addQueue: (name: string) => typedError<number, CommandError>(__TAURI_INVOKE("add_queue", { name })),
+	/**
+	 *  The main queue's "downloads at once" is also the setting of that name,
+	 *  so the two stay the same whichever page changes it.
+	 */
+	updateQueue: (id: number, changes: QueueChanges_Deserialize) => typedError<null, CommandError>(__TAURI_INVOKE("update_queue", { id, changes })),
+	removeQueue: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("remove_queue", { id })),
+	movePackageToQueue: (packageId: number, queue: number) => typedError<null, CommandError>(__TAURI_INVOKE("move_package_to_queue", { packageId, queue })),
+	/**  The countdown in progress, for a page that opens during one. */
+	onCompletePending: () => __TAURI_INVOKE<PendingAction | null>("on_complete_pending"),
+	/**  Cancel the countdown; returns whether one was running. */
+	cancelOnComplete: () => __TAURI_INVOKE<boolean>("cancel_on_complete"),
 };
 
 /** Events */
@@ -86,6 +99,7 @@ export const events = {
 	clipboardOffer: makeEvent<ClipboardOffer, ClipboardOffer>("clipboard-offer"),
 	downloadEvents: makeEvent<DownloadEvents_Serialize, DownloadEvents_Deserialize>("download-events"),
 	grabberEvents: makeEvent<GrabberEvents_Serialize, GrabberEvents_Deserialize>("grabber-events"),
+	onCompleteCountdown: makeEvent<OnCompleteCountdown_Serialize, OnCompleteCountdown_Deserialize>("on-complete-countdown"),
 	speedLimitStatus: makeEvent<SpeedLimitStatus_Serialize, SpeedLimitStatus_Deserialize>("speed-limit-status"),
 	toolEvents: makeEvent<ToolEvents_Serialize, ToolEvents_Deserialize>("tool-events"),
 };
@@ -241,7 +255,14 @@ export type Event = Event_Serialize | Event_Deserialize;
  */
 export type Event_Deserialize = { type: "packageAdded"; packageId: number } | { type: "packageRemoved"; packageId: number } | 
 /**  Packages in the queue changed order; re-read the list. */
-{ type: "packagesReordered"; queueId: number } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error?: string | null } | 
+{ type: "packagesReordered"; queueId: number } | 
+/**
+ *  Queues were added, changed or removed, or a package moved between
+ *  them; re-read them.
+ */
+{ type: "queuesChanged" } | 
+/**  Everything in the queue is done; `on_complete` says what it wants done now. */
+{ type: "queueFinished"; queueId: number; onComplete: OnComplete } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error?: string | null } | 
 /**  A download's own speed limit changed. */
 { type: "speedLimitChanged"; downloadId: number; speedLimit?: number | null } | 
 /**  Name, size and destination are known after the first probe. */
@@ -256,7 +277,14 @@ files?: FileCount_Deserialize | null };
  */
 export type Event_Serialize = { type: "packageAdded"; packageId: number } | { type: "packageRemoved"; packageId: number } | 
 /**  Packages in the queue changed order; re-read the list. */
-{ type: "packagesReordered"; queueId: number } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error: string | null } | 
+{ type: "packagesReordered"; queueId: number } | 
+/**
+ *  Queues were added, changed or removed, or a package moved between
+ *  them; re-read them.
+ */
+{ type: "queuesChanged" } | 
+/**  Everything in the queue is done; `on_complete` says what it wants done now. */
+{ type: "queueFinished"; queueId: number; onComplete: OnComplete } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error: string | null } | 
 /**  A download's own speed limit changed. */
 { type: "speedLimitChanged"; downloadId: number; speedLimit: number | null } | 
 /**  Name, size and destination are known after the first probe. */
@@ -635,6 +663,24 @@ export type MediaSummary_Serialize = {
 	isLive: boolean,
 };
 
+/**  What to do when a queue has finished. Stored as `queues.on_complete_action`. */
+export type OnComplete = "none" | "sleep" | "hibernate" | "shutdown" | 
+/**  Close the app. */
+"exit";
+
+/**  A countdown started (`pending` set) or ended (`None`: done or cancelled). */
+export type OnCompleteCountdown = OnCompleteCountdown_Serialize | OnCompleteCountdown_Deserialize;
+
+/**  A countdown started (`pending` set) or ended (`None`: done or cancelled). */
+export type OnCompleteCountdown_Deserialize = {
+	pending?: PendingAction | null,
+};
+
+/**  A countdown started (`pending` set) or ended (`None`: done or cancelled). */
+export type OnCompleteCountdown_Serialize = {
+	pending: PendingAction | null,
+};
+
 export type Package = Package_Serialize | Package_Deserialize;
 
 export type Package_Deserialize = {
@@ -655,11 +701,94 @@ export type Package_Serialize = {
 	downloads: Download_Serialize[],
 };
 
+/**  A countdown in progress, for the UI. */
+export type PendingAction = {
+	action: OnComplete,
+	queueName: string,
+	/**  Whole seconds left when this was sent. */
+	secondsLeft: number,
+};
+
 /**  What the LinkGrabber shows for a link downloaded before: the latest time. */
 export type PreviousDownload = {
 	finishedAt: number,
 	path: string,
 	exists: boolean,
+};
+
+/**  A queue as the Queues page shows it. */
+export type Queue = Queue_Serialize | Queue_Deserialize;
+
+/**  What the Queues page can change about a queue. */
+export type QueueChanges = QueueChanges_Serialize | QueueChanges_Deserialize;
+
+/**  What the Queues page can change about a queue. */
+export type QueueChanges_Deserialize = {
+	name: string,
+	maxActive: number,
+	schedule: QueueSchedule_Deserialize,
+	onComplete: OnComplete,
+};
+
+/**  What the Queues page can change about a queue. */
+export type QueueChanges_Serialize = {
+	name: string,
+	maxActive: number,
+	schedule: QueueSchedule_Serialize,
+	onComplete: OnComplete,
+};
+
+/**  When a queue may run. Disabled: always. */
+export type QueueSchedule = QueueSchedule_Serialize | QueueSchedule_Deserialize;
+
+/**  When a queue may run. Disabled: always. */
+export type QueueSchedule_Deserialize = {
+	enabled?: boolean,
+	/**  Days the window starts on: 0 is Monday, 6 is Sunday. */
+	days?: number[],
+	/**  `HH:MM`; a stop not after the start means the next day. */
+	start?: string,
+	stop?: string,
+};
+
+/**  When a queue may run. Disabled: always. */
+export type QueueSchedule_Serialize = {
+	enabled: boolean,
+	/**  Days the window starts on: 0 is Monday, 6 is Sunday. */
+	days: number[],
+	/**  `HH:MM`; a stop not after the start means the next day. */
+	start: string,
+	stop: string,
+};
+
+/**  A queue as the Queues page shows it. */
+export type Queue_Deserialize = {
+	id: number,
+	name: string,
+	maxActive: number,
+	schedule: QueueSchedule_Deserialize,
+	onComplete: OnComplete,
+	/**  Whether its schedule lets it run right now. */
+	open: boolean,
+	packages: number,
+	active: number,
+	queued: number,
+	paused: number,
+};
+
+/**  A queue as the Queues page shows it. */
+export type Queue_Serialize = {
+	id: number,
+	name: string,
+	maxActive: number,
+	schedule: QueueSchedule_Serialize,
+	onComplete: OnComplete,
+	/**  Whether its schedule lets it run right now. */
+	open: boolean,
+	packages: number,
+	active: number,
+	queued: number,
+	paused: number,
 };
 
 /**  The user's preferences. Missing fields (older saves) get their defaults. */
