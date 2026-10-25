@@ -137,6 +137,17 @@ pub async fn add_links(
     })
 }
 
+/// A download's own speed limit in bytes per second; `None` removes it.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_download_speed_limit(
+    state: State<'_, AppState>,
+    id: DownloadId,
+    limit: Option<u64>,
+) -> CommandResult<()> {
+    Ok(state.downloads.set_download_speed_limit(id, limit).await?)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn pause_download(state: State<'_, AppState>, id: DownloadId) -> CommandResult<()> {

@@ -73,6 +73,7 @@
 			<dd>
 				{download.status === 'active' ? formatSpeed(live?.speedBps) : '—'}
 				{#if live?.connections}· {live.connections} connection{live.connections === 1 ? '' : 's'}{/if}
+				{#if download.speedLimit}· limited to {formatSpeed(download.speedLimit)}{/if}
 			</dd>
 			<dt>Time left</dt>
 			<dd>

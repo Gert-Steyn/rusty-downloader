@@ -165,6 +165,8 @@ pub struct RunSpec {
     pub request: RequestContext,
     /// The cookies written out for this run; [`download`] fills it in.
     pub cookie_file: Option<PathBuf>,
+    /// Bytes per second (`--limit-rate`), unless the options set their own.
+    pub limit_rate: Option<u64>,
 }
 
 impl RunSpec {
@@ -188,6 +190,11 @@ impl RunSpec {
             self.cookie_file.as_deref(),
             &self.options,
         ));
+        if let Some(rate) = self.limit_rate
+            && !self.options.is_set("limit-rate")
+        {
+            args.extend(["--limit-rate".into(), rate.to_string()]);
+        }
         args.push("--".into());
         args.push(self.url.to_string());
         Ok(args)
@@ -357,6 +364,7 @@ mod tests {
             available: None,
             request: RequestContext::default(),
             cookie_file: None,
+            limit_rate: None,
         };
         let args = spec.args().unwrap();
         assert!(!args.iter().any(|a| a == "--cookies" || a == "--user-agent"));
@@ -368,6 +376,17 @@ mod tests {
         assert_eq!(after(&args, "-D"), r"C:\dl\Trip");
         assert!(after(&args, "--download-archive").ends_with("imgur.com.sqlite3"));
         assert_eq!(args[args.len() - 2..], ["--", "https://imgur.com/a/abc"]);
+
+        assert!(!args.iter().any(|a| a == "--limit-rate"));
+        spec.limit_rate = Some(500_000);
+        let args = spec.args().unwrap();
+        assert_eq!(after(&args, "--limit-rate"), "500000");
+        // A limit set in the gallery's own options wins.
+        spec.options.flags.insert("limit-rate".into(), "2M".into());
+        let args = spec.args().unwrap();
+        assert_eq!(args.iter().filter(|a| *a == "--limit-rate").count(), 1);
+        assert_eq!(after(&args, "--limit-rate"), "2M");
+        spec.options.flags.clear();
 
         spec.options.archive = false;
         spec.options.user_config = true;

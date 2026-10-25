@@ -7,6 +7,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::db::Pool;
+use crate::ratelimit::MIN_RATE;
+use crate::speed::{self, ActiveLimit, SpeedRule};
 use crate::{Error, Result};
 
 /// Key of the [`Settings`] value.
@@ -49,6 +51,12 @@ pub struct Settings {
     pub warn_duplicates: bool,
     /// Don't let Windows go to sleep while downloads are running.
     pub keep_awake: bool,
+    /// The status bar's switch: limit the speed to `speed_limit` now.
+    pub speed_limit_on: bool,
+    /// Bytes per second while the switch is on.
+    pub speed_limit: u64,
+    /// Limits that apply by themselves at set times, while the switch is off.
+    pub speed_schedule: Vec<SpeedRule>,
 }
 
 impl Default for Settings {
@@ -67,6 +75,9 @@ impl Default for Settings {
             notify_failed: true,
             warn_duplicates: true,
             keep_awake: true,
+            speed_limit_on: false,
+            speed_limit: 2 * 1024 * 1024,
+            speed_schedule: Vec::new(),
         }
     }
 }
@@ -100,6 +111,20 @@ impl Settings {
         {
             return invalid(format!("\"{}\" is not a full folder path.", dir.display()));
         }
+        if self.speed_limit < MIN_RATE {
+            return invalid(format!(
+                "The speed limit must be at least {} KB/s.",
+                MIN_RATE / 1024
+            ));
+        }
+        if self.speed_schedule.len() > speed::MAX_RULES {
+            return invalid(format!("At most {} scheduled limits.", speed::MAX_RULES));
+        }
+        self.speed_schedule = self
+            .speed_schedule
+            .into_iter()
+            .map(SpeedRule::validated)
+            .collect::<Result<_>>()?;
         self.clipboard_ignore = self
             .clipboard_ignore
             .iter()
@@ -111,6 +136,21 @@ impl Settings {
 
     pub async fn save(&self, pool: &Pool) -> Result<()> {
         set(pool, APP, self).await
+    }
+
+    /// The speed limit that applies at `now` (local time).
+    pub fn active_speed_limit(&self, now: chrono::NaiveDateTime) -> ActiveLimit {
+        speed::active_limit(
+            self.speed_limit_on,
+            self.speed_limit,
+            &self.speed_schedule,
+            now,
+        )
+    }
+
+    /// The speed limit that applies now.
+    pub fn active_speed_limit_now(&self) -> ActiveLimit {
+        self.active_speed_limit(chrono::Local::now().naive_local())
     }
 
     /// Whether a copied link should be left alone.
@@ -230,6 +270,19 @@ mod tests {
             },
             Settings {
                 download_dir: Some("C:dl".into()),
+                ..Settings::default()
+            },
+            Settings {
+                speed_limit: 10,
+                ..Settings::default()
+            },
+            Settings {
+                speed_schedule: vec![SpeedRule {
+                    days: vec![],
+                    from: "08:00".into(),
+                    to: "18:00".into(),
+                    limit: 4096,
+                }],
                 ..Settings::default()
             },
         ] {

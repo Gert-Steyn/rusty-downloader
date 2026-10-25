@@ -7,6 +7,7 @@ mod keep_awake;
 mod native_host;
 mod notify;
 mod settings_commands;
+mod speed;
 mod state;
 mod tool_commands;
 mod tray;
@@ -67,12 +68,16 @@ fn specta_builder() -> Builder<tauri::Wry> {
             settings_commands::history_clear,
             settings_commands::history_open,
             settings_commands::move_package,
+            speed::speed_limit_status,
+            speed::set_speed_limit_on,
+            commands::set_download_speed_limit,
         ])
         .events(collect_events![
             events::DownloadEvents,
             events::GrabberEvents,
             events::ToolEvents,
-            clipboard::ClipboardOffer
+            clipboard::ClipboardOffer,
+            speed::SpeedLimitStatus
         ])
         // Sizes and ids are far below 2^53, so plain numbers are safe in JS.
         .dangerously_cast_bigints_to_number()
@@ -152,6 +157,7 @@ pub fn run() {
             tauri::async_runtime::spawn(clipboard::watch(handle.clone()));
             bridge::start(handle);
             tauri::async_runtime::spawn(keep_awake::watch(handle.clone()));
+            tauri::async_runtime::spawn(speed::follow_schedule(handle.clone()));
             Ok(())
         })
         .build(tauri::generate_context!())

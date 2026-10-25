@@ -102,6 +102,8 @@ pub struct RunSpec {
     pub request: RequestContext,
     /// The cookies written out for this run; [`download`] fills it in.
     pub cookie_file: Option<PathBuf>,
+    /// Bytes per second (`--limit-rate`); fixed for the run.
+    pub limit_rate: Option<u64>,
 }
 
 impl RunSpec {
@@ -140,6 +142,9 @@ impl RunSpec {
         }
         args.extend(self.options.format_args());
         args.extend(request_args(&self.request, self.cookie_file.as_deref()));
+        if let Some(rate) = self.limit_rate {
+            args.extend(["--limit-rate".into(), rate.to_string()]);
+        }
         args.push("--".into());
         args.push(self.url.to_string());
         args
@@ -391,6 +396,7 @@ mod tests {
             options: YtDlpOptions::default(),
             request: RequestContext::default(),
             cookie_file: None,
+            limit_rate: None,
         };
         let args = spec.args();
         assert!(!args.iter().any(|a| a == "--cookies" || a == "--add-header"));
@@ -420,12 +426,14 @@ mod tests {
                 cookies: Vec::new(),
             },
             cookie_file: Some(r"C:\tmp\c.txt".into()),
+            limit_rate: Some(1_048_576),
         };
         let args = spec.args();
         let joined = args.join(" ");
         assert!(joined.contains("--add-header Referer:https://example.com/page"));
         assert!(joined.contains("--add-header User-Agent:TestBrowser/1"));
         assert!(joined.contains(r"--cookies C:\tmp\c.txt"));
+        assert!(joined.contains("--limit-rate 1048576"));
         assert_eq!(args[args.len() - 2], "--");
     }
 

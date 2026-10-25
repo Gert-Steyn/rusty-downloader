@@ -92,6 +92,7 @@ pub(super) async fn execute(
         available,
         request: row.request(),
         cookie_file: None,
+        limit_rate: inner.tool_rate(row.speed_limit()),
     };
     let (tx, rx) = mpsc::unbounded_channel();
     let total = row.files_total.map(|t| t as u32);

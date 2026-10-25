@@ -32,6 +32,7 @@ impl Run {
                 max_retries: 5,
                 retry_base_delay: Duration::from_millis(10),
                 progress_interval: Duration::from_millis(20),
+                throttle: Default::default(),
             },
         }
     }

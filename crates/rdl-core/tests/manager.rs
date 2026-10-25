@@ -27,6 +27,7 @@ fn config() -> ManagerConfig {
             max_retries: 3,
             retry_base_delay: Duration::from_millis(10),
             progress_interval: Duration::from_millis(20),
+            throttle: Default::default(),
         },
         save_interval: Duration::from_millis(30),
         rescan_interval: Duration::from_millis(200),
@@ -539,5 +540,75 @@ async fn browser_cookies_and_referer_reach_only_their_host() {
     let id = fx.add_downloads(vec![with_request("to-localhost")]).await[0];
     assert_eq!(finished(&mut fx, id).await, Status::Failed);
     assert_eq!(*server.private_cookies.lock().unwrap(), [None]);
+    fx.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_global_speed_limit_slows_downloads() {
+    let (base, server) = spawn_server().await;
+    let mut fx = Fixture::new().await;
+    // 4 MiB at 2 MiB/s: about 2 s (less the bucket's quarter second).
+    fx.manager.set_speed_limit(Some(2 * 1024 * 1024));
+    assert_eq!(fx.manager.speed_limit(), Some(2 * 1024 * 1024));
+    let started = std::time::Instant::now();
+    let id = fx.add(&[url(&base, "file")]).await[0];
+    assert_eq!(finished(&mut fx, id).await, Status::Completed);
+    let took = started.elapsed();
+    assert!(
+        took >= Duration::from_millis(1500) && took < Duration::from_secs(5),
+        "took {took:?}"
+    );
+    assert_file(&fx, "test.bin", &server);
+
+    // Lifted, the same file comes in at full speed.
+    fx.manager.set_speed_limit(None);
+    let started = std::time::Instant::now();
+    let id = fx.add(&[url(&base, "named/again.bin")]).await[0];
+    assert_eq!(finished(&mut fx, id).await, Status::Completed);
+    assert!(started.elapsed() < Duration::from_millis(1500));
+    fx.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_downloads_own_limit_changes_while_it_runs() {
+    let (base, server) = spawn_server().await;
+    let mut fx = Fixture::new().await;
+    let id = fx.add(&[url(&base, "file")]).await[0];
+    // Slowed right away: 4 MiB at 256 KiB/s would take 16 s.
+    fx.manager
+        .set_download_speed_limit(id, Some(256 * 1024))
+        .await
+        .unwrap();
+    fx.wait_for(|e| {
+        matches!(e, Event::SpeedLimitChanged { download_id, speed_limit: Some(_) } if *download_id == id)
+    })
+    .await;
+    assert_eq!(
+        fx.manager.get(id).await.unwrap().speed_limit,
+        Some(256 * 1024)
+    );
+    fx.wait_status(id, Status::Active).await;
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let partway = fx.manager.get(id).await.unwrap();
+    assert_ne!(partway.status, Status::Completed, "the limit didn't hold");
+
+    // Lifted while running: it finishes promptly.
+    let started = std::time::Instant::now();
+    fx.manager.set_download_speed_limit(id, None).await.unwrap();
+    assert_eq!(finished(&mut fx, id).await, Status::Completed);
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(fx.manager.get(id).await.unwrap().speed_limit, None);
+    assert_file(&fx, "test.bin", &server);
+
+    assert!(
+        fx.manager
+            .set_download_speed_limit(9999, Some(1024))
+            .await
+            .is_err()
+    );
     fx.manager.shutdown().await;
 }

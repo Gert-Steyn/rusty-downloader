@@ -9,6 +9,7 @@
 	import { isLinkDrag, textFromDrop } from '#lib/drop.js';
 	import { formatSpeed } from '#lib/format.js';
 	import { grabber } from '#lib/linkgrabber.svelte.js';
+	import { speed } from '#lib/speed.svelte.js';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import type { LayoutProps } from './$types';
@@ -26,6 +27,21 @@
 	// Owned by the layout so the status bar and badges are live on every page.
 	downloads.start();
 	grabber.start();
+	speed.start();
+
+	const limitText = $derived.by(() => {
+		const { limit, source, until } = speed.active;
+		if (source === 'none' || limit == null) return 'No speed limit';
+		const text = `Limited to ${formatSpeed(limit)}`;
+		return source === 'schedule' && until ? `${text} until ${until}` : text;
+	});
+	const limitHint = $derived(
+		speed.active.source === 'manual'
+			? 'Click to lift the limit (scheduled limits still apply)'
+			: speed.active.source === 'schedule'
+				? 'A scheduled limit. Click to use your own limit instead'
+				: 'Click to limit the speed (the limit is set in Settings)'
+	);
 
 	const isActive = (item: NavItem) =>
 		item.href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(item.href);
@@ -116,7 +132,17 @@
 		<span>{downloads.stats.active} active</span>
 		<span>{downloads.stats.queued} queued</span>
 		<span class="spacer"></span>
-		<span>No speed limit</span>
+		<button
+			type="button"
+			class="limit"
+			class:on={speed.active.source !== 'none'}
+			aria-pressed={speed.active.source === 'manual'}
+			title={speed.error ?? limitHint}
+			onclick={() => speed.toggle()}
+		>
+			<Icon name="speed" size={14} />
+			{limitText}
+		</button>
 	</footer>
 </div>
 
@@ -232,6 +258,25 @@
 	}
 	.statusbar .spacer {
 		flex: 1;
+	}
+	.statusbar .limit {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		height: 22px;
+		padding: 0 8px;
+		border: 0;
+		border-radius: 4px;
+		font: inherit;
+		color: inherit;
+		background: transparent;
+		cursor: pointer;
+	}
+	.statusbar .limit:hover {
+		background: var(--fill-subtle-hover);
+	}
+	.statusbar .limit.on {
+		color: var(--accent-text-on-layer);
 	}
 
 	.badge {

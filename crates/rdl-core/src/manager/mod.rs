@@ -25,6 +25,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::db::Pool;
 use crate::http::{self, SegmentConfig, filename};
+use crate::ratelimit::{RateLimiter, Throttle};
 use crate::tools::Tools;
 use crate::{Error, Result, gallerydl, ytdlp};
 
@@ -80,6 +81,8 @@ struct Inner {
     /// Connections per plain download, changeable while running; starts at
     /// `config.segment.max_connections`.
     max_connections: AtomicUsize,
+    /// The speed limit all downloads share.
+    global_limit: Arc<RateLimiter>,
 }
 
 struct RunningJob {
@@ -87,6 +90,8 @@ struct RunningJob {
     cancel: CancellationToken,
     stop: Arc<Mutex<Option<StopReason>>>,
     finished: watch::Receiver<bool>,
+    /// The download's own speed limit, changeable while it runs.
+    limit: Arc<RateLimiter>,
 }
 
 /// Why a running download was cancelled; decides its status afterwards.
@@ -101,11 +106,26 @@ enum StopReason {
 }
 
 impl Inner {
-    /// Segment settings for a download starting now.
-    fn segment_config(&self) -> SegmentConfig {
+    /// Segment settings for a download starting now, whose own limit is `limit`.
+    fn segment_config(&self, limit: &Arc<RateLimiter>) -> SegmentConfig {
         SegmentConfig {
             max_connections: self.max_connections.load(Ordering::Relaxed),
+            throttle: Throttle::new([Arc::clone(&self.global_limit), Arc::clone(limit)]),
             ..self.config.segment.clone()
+        }
+    }
+
+    /// The `--limit-rate` for a yt-dlp or gallery-dl run starting now: the
+    /// download's own limit, or its share of the global one if smaller. The
+    /// tools can't be slowed while they run, so this is fixed at the start.
+    fn tool_rate(&self, own: Option<u64>) -> Option<u64> {
+        let share = self.global_limit.rate().map(|global| {
+            let running = self.running().len().max(1) as u64;
+            (global / running).max(crate::ratelimit::MIN_RATE)
+        });
+        match (own, share) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
         }
     }
 
@@ -152,9 +172,41 @@ impl Manager {
             dest_lock: tokio::sync::Mutex::new(()),
             wake: Notify::new(),
             shutdown: CancellationToken::new(),
+            global_limit: Arc::new(RateLimiter::new(None)),
         });
         tokio::spawn(scheduler(Arc::clone(&inner)));
         Ok(Self { inner })
+    }
+
+    /// The speed limit all downloads share, in bytes per second; `None` lifts it.
+    /// Plain downloads feel it at once; yt-dlp and gallery-dl runs from
+    /// their next start.
+    pub fn set_speed_limit(&self, limit: Option<u64>) {
+        if self.inner.global_limit.rate() != limit {
+            tracing::info!(?limit, "global speed limit");
+        }
+        self.inner.global_limit.set_rate(limit);
+    }
+
+    pub fn speed_limit(&self) -> Option<u64> {
+        self.inner.global_limit.rate()
+    }
+
+    /// A download's own speed limit (`None`: only the global one applies).
+    /// Takes effect at once for a running plain download.
+    pub async fn set_download_speed_limit(&self, id: DownloadId, limit: Option<u64>) -> Result<()> {
+        let limit = limit.map(|l| l.max(crate::ratelimit::MIN_RATE));
+        if !store::set_speed_limit(&self.inner.pool, id, limit).await? {
+            return Err(Error::NotFound(format!("download {id}")));
+        }
+        if let Some(job) = self.inner.running().get(&id) {
+            job.limit.set_rate(limit);
+        }
+        self.inner.emit(Event::SpeedLimitChanged {
+            download_id: id,
+            speed_limit: limit,
+        });
+        Ok(())
     }
 
     /// Downloads running right now (including ones that are stopping).

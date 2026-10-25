@@ -6,7 +6,9 @@
 	import EmptyState from '#lib/components/EmptyState.svelte';
 	import Icon from '#lib/components/Icon.svelte';
 	import RemoveDialog from '#lib/components/RemoveDialog.svelte';
+	import SpeedLimitDialog from '#lib/components/SpeedLimitDialog.svelte';
 	import { downloads } from '#lib/downloads.svelte.js';
+	import { formatSpeed } from '#lib/format.js';
 
 	let selection = $state<Selection>(null);
 	let adding = $state(false);
@@ -59,6 +61,8 @@
 	// Right-click menu for the row under the pointer.
 	let menuAt = $state<{ x: number; y: number } | null>(null);
 	let menuItems = $state<MenuItem[]>([]);
+	let limiting = $state<number | null>(null);
+	let limitOpen = $state(false);
 
 	function openMenu(target: NonNullable<Selection>, x: number, y: number) {
 		menuItems = target.kind === 'download' ? downloadMenu(target.id) : packageMenu(target.id);
@@ -81,6 +85,15 @@
 			{ label: 'Open', icon: 'open', disabled: d.status !== 'completed', action: () => downloads.open(id) },
 			{ label: 'Show in folder', icon: 'folder', action: () => downloads.reveal(id) },
 			{ label: 'Copy link', icon: 'copy', action: () => copy(d.sourceUrl) },
+			{
+				label: d.speedLimit ? `Speed limit (${formatSpeed(d.speedLimit)})…` : 'Speed limit…',
+				icon: 'speed',
+				disabled: d.status === 'completed',
+				action: () => {
+					limiting = id;
+					limitOpen = true;
+				}
+			},
 			'separator',
 			{ label: 'Remove…', icon: 'trash', danger: true, action: askRemove }
 		];
@@ -196,6 +209,7 @@
 	onadded={(id) => (selection = { kind: 'package', id })}
 />
 <RemoveDialog bind:open={removing} target={removeTarget} />
+<SpeedLimitDialog bind:open={limitOpen} id={limiting} />
 <ContextMenu bind:at={menuAt} items={menuItems} />
 
 

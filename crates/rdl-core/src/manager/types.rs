@@ -157,6 +157,8 @@ pub struct Download {
     /// File count, for gallery-dl downloads.
     pub files: Option<FileCount>,
     pub title: Option<String>,
+    /// The download's own speed limit in bytes per second.
+    pub speed_limit: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -201,6 +203,11 @@ pub enum Event {
         download_id: DownloadId,
         status: Status,
         error: Option<String>,
+    },
+    /// A download's own speed limit changed.
+    SpeedLimitChanged {
+        download_id: DownloadId,
+        speed_limit: Option<u64>,
     },
     /// Name, size and destination are known after the first probe.
     Resolved {

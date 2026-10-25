@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { open as pickFolder } from '@tauri-apps/plugin-dialog';
-	import { commands, isTauri, unwrap, type AppInfo, type Settings } from '#lib/api.js';
+	import { commands, isTauri, unwrap, type AppInfo, type Settings, type SpeedRule } from '#lib/api.js';
 	import { settings } from '#lib/settings.svelte.js';
+	import { speed } from '#lib/speed.svelte.js';
 
 	let info = $state<AppInfo | null>(null);
 	let infoError = $state<string | null>(null);
@@ -46,6 +47,44 @@
 			title: 'Folder for new downloads'
 		});
 		if (typeof picked === 'string') set('downloadDir', picked);
+	}
+
+	const MB = 1024 * 1024;
+	const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+	/** MB/s for a limit field, without trailing zeros. */
+	const mbps = (bytes: number) => String(Math.round((bytes / MB) * 100) / 100);
+
+	/** Bytes per second from a MB/s field, or null if it isn't a positive number. */
+	function fromMbps(input: HTMLInputElement): number | null {
+		const n = Number(input.value.replace(',', '.'));
+		return Number.isFinite(n) && n > 0 ? Math.round(n * MB) : null;
+	}
+
+	async function setSpeedLimit(input: HTMLInputElement) {
+		const bytes = fromMbps(input);
+		if (bytes != null && bytes !== s?.speedLimit) await settings.update({ speedLimit: bytes });
+		if (settings.value) input.value = mbps(settings.value.speedLimit);
+		await speed.refresh();
+	}
+
+	async function setSwitch(on: boolean) {
+		await settings.update({ speedLimitOn: on });
+		await speed.refresh();
+	}
+
+	/** Save the schedule with `rule` at `i` changed (or removed, or added at the end). */
+	async function saveRule(i: number, rule: SpeedRule | null) {
+		const rules = [...(s?.speedSchedule ?? [])];
+		if (rule == null) rules.splice(i, 1);
+		else rules[i] = rule;
+		await settings.update({ speedSchedule: rules });
+		await speed.refresh();
+	}
+
+	function toggleDay(i: number, rule: SpeedRule, day: number) {
+		const days = rule.days.includes(day) ? rule.days.filter((d) => d !== day) : [...rule.days, day];
+		void saveRule(i, { ...rule, days });
 	}
 
 	function patterns(text: string) {
@@ -109,6 +148,88 @@
 					/>
 					<small>For plain files on servers that allow it. Applies to downloads that start after the change.</small>
 				</div>
+			</div>
+		</section>
+
+		<section class="card" aria-labelledby="set-speed">
+			<h2 id="set-speed">Speed</h2>
+			<label class="check">
+				<input type="checkbox" checked={s.speedLimitOn} onchange={(e) => setSwitch(e.currentTarget.checked)} />
+				<span>
+					<span class="inline">
+						Limit downloads to
+						<input
+							class="textbox narrow"
+							type="number"
+							min="0.01"
+							step="0.1"
+							aria-label="Speed limit in MB/s"
+							value={mbps(s.speedLimit)}
+							onchange={(e) => setSpeedLimit(e.currentTarget)}
+						/>
+						MB/s
+					</span>
+					<small>The same switch is in the status bar. yt-dlp and gallery-dl downloads take the new limit when they next start.</small>
+				</span>
+			</label>
+
+			<h3>Scheduled limits</h3>
+			<small>Apply by themselves at these times while the switch above is off; the lowest one counts. A window that ends before it starts runs overnight.</small>
+			{#each s.speedSchedule as rule, i (i)}
+				<div class="rule">
+					<div class="days" role="group" aria-label="Days">
+						{#each DAYS as day, d (day)}
+							<button
+								type="button"
+								class="day"
+								class:on={rule.days.includes(d)}
+								aria-pressed={rule.days.includes(d)}
+								aria-label={day}
+								title={day}
+								onclick={() => toggleDay(i, rule, d)}>{day[0]}</button
+							>
+						{/each}
+					</div>
+					<input
+						class="textbox"
+						type="time"
+						aria-label="From"
+						value={rule.from}
+						onchange={(e) => saveRule(i, { ...rule, from: e.currentTarget.value })}
+					/>
+					<span class="muted">to</span>
+					<input
+						class="textbox"
+						type="time"
+						aria-label="To"
+						value={rule.to}
+						onchange={(e) => saveRule(i, { ...rule, to: e.currentTarget.value })}
+					/>
+					<input
+						class="textbox narrow"
+						type="number"
+						min="0.01"
+						step="0.1"
+						aria-label="Limit in MB/s"
+						value={mbps(rule.limit)}
+						onchange={(e) => {
+							const limit = fromMbps(e.currentTarget);
+							if (limit != null) saveRule(i, { ...rule, limit });
+							else e.currentTarget.value = mbps(rule.limit);
+						}}
+					/>
+					<span class="muted">MB/s</span>
+					<button type="button" class="btn" aria-label="Remove this limit" onclick={() => saveRule(i, null)}>Remove</button>
+				</div>
+			{/each}
+			<div class="row">
+				<button
+					type="button"
+					class="btn"
+					onclick={() =>
+						saveRule(s?.speedSchedule.length ?? 0, { days: [0, 1, 2, 3, 4], from: '08:00', to: '18:00', limit: MB })}
+					>Add a scheduled limit</button
+				>
 			</div>
 		</section>
 
@@ -268,6 +389,48 @@
 	}
 	.narrow {
 		width: 90px;
+	}
+	h3 {
+		margin: 6px 0 0;
+		font: 600 13px/18px var(--font-ui);
+	}
+	.inline {
+		display: flex !important;
+		flex-direction: row !important;
+		align-items: center;
+		gap: 8px;
+	}
+	.rule {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+		font-size: 13px;
+	}
+	.rule .textbox {
+		width: 90px;
+	}
+	.rule input[type='time'] {
+		width: 120px;
+	}
+	.days {
+		display: flex;
+		gap: 2px;
+	}
+	.day {
+		width: 26px;
+		height: 26px;
+		border: 1px solid var(--stroke-control, var(--stroke-divider));
+		border-radius: 4px;
+		font: 600 12px var(--font-ui);
+		color: var(--text-secondary);
+		background: transparent;
+		cursor: pointer;
+	}
+	.day.on {
+		color: var(--accent-text);
+		background: var(--accent);
+		border-color: var(--accent);
 	}
 	.check {
 		display: flex;

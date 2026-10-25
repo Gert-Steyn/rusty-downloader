@@ -71,6 +71,7 @@ async fn downloads_real_video() {
         },
         request: RequestContext::default(),
         cookie_file: None,
+        limit_rate: None,
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let printer = tokio::spawn(async move {
@@ -242,6 +243,7 @@ async fn gallery_dl_resolves_and_downloads_a_real_gallery() {
         available: Some(gallerydl::supported_flags(&exe).await.unwrap()),
         request: RequestContext::default(),
         cookie_file: None,
+        limit_rate: None,
     };
     println!("args: {:?}", spec.args().unwrap());
     for run in 1..=2 {

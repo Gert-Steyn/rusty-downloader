@@ -73,6 +73,12 @@ export const commands = {
 	historyOpen: (id: number, reveal: boolean) => typedError<null, CommandError>(__TAURI_INVOKE("history_open", { id, reveal })),
 	/**  Move a package before another one in its queue (`None`: to the end). */
 	movePackage: (id: number, before: number | null) => typedError<null, CommandError>(__TAURI_INVOKE("move_package", { id, before })),
+	/**  What limits the speed now. */
+	speedLimitStatus: () => __TAURI_INVOKE<ActiveLimit_Serialize>("speed_limit_status"),
+	/**  The status bar's switch. Returns what limits the speed afterwards. */
+	setSpeedLimitOn: (on: boolean) => typedError<ActiveLimit_Serialize, CommandError>(__TAURI_INVOKE("set_speed_limit_on", { on })),
+	/**  A download's own speed limit in bytes per second; `None` removes it. */
+	setDownloadSpeedLimit: (id: number, limit: number | null) => typedError<null, CommandError>(__TAURI_INVOKE("set_download_speed_limit", { id, limit })),
 };
 
 /** Events */
@@ -80,10 +86,32 @@ export const events = {
 	clipboardOffer: makeEvent<ClipboardOffer, ClipboardOffer>("clipboard-offer"),
 	downloadEvents: makeEvent<DownloadEvents_Serialize, DownloadEvents_Deserialize>("download-events"),
 	grabberEvents: makeEvent<GrabberEvents_Serialize, GrabberEvents_Deserialize>("grabber-events"),
+	speedLimitStatus: makeEvent<SpeedLimitStatus_Serialize, SpeedLimitStatus_Deserialize>("speed-limit-status"),
 	toolEvents: makeEvent<ToolEvents_Serialize, ToolEvents_Deserialize>("tool-events"),
 };
 
 /* Types */
+/**  What limits the speed right now, for the status bar. */
+export type ActiveLimit = ActiveLimit_Serialize | ActiveLimit_Deserialize;
+
+/**  What limits the speed right now, for the status bar. */
+export type ActiveLimit_Deserialize = {
+	/**  Bytes per second; `None` is no limit. */
+	limit?: number | null,
+	source: LimitSource,
+	/**  For a scheduled limit, when its window ends (`HH:MM`). */
+	until?: string | null,
+};
+
+/**  What limits the speed right now, for the status bar. */
+export type ActiveLimit_Serialize = {
+	/**  Bytes per second; `None` is no limit. */
+	limit: number | null,
+	source: LimitSource,
+	/**  For a scheduled limit, when its window ends (`HH:MM`). */
+	until: string | null,
+};
+
 export type AddLinks = AddLinks_Serialize | AddLinks_Deserialize;
 
 export type AddLinksResult = {
@@ -173,6 +201,8 @@ export type Download_Deserialize = {
 	/**  File count, for gallery-dl downloads. */
 	files?: FileCount_Deserialize | null,
 	title?: string | null,
+	/**  The download's own speed limit in bytes per second. */
+	speedLimit?: number | null,
 };
 
 export type Download_Serialize = {
@@ -193,6 +223,8 @@ export type Download_Serialize = {
 	/**  File count, for gallery-dl downloads. */
 	files: FileCount_Serialize | null,
 	title: string | null,
+	/**  The download's own speed limit in bytes per second. */
+	speedLimit: number | null,
 };
 
 /**
@@ -210,6 +242,8 @@ export type Event = Event_Serialize | Event_Deserialize;
 export type Event_Deserialize = { type: "packageAdded"; packageId: number } | { type: "packageRemoved"; packageId: number } | 
 /**  Packages in the queue changed order; re-read the list. */
 { type: "packagesReordered"; queueId: number } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error?: string | null } | 
+/**  A download's own speed limit changed. */
+{ type: "speedLimitChanged"; downloadId: number; speedLimit?: number | null } | 
 /**  Name, size and destination are known after the first probe. */
 { type: "resolved"; downloadId: number; filename: string; size?: number | null } | { type: "progress"; downloadId: number; downloaded: number; total?: number | null; speedBps: number; connections: number; 
 /**  For gallery downloads, which count files rather than bytes. */
@@ -223,6 +257,8 @@ files?: FileCount_Deserialize | null };
 export type Event_Serialize = { type: "packageAdded"; packageId: number } | { type: "packageRemoved"; packageId: number } | 
 /**  Packages in the queue changed order; re-read the list. */
 { type: "packagesReordered"; queueId: number } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error: string | null } | 
+/**  A download's own speed limit changed. */
+{ type: "speedLimitChanged"; downloadId: number; speedLimit: number | null } | 
 /**  Name, size and destination are known after the first probe. */
 { type: "resolved"; downloadId: number; filename: string; size: number | null } | { type: "progress"; downloadId: number; downloaded: number; total: number | null; speedBps: number; connections: number; 
 /**  For gallery downloads, which count files rather than bytes. */
@@ -553,6 +589,10 @@ export type HistoryEntry_Serialize = {
 	exists: boolean,
 };
 
+export type LimitSource = "none" | 
+/**  The switch is on. */
+"manual" | "schedule";
+
 /**  Where links came from, so the UI can say "3 links from the clipboard". */
 export type LinkSource = "manual" | "clipboard" | "drop" | 
 /**  Expanded from a playlist link already in the LinkGrabber. */
@@ -655,6 +695,12 @@ export type Settings_Deserialize = {
 	warnDuplicates?: boolean,
 	/**  Don't let Windows go to sleep while downloads are running. */
 	keepAwake?: boolean,
+	/**  The status bar's switch: limit the speed to `speed_limit` now. */
+	speedLimitOn?: boolean,
+	/**  Bytes per second while the switch is on. */
+	speedLimit?: number,
+	/**  Limits that apply by themselves at set times, while the switch is off. */
+	speedSchedule?: SpeedRule[],
 };
 
 /**  The user's preferences. Missing fields (older saves) get their defaults. */
@@ -687,6 +733,37 @@ export type Settings_Serialize = {
 	warnDuplicates: boolean,
 	/**  Don't let Windows go to sleep while downloads are running. */
 	keepAwake: boolean,
+	/**  The status bar's switch: limit the speed to `speed_limit` now. */
+	speedLimitOn: boolean,
+	/**  Bytes per second while the switch is on. */
+	speedLimit: number,
+	/**  Limits that apply by themselves at set times, while the switch is off. */
+	speedSchedule: SpeedRule[],
+};
+
+/**  What limits the speed now changed. */
+export type SpeedLimitStatus = SpeedLimitStatus_Serialize | SpeedLimitStatus_Deserialize;
+
+/**  What limits the speed now changed. */
+export type SpeedLimitStatus_Deserialize = {
+	active: ActiveLimit_Deserialize,
+};
+
+/**  What limits the speed now changed. */
+export type SpeedLimitStatus_Serialize = {
+	active: ActiveLimit_Serialize,
+};
+
+/**  A window of the week with its own limit. */
+export type SpeedRule = {
+	/**  Days the window starts on: 0 is Monday, 6 is Sunday. */
+	days: number[],
+	/**  Start, `HH:MM`. */
+	from: string,
+	/**  End, `HH:MM`; not after `from` means the next day. */
+	to: string,
+	/**  Bytes per second. */
+	limit: number,
 };
 
 export type Status = "queued" | "active" | "paused" | "completed" | "failed" | "canceled";

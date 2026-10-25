@@ -347,6 +347,7 @@ mod tests {
             gallerydl: None,
             files: None,
             title: None,
+            speed_limit: None,
         }
     }
 

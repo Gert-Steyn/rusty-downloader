@@ -38,7 +38,8 @@ function dl(
 		ytdlp: null,
 		gallerydl: null,
 		files: null,
-		title: null
+		title: null,
+		speedLimit: null
 	};
 }
 
@@ -306,7 +307,10 @@ export function settings(): Settings {
 		notifyFinished: true,
 		notifyFailed: true,
 		warnDuplicates: true,
-		keepAwake: true
+		keepAwake: true,
+		speedLimitOn: false,
+		speedLimit: 2 * 1024 * 1024,
+		speedSchedule: [{ days: [0, 1, 2, 3, 4], from: '08:00', to: '18:00', limit: 1024 * 1024 }]
 	};
 }
 

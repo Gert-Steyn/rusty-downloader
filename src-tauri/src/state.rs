@@ -97,6 +97,8 @@ impl AppState {
         self.downloads
             .set_max_connections(settings.max_connections as usize);
         self.grabber.set_warn_duplicates(settings.warn_duplicates);
+        self.downloads
+            .set_speed_limit(settings.active_speed_limit_now().limit);
         Ok(())
     }
 

@@ -64,6 +64,7 @@ pub(super) async fn execute(
         options: row.ytdlp_options().unwrap_or_default(),
         request: row.request(),
         cookie_file: None,
+        limit_rate: inner.tool_rate(row.speed_limit()),
     };
     let (tx, rx) = mpsc::unbounded_channel();
     let forwarder = tokio::spawn(forward(Arc::clone(inner), row.id, rx));

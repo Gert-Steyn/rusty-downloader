@@ -13,6 +13,7 @@ use url::Url;
 use super::store::{self, DownloadRow, Resolved};
 use super::{Event, Inner, RunningJob, Status, StopReason};
 use crate::http::{self, DownloadSpec, Outcome, ProbeResult, Progress, filename, segments};
+use crate::ratelimit::RateLimiter;
 use crate::{Error, Result, history};
 
 const PART_SUFFIX: &str = ".rdl.part";
@@ -35,6 +36,7 @@ pub(super) async fn start(inner: &Arc<Inner>, row: DownloadRow, queue_id: i64) -
     let cancel = CancellationToken::new();
     let stop = Arc::new(Mutex::new(None));
     let (finished_tx, finished_rx) = watch::channel(false);
+    let limit = Arc::new(RateLimiter::new(row.speed_limit()));
     inner.running().insert(
         row.id,
         RunningJob {
@@ -42,6 +44,7 @@ pub(super) async fn start(inner: &Arc<Inner>, row: DownloadRow, queue_id: i64) -
             cancel: cancel.clone(),
             stop: Arc::clone(&stop),
             finished: finished_rx,
+            limit: Arc::clone(&limit),
         },
     );
     tracing::info!(download = row.id, url = %row.source_url, "download started");
@@ -49,7 +52,7 @@ pub(super) async fn start(inner: &Arc<Inner>, row: DownloadRow, queue_id: i64) -
     let inner = Arc::clone(inner);
     tokio::spawn(async move {
         let mut last = None;
-        let result = execute(&inner, &row, &cancel, &mut last).await;
+        let result = execute(&inner, &row, &cancel, &limit, &mut last).await;
         let reason = *stop.lock().unwrap_or_else(|e| e.into_inner());
         if let Err(e) = finalize(&inner, &row, result, reason, last).await {
             tracing::error!(download = row.id, error = %e, "could not record download outcome");
@@ -69,6 +72,7 @@ async fn execute(
     inner: &Arc<Inner>,
     row: &DownloadRow,
     cancel: &CancellationToken,
+    limit: &Arc<RateLimiter>,
     last: &mut Option<Progress>,
 ) -> Result<Outcome> {
     match row.kind.as_str() {
@@ -148,7 +152,7 @@ async fn execute(
         &part_path(&dest),
         &dest,
         &resume_from,
-        &inner.segment_config(),
+        &inner.segment_config(limit),
         &tx,
         cancel,
     )

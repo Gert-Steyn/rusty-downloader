@@ -3360,6 +3360,7 @@ name = "rdl-core"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "chrono",
  "dirs 7.0.0",
  "fastrand",
  "futures-util",

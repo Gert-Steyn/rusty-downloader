@@ -109,6 +109,9 @@ class DownloadsStore {
 	reveal = (id: number) => this.run(() => unwrap(commands.revealDownload(id)));
 	openFolder = (packageId: number) =>
 		this.run(() => unwrap(commands.openPackageFolder(packageId)));
+	/** A download's own speed limit in bytes per second; `null` removes it. */
+	setSpeedLimit = (id: number, limit: number | null) =>
+		this.run(() => unwrap(commands.setDownloadSpeedLimit(id, limit)));
 	/** Put a package before another (`null`: last); the order is the start order. */
 	movePackage = (id: number, before: number | null) =>
 		this.run(() => unwrap(commands.movePackage(id, before)));
@@ -165,6 +168,11 @@ class DownloadsStore {
 					if (!d) break;
 					d.filename = event.filename;
 					if (event.size != null) d.size = event.size;
+					break;
+				}
+				case 'speedLimitChanged': {
+					const d = this.#byId.get(event.downloadId);
+					if (d) d.speedLimit = event.speedLimit;
 					break;
 				}
 				case 'packageAdded':

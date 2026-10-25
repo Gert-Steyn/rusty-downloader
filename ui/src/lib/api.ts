@@ -1,6 +1,7 @@
 // Friendly names and helpers over the generated bindings (bindings.ts).
 import { isTauri } from '@tauri-apps/api/core';
 import type {
+	ActiveLimit_Serialize,
 	CommandError,
 	Download_Serialize,
 	DownloadEvents_Serialize,
@@ -29,6 +30,7 @@ export type {
 	FormatPreset,
 	LinkSource,
 	Status,
+	SpeedRule,
 	ToolChannel,
 	ToolName
 } from './bindings.js';
@@ -53,6 +55,7 @@ export type HistoryEntry = HistoryEntry_Serialize;
 export type ToolInfo = ToolInfo_Serialize;
 export type ToolTask = ToolTask_Serialize;
 export type ToolEventBatch = ToolEvents_Serialize;
+export type ActiveLimit = ActiveLimit_Serialize;
 
 type CommandResult<T> = { status: 'ok'; data: T } | { status: 'error'; error: CommandError };
 

@@ -26,6 +26,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::segments::{self, Segment};
 use super::{DownloadSpec, ProbeResult, check_status, parse_content_range};
+use crate::ratelimit::Throttle;
 use crate::{Error, Result};
 
 #[derive(Debug, Clone)]
@@ -37,6 +38,8 @@ pub struct SegmentConfig {
     pub max_retries: u32,
     pub retry_base_delay: Duration,
     pub progress_interval: Duration,
+    /// Speed limits every received chunk passes through.
+    pub throttle: Throttle,
 }
 
 impl Default for SegmentConfig {
@@ -47,6 +50,7 @@ impl Default for SegmentConfig {
             max_retries: 5,
             retry_base_delay: Duration::from_millis(500),
             progress_interval: Duration::from_millis(250),
+            throttle: Throttle::default(),
         }
     }
 }
@@ -362,9 +366,17 @@ async fn fetch_range(shared: &Shared, idx: usize) -> Result<()> {
         if take > 0 {
             file.write_all(&chunk[..take]).await?;
         }
-        let mut segs = shared.lock();
-        segs[idx].advance(take as u64);
-        if segs[idx].is_done() {
+        let done = {
+            let mut segs = shared.lock();
+            segs[idx].advance(take as u64);
+            segs[idx].is_done()
+        };
+        // Every chunk pays, the last one too: segments can be small.
+        tokio::select! {
+            _ = job.cancel.cancelled() => break Ok(()),
+            _ = job.config.throttle.take(take as u64) => {}
+        }
+        if done {
             break Ok(());
         }
     };
@@ -448,6 +460,10 @@ async fn stream_once(job: &Job, progress: &watch::Sender<Progress>) -> Result<Ou
                 if last_publish.elapsed() >= job.config.progress_interval {
                     progress.send_replace(report(written, 1));
                     last_publish = Instant::now();
+                }
+                tokio::select! {
+                    _ = job.cancel.cancelled() => break Outcome::Paused,
+                    _ = job.config.throttle.take(chunk.len() as u64) => {}
                 }
             }
             None => {

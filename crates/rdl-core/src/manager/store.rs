@@ -33,9 +33,14 @@ pub(crate) struct DownloadRow {
     pub files_done: Option<i64>,
     pub files_total: Option<i64>,
     pub request_json: Option<String>,
+    pub speed_limit: Option<i64>,
 }
 
 impl DownloadRow {
+    pub fn speed_limit(&self) -> Option<u64> {
+        self.speed_limit.map(|l| l as u64)
+    }
+
     pub fn kind(&self) -> DownloadKind {
         DownloadKind::parse(&self.kind)
     }
@@ -91,6 +96,7 @@ impl DownloadRow {
             gallerydl: self.gallerydl_options(),
             files: self.files(),
             title: self.title.clone(),
+            speed_limit: self.speed_limit(),
         }
     }
 }
@@ -382,6 +388,20 @@ pub(crate) async fn set_planned(
         .execute(pool)
         .await?;
     Ok(())
+}
+
+/// Returns whether the download exists.
+pub(crate) async fn set_speed_limit(
+    pool: &Pool,
+    id: DownloadId,
+    limit: Option<u64>,
+) -> Result<bool> {
+    let result = sqlx::query("UPDATE downloads SET speed_limit = ? WHERE id = ?")
+        .bind(limit.map(|l| l as i64))
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 pub(crate) async fn set_downloaded(pool: &Pool, id: DownloadId, downloaded: u64) -> Result<()> {
