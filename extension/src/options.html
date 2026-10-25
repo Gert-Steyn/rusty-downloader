@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Rusty Downloader options</title>
+		<link rel="stylesheet" href="style.css" />
+		<style>
+			body {
+				padding: 16px 20px;
+				max-width: 560px;
+			}
+			section {
+				margin-bottom: 16px;
+			}
+			h2 {
+				font-size: 13px;
+				font-weight: 600;
+				margin: 0 0 4px;
+			}
+			p {
+				margin: 0 0 6px;
+			}
+			#access[hidden] {
+				display: none;
+			}
+		</style>
+	</head>
+	<body>
+		<section id="access" hidden>
+			<h2>Access to sites</h2>
+			<p class="muted">
+				To send cookies and read links on pages, the extension needs access to all sites.
+			</p>
+			<button class="primary" id="grant">Allow access to all sites</button>
+		</section>
+		<section>
+			<label><input type="checkbox" id="intercept" /> Take over downloads from the browser</label>
+		</section>
+		<section>
+			<h2>File types</h2>
+			<p class="muted">Downloads of these types go to Rusty Downloader, whatever their size.</p>
+			<textarea id="extensions"></textarea>
+		</section>
+		<section>
+			<label>
+				Also downloads of at least
+				<input type="number" id="minSizeMB" min="0" step="1" style="width: 70px" /> MB
+			</label>
+			<p class="muted">0 means size alone never decides.</p>
+		</section>
+		<section>
+			<h2>Always take over downloads from</h2>
+			<textarea id="alwaysSites" placeholder="example.com"></textarea>
+		</section>
+		<section>
+			<h2>Never take over downloads from</h2>
+			<textarea id="neverSites" placeholder="example.com"></textarea>
+			<p class="muted">Subdomains count too. Downloads in private windows always stay in the browser.</p>
+		</section>
+		<section>
+			<label><input type="checkbox" id="sendCookies" /> Send this browser’s cookies for the links’ sites</label>
+			<p class="muted">Needed for downloads behind a sign-in. Only the cookies of the sites the links point to are sent.</p>
+		</section>
+		<p class="muted" id="saved"></p>
+		<script type="module" src="options.js"></script>
+	</body>
+</html>

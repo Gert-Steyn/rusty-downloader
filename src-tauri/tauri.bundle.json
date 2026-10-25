@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "pnpm host:build && pnpm ui:build"
+  },
+  "bundle": {
+    "resources": {
+      "../target/release/rdl-native-host.exe": "rdl-native-host.exe"
+    }
+  }
+}

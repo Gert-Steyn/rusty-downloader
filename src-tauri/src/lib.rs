@@ -3,6 +3,7 @@ mod clipboard;
 mod commands;
 mod events;
 mod grabber_commands;
+mod native_host;
 mod notify;
 mod settings_commands;
 mod state;
@@ -126,6 +127,7 @@ pub fn run() {
             let handle = app.handle();
             tray::create(handle)?;
             notify::register(handle);
+            native_host::register(handle);
             tauri::async_runtime::spawn(tray::track(handle.clone(), tray_events));
             tauri::async_runtime::spawn(notify::watch(handle.clone(), notify_events));
             // The window starts hidden (tauri.conf.json) so a start into the

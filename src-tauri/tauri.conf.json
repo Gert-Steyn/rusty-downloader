@@ -4,7 +4,7 @@
   "mainBinaryName": "rusty-downloader",
   "identifier": "dev.rustydownloader.app",
   "build": {
-    "beforeDevCommand": "pnpm ui:dev",
+    "beforeDevCommand": "cargo build -p rdl-native-host && pnpm ui:dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm ui:build",
     "frontendDist": "../ui/build"

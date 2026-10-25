@@ -6,7 +6,10 @@
 	"scripts": {
 		"tauri": "tauri",
 		"dev": "tauri dev",
-		"build": "tauri build",
+		"build": "tauri build --config src-tauri/tauri.bundle.json",
+		"host:build": "cargo build --release -p rdl-native-host",
+		"ext:build": "node extension/build.mjs",
+		"ext:test": "node --test extension/test/*.test.mjs",
 		"ui:dev": "pnpm --filter ui dev",
 		"ui:build": "pnpm --filter ui build",
 		"ui:check": "pnpm --filter ui check"

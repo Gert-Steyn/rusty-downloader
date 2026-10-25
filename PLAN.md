@@ -8,9 +8,9 @@ A full-featured download manager for Windows, modeled on **JDownloader**. It has
 
 ## 0. Current Status (updated 2026-10-25)
 
-**Where we are:** Phase 0 and **all of Phase 1 (1a–1g) are done**. Phase 2 is under way: **2a (per-download referer, user agent and cookies), 2b (the app's named-pipe server) and 2c (`rdl-native-host`) are done** (see "How 2a/2b/2c works"). **Next up: 2d, the MV3 extension.** Browsers can't reach the host until it's registered (2e), so the extension and registration are best built together.
+**Where we are:** Phases 0, 1 and **2 (browser integration, 2a–2e) are done**; only a live Firefox run is still owed (see the 2d/2e follow-ups). **Next up: Phase 3 (scheduler, speed limits, keep-awake, on-complete actions, checksums).**
 
-The app works as an HTTP(S), video and gallery download manager that lives in the tray. You can paste, drop or copy links into the LinkGrabber (optionally "ask first", with ignore patterns), review and rename them, pick a video format or gallery options, and start them. Links you downloaded before are flagged. Plain files download segmented and resumable. Pages from sites yt-dlp supports are recognised automatically, and playlists expand into one link per video. Pages yt-dlp doesn't know (or can't read) go to gallery-dl, and a gallery becomes one download into its own folder. yt-dlp, gallery-dl and ffmpeg install themselves on first use. Finished downloads go into History; Windows notifications report finished packages and failures. Settings cover the download folder, limits, clipboard, start with Windows and the tray. Everything survives an app restart.
+The app works as an HTTP(S), video and gallery download manager that lives in the tray. You can paste, drop or copy links into the LinkGrabber (optionally "ask first", with ignore patterns), review and rename them, pick a video format or gallery options, and start them. Links you downloaded before are flagged. Plain files download segmented and resumable. Pages from sites yt-dlp supports are recognised automatically, and playlists expand into one link per video. Pages yt-dlp doesn't know (or can't read) go to gallery-dl, and a gallery becomes one download into its own folder. yt-dlp, gallery-dl and ffmpeg install themselves on first use. Finished downloads go into History; Windows notifications report finished packages and failures. A browser extension (Edge, Chrome, Brave; Firefox untested) sends links, selections, pages and matching downloads to the app with the browser's cookies, starting the app if needed. Settings cover the download folder, limits, clipboard, start with Windows and the tray. Everything survives an app restart.
 
 ### Done so far
 
@@ -28,8 +28,10 @@ The app works as an HTTP(S), video and gallery download manager that lives in th
 | 2a – Request context | `ab1cc74` | `rdl-core::request` (referer, user agent, browser-shaped cookies with RFC 6265 matching), redirects followed by hand so each hop gets its own cookies, temporary Netscape cookie files for yt-dlp and gallery-dl (checking and downloading), LinkGrabber `add_with_request`, migration 6 |
 | 2b – Pipe server | `f281838` | `rdl-bridge` crate (protocol v1: `ping`, `status`, `add`; native-messaging framing; pipe server and client), app handler sending links to the LinkGrabber or the queue with their request context, `browser` link source, Windows notification for browser links, `tools/dev/pipe.mjs` |
 | 2c – Native host | `f7df5be` | `rdl-native-host.exe`: relays native messages to the pipe, checks the pipe is served by `rusty-downloader.exe` from its own folder under the same user, starts the app in the tray for an `add`, keeps the browser's pipes out of the app; error replies gain a `code` (`notRunning`, `untrusted`, `unavailable`) |
+| 2d – Extension | (uncommitted) | MV3 extension (`extension/`, plain JS, Chromium + generated Firefox build): right-click menus, download takeover by type/size/site rules, cookies per link site, popup with status and switch, options page; pinned id; unit tests in CI |
+| 2e – Registration | (uncommitted) | App registers the host for Chrome, Edge, Brave, Chromium and Firefox on every start; `pnpm dev` builds the host, `pnpm build` bundles it next to the app |
 
-Tests: 165 Rust tests (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; pipe suite against real named pipes; native-host suite driving the real host binary over stdin/stdout; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
+Tests: 167 Rust tests and 9 extension tests (`pnpm ext:test`) (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; pipe suite against real named pipes; native-host suite driving the real host binary over stdin/stdout; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
 
 ### How 1e works
 
@@ -90,6 +92,33 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
 - **Checked against the real app (2026-10-25)**, with a script playing the browser and the debug binaries side by side: with the app off, `ping` answered `notRunning` without starting it; `add` started it in the tray (0.6 s warm, 4.9 s on the first run), passed the trust check, and the link reached the LinkGrabber with a "1 link from the browser" notification; a second host session reached the running app. Cleaned up afterwards.
 - **Not done here:** browsers can't find the host until 2e registers it (`HKCU\…\NativeMessagingHosts`).
 
+### How 2d works
+
+- **Layout:** `extension/src/` holds one set of sources, plain ES modules with no bundler: `background.js` (worker), `native.js` (talking to the host), `rules.js` (pure helpers, unit-tested by `extension/test/` with `node --test`), `popup.*`, `options.*`, `style.css`. `node extension/build.mjs` (`pnpm ext:build`) writes `extension/dist/chromium/` and `extension/dist/firefox/` (git-ignored). The Firefox manifest is generated from the Chromium one: no `key`, `background.scripts` instead of a service worker, and `browser_specific_settings.gecko.id = extension@rustydownloader.dev`. Icons are copied from `src-tauri/icons`.
+- **Pinned id:** the manifest's `key` is a public key generated for this project (the private key wasn't kept and isn't needed for unpacked installs), so Chromium gives the unpacked extension the id `pnfhclaphbmimlmgkdamhmiaidjcmioh` everywhere. Edge confirmed it. `node extension/build.mjs --check` (in CI) fails if `src-tauri/src/native_host.rs` doesn't allow that id and the Firefox id.
+- **Permissions:** `nativeMessaging`, `contextMenus`, `cookies`, `downloads`, `storage`, `notifications`, `scripting`, host access to `<all_urls>` (cookies for any site, links from any page). Firefox grants site access separately; the options page shows an "Allow access to all sites" button when it's missing.
+- **Talking to the app** (`native.js`): `connectNative("dev.rustydownloader.host")`, one port per browser session (the host keeps its pipe), closed after 3 idle minutes so the host exits and the worker can sleep; replies matched by `id`, 60 s timeout. A host the browser can't start ("not found", "forbidden") becomes `notInstalled`. The popup uses one-shot `sendNativeMessage` with `status`, which never starts the app.
+- **Right-click menus:** *Download with Rusty Downloader* (link), *Send selected links* (anchors the selection touches plus links written as text; falls back to the selection text where scripts can't run), *Send all links on this page*, *Send this page (video or gallery)* (the page URL; the LinkGrabber decides between yt-dlp and gallery-dl). All go to the LinkGrabber with the tab's URL as referer. Only http(s) links, de-duplicated, at most 1,000 per message.
+- **Cookies:** read with `cookies.getAll({url})` for one link per site (at most 25 sites per send), from the tab's cookie store (private windows, Firefox containers), merged; the app then sends each cookie only where it matches. `sendCookies` can be switched off.
+- **Taking over downloads:** `downloads.onCreated` → `shouldIntercept` (switched on; not a private window; http(s); never-sites win; always-sites; file type list, by default archives, disc images, installers and media; or at least 20 MB). A match is paused at once and sent to the queue with the referer, the browser's user agent and cookies; if the app took it, the browser's copy is cancelled and erased and a notification says so; if not, it's resumed and a notification says why.
+  - **Found in Edge:** a small file can be entirely received the moment the download is created (always when the worker has to wake first). Edge then reports the pause as done, finishes the download anyway, and `cancel` succeeds without effect; erasing it from the list hid a second copy in Downloads. Now only a download that is paused *and still missing bytes* (`stillMissingBytes`) is taken over; the others stay with the browser. As a backstop, a download found complete after cancelling stays visible and a "Downloaded twice" notification appears.
+- **Popup:** Connected (with the app's counts) / Not running ("It starts by itself when you send something.") / Not set up / Not reachable; the takeover switch and a summary of the rule. **Options:** the switch, file types, minimum size, always/never sites, the cookie switch; saved in `storage.sync` on every change.
+- **Test hook:** `globalThis.rustyDownloader.onMenu(info, tab)` in the worker runs a menu item as if clicked (DevTools can't click context menus) and returns the totals.
+
+### How 2e works
+
+- **Registration** (`src-tauri/src/native_host.rs`): on every start, if `rdl-native-host.exe` is next to the app, it writes `%APPDATA%\rusty-downloader\native-host\chromium.json` (`allowed_origins`: the pinned extension) and `firefox.json` (`allowed_extensions`: the Firefox id), and sets the default value of `HKCU\Software\{Google\Chrome, Microsoft\Edge, BraveSoftware\Brave-Browser, Chromium, Mozilla}\NativeMessagingHosts\dev.rustydownloader.host` to the right one. Brave and Chromium only when their vendor key exists. Without the host exe it logs a warning and registers nothing. The last copy of the app to start wins, including a dev build.
+- **Building the host:** `pnpm dev` now runs `cargo build -p rdl-native-host` first, so the debug host sits next to the debug app. `pnpm build` uses `src-tauri/tauri.bundle.json`, which builds the release host (`pnpm host:build`) and adds it as a resource mapped to the install folder: the installer puts `rdl-native-host.exe` next to `rusty-downloader.exe` and the uninstaller deletes it (checked in the generated NSIS script and the installer's file list). It's not in the main config, because Tauri's build script would then demand a release host for every `cargo test`.
+- **CI:** the check job also runs `pnpm ext:test` and `node extension/build.mjs --check`.
+- **Checked end to end in Edge 156 (2026-10-25)**, with a throwaway profile, `--load-extension` (plus `--disable-features=DisableLoadExtensionCommandLineSwitch`) and DevTools on port 9333 (`tools/dev/edge.mjs`), against a local site that logs each request's `Cookie`, `Referer` and `User-Agent`:
+  - The registry entries and manifests were written; the extension loaded with the pinned id; `sendNativeMessage` reached the app through the debug host.
+  - All links on a page (4; a `mailto:` dropped), a selection (an anchor plus a written-out link), a single link (came back as a duplicate) reached the LinkGrabber; the app's checks of them carried Edge's cookies, the page as referer and Edge's user agent, and so did a tool run's (cookie file).
+  - Clicking a `.zip` link: Edge's download was paused, cancelled and erased; the app downloaded an identical file with the cookies and referer.
+  - With the app closed, the popup said "Not running" and didn't start it; a download then started it (`--minimized`) and went to the app within 2 s. The app kept running after Edge closed.
+  - A never-site kept the download in Edge. The small-file race above was found here and fixed; afterwards a 400 KB file stayed with Edge only and a 100 MB file went to the app only.
+  - Cleaned up afterwards: test downloads, LinkGrabber links, history entries, notifications, settings, the test profile, and the test files that reached Downloads.
+  - Not checked: Firefox, real sign-in sites, the popup's look (screenshots of the test Edge hung).
+
 ### How 1g works
 
 - **Settings** (`rdl-core::settings::Settings`): one JSON value under the `app` key (missing fields get defaults; the old `linkgrabber.clipboard_watch` key is read once as a fallback). `AppState::update_settings` validates (limits 1–20 active, 1–32 connections, absolute folder, trimmed patterns), saves and applies: the main queue's `max_active`, `Manager::set_max_connections` (new downloads only), and the LinkGrabber's duplicate lookups. "Start with Windows" goes through `tauri-plugin-autostart` (HKCU `Run` entry with `--minimized`), and `get_settings` reports what Windows actually has. The Settings page saves each change at once and reloads on every visit, since the LinkGrabber's clipboard switch also writes settings.
@@ -103,7 +132,7 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
 
 ### Resume here
 
-- **Repo state:** 2c is committed on `main` (`f7df5be`) plus this PLAN update. Check `git status -sb` for whether it has been pushed.
+- **Repo state:** 2c is committed and pushed (`f7df5be`). 2d and 2e are written and tested but not committed yet.
 - **Checked in the app for 1g (2026-10-25)** (2b's checks are in "How 2b works"):
   - DB migrated to schema 5; the window starts hidden and is shown in setup.
   - Settings: a valid change saves ("Saved"), an invalid one (0 at once) shows the error and the field reverts; a relative folder is refused; the chosen folder is used by Add links.
@@ -116,17 +145,17 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
   - Downloads: the right-click menu (with Move to bottom disabled on the last package), Move to top, and dragging a package (indicator shown, link overlay not) reordered as expected.
   - Not checked: clicking the tray menu items and the notification buttons (neither can be driven from DevTools); the Mica background.
   - Cleaned up: test downloads (with files), LinkGrabber, history and notifications cleared, settings back to defaults, no `Run` entry. The test overwrote the clipboard (it held no text before) and cleared it afterwards.
-- **Your machine:** yt-dlp 2026.10.21, gallery-dl 1.32.17 and ffmpeg N-128018 are in `%APPDATA%\rusty-downloader\tools`. The app's DB is at schema `20261027000006` with empty downloads, LinkGrabber and history. The notification registration (`HKCU\Software\Classes\AppUserModelId\dev.rustydownloader.app`) stays; it's what the app writes on every start.
-- **Sanity check before starting:** `cargo test --workspace` (165 pass), `pnpm -C ui check`, then `pnpm dev` and open Settings.
+- **Your machine:** yt-dlp 2026.10.21, gallery-dl 1.32.17 and ffmpeg N-128018 are in `%APPDATA%\rusty-downloader\tools`. The app's DB is at schema `20261027000006` with empty downloads, LinkGrabber and history. The notification registration (`HKCU\Software\Classes\AppUserModelId\dev.rustydownloader.app`) and the native-host registration (`HKCU\Software\…\NativeMessagingHosts\dev.rustydownloader.host`, currently pointing at the debug host in `target\debug`) stay; the app writes both on every start.
+- **Sanity check before starting:** `cargo test --workspace` (167 pass), `pnpm ext:test` (9), `pnpm -C ui check`, then `pnpm dev` and open Settings.
 - **Optional, real network:** `RDL_LIVE_DIR=<some folder> cargo test -p rdl-core --test tools_live -- --ignored --nocapture` (about 135 MB of tools on the first run, reused after).
 
-### Next: Phase 2 – browser integration (suggested order)
+### Phase 2 – browser integration (done)
 
-1. ~~**Per-download headers and cookies**~~ done as 2a (see "How 2a works").
-2. ~~**App side of the bridge**~~ done as 2b (see "How 2b works").
-3. ~~**`rdl-native-host`**~~ done as 2c (see "How 2c works").
-4. **MV3 extension (2d)** (`extension/`, Chromium first, then a Firefox manifest). Talk to the host with `chrome.runtime.connectNative` (one host process per browser session), show `notRunning` / `untrusted` errors plainly, and send cookies only for the links' own sites: context menus (download link, all links on page, selection, send page to yt-dlp / gallery-dl), download interception by size/extension/site rules with a modifier to bypass, `chrome.cookies` for the link's site, and a popup with connection status and a pause switch.
-5. **Registration (2e):** native-host manifests under `HKCU\Software\Google\Chrome\NativeMessagingHosts`, `…\Microsoft\Edge\…` and `…\Mozilla\NativeMessagingHosts`, written by the NSIS installer and by a dev script (`tools/dev/`), with the extension id pinned via a manifest `key`.
+2a request context, 2b pipe server, 2c native host, 2d extension, 2e registration; see "How 2a works" to "How 2e works". Still owed: a run in Firefox (load `extension/dist/firefox/manifest.json` from `about:debugging`, grant site access in the options page, then repeat the Edge checks) and a download from a real site that needs sign-in.
+
+### Next: Phase 3 – control
+
+Scheduler (start/stop times per queue, on-complete action), speed limiting with time profiles, keep-awake while downloading, checksum verification (§2.3). The Queues page is still a placeholder.
 
 ### Deferred / known gaps (pick up in the milestone noted)
 
@@ -158,6 +187,17 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
   - The trust check trusts any `rusty-downloader.exe` in the host's folder; it doesn't check a signature (there is none yet, see Authenticode in Open Decisions).
   - A portable copy has its own host next to it; whichever copy's host the browser registration points at is the one the browser uses (2e should register the copy that does the registering).
   - The host's stderr goes to the browser's log only when the browser runs with logging on; there's no host log file.
+- **Extension and registration (2d/2e follow-ups):**
+  - **Firefox not run yet** (see Phase 2 above). Its manifest is generated and the APIs used exist there, but nothing was tried live.
+  - Small downloads that the browser has fully received when the takeover happens stay in the browser (by design, see "How 2d works"). Chromium's `downloads.onDeterminingFilename` could hold them earlier, at the cost of delaying every download.
+  - No modifier key to keep a download in the browser: the downloads API can't see keys. The popup switch and the never-sites list do that job.
+  - A download that came from a form POST is fetched again with GET by the app, which may fail.
+  - "Send this page" doesn't force yt-dlp or gallery-dl; the LinkGrabber decides (also a 1f gap).
+  - Chromium's `filename` is empty when a download is created, so the app names files from the server; Firefox passes the browser's name.
+  - Partitioned (CHIPS) cookies and Firefox's first-party isolation aren't handled.
+  - Not packaged for any store: Edge/Chrome need developer mode and *Load unpacked* (`extension/dist/chromium`), and branded Chrome 137+ ignores `--load-extension` unless the `DisableLoadExtensionCommandLineSwitch` feature is turned off.
+  - The registry entries stay after uninstalling (no NSIS uninstall hook yet); they point at a host that's gone, which browsers report as "not found". A dev build overwrites an installed copy's registration until the installed app starts again.
+  - No in-app status for the browser bridge (registered? extension seen?) and no switch to turn it off.
   - Not tried under a real browser yet (needs 2d and 2e), so the job breakaway and the stdin/stdout handling are only tested against a script.
 - **Windows 10:** the transparent window shows the desktop through it, because Mica is Windows 11 only. A fallback is needed if Windows 10 ever matters.
 - **Tool and plugin kinds:** `http`, `ytdlp` and `gallerydl` downloads run; the rest later.
@@ -192,6 +232,11 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
 - **SQLite ids are reused:** tables use `INTEGER PRIMARY KEY` without `AUTOINCREMENT`, so after deleting the newest row its id comes back. History is keyed on a URL hash for this reason; never key anything long-lived on a download id.
 - **Clippy `large_enum_variant`:** `GrabberEvent::Updated` holds a `Box<GrabbedLink>` for this reason; serialisation is unchanged.
 - **Svelte 5:** in `$effect`, anything read becomes a dependency. Wrap reset logic in `untrack` (this caused the "folder field wipes links" bug in 1c).
+- **Edge and Chrome when testing the extension:**
+  - After a page has started one download, further downloads it starts from script are blocked silently ("multiple automatic downloads"). Navigate the tab instead (`cdp:Page.navigate`, or `chrome.tabs.update`).
+  - Screenshots of a background tab hang; bring it to the front first (they still hung in the test Edge, so read pages as text).
+  - The extension's worker stays alive while DevTools is attached; `cdp:ServiceWorker.enable ;; ServiceWorker.stopAllWorkers` on a page target stops it, to test waking up.
+  - `msedge.exe --version` doesn't print a version on Windows; it opens the user's own Edge. Read the version from the exe's file properties instead.
 - **Windows PowerShell 5.1:**
   - Commit messages with embedded `"` get split. Write the message to a file and use `git commit -F`.
   - `Invoke-RestMethod` doesn't unroll JSON arrays.
@@ -224,6 +269,7 @@ The native window can't be clicked from automation, but WebView2 exposes Chrome 
 7. **Browser pipe:** `node tools/dev/pipe.mjs '{"type":"add","links":["http://127.0.0.1:8765/x"],"target":"queue"}'` plays the native host. Set a disposable download folder first: `queue` adds go to the default folder.
 8. **Reading the DB while the app runs:** another process sees only the state from before the app started (its WAL changes aren't visible from outside). Copy `rusty-downloader.db` and `-wal` somewhere else and read the copy, after closing the app.
 9. **Stopping `pnpm dev`** from a background shell can leave Vite on port 1420, and the next start fails with "Port 1420 is already in use". Stop that `node … vite dev` process first.
+10. **Extension in Edge:** `pnpm ext:build`, then start Edge with a throwaway profile (`--user-data-dir=<temp folder>`), `--load-extension=<repo>\extension\dist\chromium`, `--disable-features=DisableLoadExtensionCommandLineSwitch`, `--remote-debugging-port=9333` and `--no-first-run`. Drive it with `node tools/dev/edge.mjs <target> "<js>"` (see its header). The app must be running from a build with the host next to it (`pnpm dev` does that). A download Edge keeps lands in your real Downloads folder even with a throwaway profile, so delete test files there afterwards. Close the test Edge with `Browser.close` over DevTools.
 
 ---
 
@@ -508,8 +554,8 @@ Locations: installed builds use `%APPDATA%\rusty-downloader\` (db, logs, plugins
 |---|---|---|---|
 | **0. Scaffold** | Workspace, Tauri + SvelteKit shell, SQLite migrations, tracing logs, CI, Fluent theme base | App launches, CI green | ✅ Done (CI never checked) |
 | **1. MVP** | Segmented HTTP engine (resume, retries, dynamic splitting, headers/cookies/auth), queues + concurrency, packages, LinkGrabber (paste/clipboard/drag-drop), yt-dlp + gallery-dl (resolve, download, progress, common flags, impersonation, archives) + tool updater, tray, toasts, history/duplicate detection, single instance, settings | Used as daily driver for HTTP, video and galleries | ✅ Done |
-| **2. Browser** | MV3 extension (Chromium + Firefox), native host, download interception, context menus, cookie hand-off | Browser downloads flow into the app with cookies | ▶️ Next |
-| **3. Control** | Scheduler, speed limiting + profiles, keep-awake, on-complete actions, checksum verification | Overnight queue then shutdown works | ⏳ |
+| **2. Browser** | MV3 extension (Chromium + Firefox), native host, download interception, context menus, cookie hand-off | Browser downloads flow into the app with cookies | ✅ Done in Edge (Firefox not run) |
+| **3. Control** | Scheduler, speed limiting + profiles, keep-awake, on-complete actions, checksum verification | Overnight queue then shutdown works | ▶️ Next |
 | **4. Network & protocols** | Proxies + rules, interface binding + kill-switch, accounts in the keyring, FTP/FTPS, SFTP | Downloads via SOCKS5/VPN interface, FTP/SFTP resume | ⏳ |
 | **5. Torrent** | librqbit integration, magnet/.torrent associations, seeding limits (ratio/time) | Torrent download + seed from the same UI | ⏳ |
 | **6. Plugins & extract** | Rhai plugin host + API, 2–3 reference plugins, auto-extract with password lists | A hoster resolved via plugin, archive auto-extracted | ⏳ |
