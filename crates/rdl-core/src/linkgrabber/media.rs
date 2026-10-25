@@ -1,5 +1,6 @@
-//! The yt-dlp side of link checking: deciding when to ask yt-dlp, and
-//! turning its answer into LinkGrabber rows (one per video; playlists expand).
+//! The yt-dlp side of link checking: deciding when to ask the tools at all,
+//! and turning yt-dlp's answer into LinkGrabber rows (one per video;
+//! playlists expand).
 
 use std::collections::HashSet;
 
@@ -9,7 +10,9 @@ use url::Url;
 
 use super::{Availability, GrabberEvent, Inner, LinkId, LinkRow, LinkSource};
 use crate::http::{ProbeResult, filename};
+use crate::manager::DownloadKind;
 use crate::tools::ToolName;
+
 use crate::ytdlp::{self, Media, MediaInfo, YtDlpOptions};
 use crate::{Error, Result};
 
@@ -53,8 +56,8 @@ impl MediaSummary {
     }
 }
 
-/// A plain probe that found a web page (or failed) may be a page yt-dlp
-/// understands. A file served directly never is.
+/// A plain probe that found a web page (or failed) may be a page yt-dlp or
+/// gallery-dl understands. A file served directly never is.
 pub(super) fn worth_asking(probe: &Result<ProbeResult>) -> bool {
     match probe {
         Ok(p) => p.content_type.as_deref().is_some_and(|t| {
@@ -66,47 +69,68 @@ pub(super) fn worth_asking(probe: &Result<ProbeResult>) -> bool {
     }
 }
 
-/// yt-dlp's verdict on a link.
+/// A tool's verdict on a link.
 pub(super) enum Verdict {
-    /// Recorded as a yt-dlp link (or links).
+    /// Recorded as the tool's link (or links).
     Handled,
-    /// Not a site yt-dlp knows; treat as a plain link.
+    /// Not a site the tool knows.
     NotMedia,
+    /// The tool knows the site but couldn't read this page. Not recorded:
+    /// another tool may still manage.
+    Failed(String),
 }
 
-/// Ask yt-dlp about `url` and record the result. Installs yt-dlp on first use.
-pub(super) async fn resolve_link(
-    inner: &Inner,
-    id: LinkId,
-    url: &Url,
-    default_package: Option<&str>,
-) -> Result<Verdict> {
+/// What yt-dlp made of a link, before anything is recorded.
+pub(super) enum Lookup {
+    NotMedia,
+    Failed(String),
+    Found(Media),
+}
+
+/// Ask yt-dlp about `url`. Installs yt-dlp on first use.
+pub(super) async fn lookup(inner: &Inner, url: &Url) -> Result<Lookup> {
     let Some(tools) = &inner.tools else {
-        return Ok(Verdict::NotMedia);
+        return Ok(Lookup::NotMedia);
     };
     let exe = match tools.ensure(ToolName::Ytdlp).await {
         Ok(exe) => exe,
         Err(e) => {
             tracing::warn!(error = %e, "yt-dlp unavailable; checking links as plain files");
-            return Ok(Verdict::NotMedia);
+            return Ok(Lookup::NotMedia);
         }
     };
-    let media = match ytdlp::resolve(&exe, url, &CancellationToken::new()).await {
-        Ok(media) => media,
-        Err(Error::Tool(message)) if is_unsupported(&message) => return Ok(Verdict::NotMedia),
-        Err(Error::Tool(message)) => {
-            record_failure(inner, id, &message).await?;
-            return Ok(Verdict::Handled);
-        }
-        Err(e) => return Err(e),
-    };
+    match ytdlp::resolve(&exe, url, &CancellationToken::new()).await {
+        Ok(media) => Ok(Lookup::Found(media)),
+        Err(Error::Tool(message)) if is_unsupported(&message) => Ok(Lookup::NotMedia),
+        Err(Error::Tool(message)) => Ok(Lookup::Failed(message)),
+        Err(e) => Err(e),
+    }
+}
+
+/// yt-dlp's catch-all extractors pick up any media embedded in any page
+/// (the one video on a Wikimedia category of 80 files, say), so a site
+/// extractor in gallery-dl should win over them.
+pub(super) fn is_generic(media: &Media) -> bool {
+    media.extractor().is_some_and(|e| {
+        let e = e.to_ascii_lowercase();
+        e == "generic" || e == "html5mediaembed"
+    })
+}
+
+/// Record what yt-dlp found: a video, or one link per playlist entry.
+pub(super) async fn record(
+    inner: &Inner,
+    id: LinkId,
+    media: Media,
+    default_package: Option<&str>,
+) -> Result<Verdict> {
     match media {
         Media::Video(info) => record_video(inner, id, &info, default_package).await?,
-        Media::Playlist { title, entries } if entries.is_empty() => {
+        Media::Playlist { title, entries, .. } if entries.is_empty() => {
             let name = title.unwrap_or_else(|| "The playlist".into());
-            record_failure(inner, id, &format!("{name} is empty")).await?;
+            return Ok(Verdict::Failed(format!("{name} is empty")));
         }
-        Media::Playlist { title, entries } => {
+        Media::Playlist { title, entries, .. } => {
             expand_playlist(inner, id, title, entries, default_package).await?
         }
     }
@@ -117,7 +141,13 @@ fn is_unsupported(message: &str) -> bool {
     message.contains("Unsupported URL") || message.contains("No video formats found")
 }
 
-async fn record_failure(inner: &Inner, id: LinkId, message: &str) -> Result<()> {
+/// Record that `kind`'s tool knows the site but couldn't read the link.
+pub(super) async fn record_failure(
+    inner: &Inner,
+    id: LinkId,
+    kind: DownloadKind,
+    message: &str,
+) -> Result<()> {
     let lower = message.to_ascii_lowercase();
     let gone = [
         "unavailable",
@@ -126,6 +156,8 @@ async fn record_failure(inner: &Inner, id: LinkId, message: &str) -> Result<()> 
         "does not exist",
         "not found",
         "404",
+        "410 gone",
+        "deleted",
     ]
     .iter()
     .any(|w| lower.contains(w));
@@ -134,7 +166,8 @@ async fn record_failure(inner: &Inner, id: LinkId, message: &str) -> Result<()> 
     } else {
         Availability::Error
     };
-    sqlx::query("UPDATE link_grabber SET kind = 'ytdlp', availability = ?, error = ? WHERE id = ?")
+    sqlx::query("UPDATE link_grabber SET kind = ?, availability = ?, error = ? WHERE id = ?")
+        .bind(kind.as_str())
         .bind(availability.as_str())
         .bind(message)
         .bind(id)
@@ -261,7 +294,12 @@ async fn expand_playlist(
 }
 
 /// Only the name the link was given when added may be replaced.
-async fn rename_default_package(inner: &Inner, id: LinkId, default: &str, to: &str) -> Result<()> {
+pub(super) async fn rename_default_package(
+    inner: &Inner,
+    id: LinkId,
+    default: &str,
+    to: &str,
+) -> Result<()> {
     sqlx::query(
         "UPDATE link_grabber SET proposed_package = ? WHERE id = ? AND proposed_package = ?",
     )
@@ -280,7 +318,11 @@ async fn row(inner: &Inner, id: LinkId) -> Result<Option<LinkRow>> {
         .await?)
 }
 
-async fn current_options(inner: &Inner, id: LinkId) -> Result<YtDlpOptions> {
+/// The link's stored handler options, if they read as `T`; else `T`'s defaults.
+pub(super) async fn current_options<T: serde::de::DeserializeOwned + Default>(
+    inner: &Inner,
+    id: LinkId,
+) -> Result<T> {
     Ok(row(inner, id)
         .await?
         .and_then(|r| r.handler_opts_json)

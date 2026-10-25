@@ -127,7 +127,9 @@ async fn forward(inner: Arc<Inner>, id: i64, mut rx: mpsc::UnboundedReceiver<Run
                     total,
                     speed_bps: speed_bps.unwrap_or(0),
                     connections: 1,
+                    files: None,
                 });
+
                 if last_save.elapsed() >= inner.config.save_interval {
                     last_save = Instant::now();
                     if let Err(e) = store::set_downloaded(&inner.pool, id, done).await {

@@ -9,6 +9,7 @@
 		percent,
 		summarize
 	} from '#lib/format.js';
+	import { changedCount } from '#lib/gallerydl.js';
 	import { presetLabel } from '#lib/media.js';
 	import Icon from './Icon.svelte';
 	import type { Selection } from './DownloadsTable.svelte';
@@ -59,8 +60,14 @@
 		<dl>
 			<dt>Progress</dt>
 			<dd>
-				{formatBytes(download.downloaded)} of {formatBytes(download.size)}
-				{#if pct != null}({pct.toFixed(1)}%){/if}
+				{#if download.files}
+					{download.files.done} of {download.files.total ?? 'an unknown number of'} files ·
+					{formatBytes(download.downloaded)}{#if download.size != null && download.status !== 'completed'}
+						of about {formatBytes(download.size)}{/if}
+				{:else}
+					{formatBytes(download.downloaded)} of {formatBytes(download.size)}
+					{#if pct != null}({pct.toFixed(1)}%){/if}
+				{/if}
 			</dd>
 			<dt>Speed</dt>
 			<dd>
@@ -79,9 +86,17 @@
 				<dt>Format</dt>
 				<dd>{presetLabel(download.ytdlp)} · yt-dlp</dd>
 			{/if}
+			{#if download.gallerydl}
+				{@const changed = changedCount(download.gallerydl)}
+				<dt>Options</dt>
+				<dd>
+					gallery-dl · {changed ? `${changed} setting${changed === 1 ? '' : 's'} changed` : 'defaults'}
+					{#if download.gallerydl.archive}· skips files fetched before{/if}
+				</dd>
+			{/if}
 			<dt>Source</dt>
 			<dd class="wide mono selectable">{download.sourceUrl}</dd>
-			<dt>Saved to</dt>
+			<dt>{download.files ? 'Folder' : 'Saved to'}</dt>
 			<dd class="wide mono selectable">{download.destPath ?? `${pkg.destDir} (name not known yet)`}</dd>
 		</dl>
 	{:else if pkg}

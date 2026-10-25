@@ -167,3 +167,92 @@ async fn manager_pauses_and_resumes_a_ytdlp_download() {
     assert_eq!(std::fs::metadata(&path).unwrap().len(), 46_935_223);
     manager.shutdown().await;
 }
+
+/// Installs gallery-dl, lists the schema flags its `--help` lacks, and
+/// resolves `RDL_LIVE_GALLERY` (any gallery URL) when set.
+#[tokio::test]
+#[ignore = "network; downloads gallery-dl"]
+async fn gallery_dl_supports_the_flag_schema_and_resolves() {
+    use rdl_core::gallerydl;
+
+    let (_root, tools) = tools().await;
+    let exe = tools.ensure(ToolName::Gallerydl).await.unwrap();
+    println!("{:#?}", tools.info(ToolName::Gallerydl).await.unwrap());
+    let flags = gallerydl::supported_flags(&exe).await.unwrap();
+    let missing: Vec<&str> = gallerydl::schema()
+        .groups
+        .iter()
+        .flat_map(|g| &g.flags)
+        .map(|f| f.flag.as_str())
+        .filter(|f| !flags.contains(*f))
+        .collect();
+    println!("schema flags this gallery-dl lacks: {missing:?}");
+    assert!(missing.is_empty(), "the schema is out of date: {missing:?}");
+}
+
+/// Resolves `RDL_LIVE_GALLERY` (a public gallery URL), then downloads its
+/// first two files twice through the app's runner: the second run must
+/// report both as skipped.
+#[tokio::test]
+#[ignore = "network; set RDL_LIVE_GALLERY"]
+async fn gallery_dl_resolves_and_downloads_a_real_gallery() {
+    use rdl_core::gallerydl::{self, GalleryDlOptions, RunEvent, RunOutcome, RunSpec};
+
+    let Ok(url) = std::env::var("RDL_LIVE_GALLERY") else {
+        println!("RDL_LIVE_GALLERY not set; skipping");
+        return;
+    };
+    let url = Url::parse(&url).unwrap();
+    let (root, tools) = tools().await;
+    let exe = tools.ensure(ToolName::Gallerydl).await.unwrap();
+    let resolved = gallerydl::resolve(&exe, &url, &CancellationToken::new())
+        .await
+        .unwrap();
+    println!("{:#?}", resolved.gallery);
+    assert!(resolved.error.is_none(), "{:?}", resolved.error);
+    assert!(resolved.gallery.files > 0 || resolved.gallery.sub_galleries > 0);
+
+    let dir = root.join("gallery-out");
+    let _ = std::fs::remove_dir_all(&dir);
+    let archive = root.join("gallery-archive.sqlite3");
+    let _ = std::fs::remove_file(&archive);
+    let mut options = GalleryDlOptions::default();
+    options.flags.insert("range".into(), "1-2".into());
+    options.flags.insert("sleep".into(), "1".into());
+    let spec = RunSpec {
+        exe: exe.clone(),
+        ffmpeg_dir: None,
+        url,
+        dir: dir.clone(),
+        archive: Some(archive),
+        options,
+        available: Some(gallerydl::supported_flags(&exe).await.unwrap()),
+    };
+    println!("args: {:?}", spec.args().unwrap());
+    for run in 1..=2 {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let outcome = gallerydl::download(&spec, &tx, &CancellationToken::new()).await;
+        drop(tx);
+        let mut events = Vec::new();
+        while let Some(event) = rx.recv().await {
+            events.push(event);
+        }
+        println!("run {run}: {outcome:?}\n{events:#?}");
+        let (files, bytes) = outcome_files(&events);
+        assert_eq!(outcome.unwrap(), RunOutcome::Completed { files, bytes });
+        assert_eq!(events.len(), 2);
+        for RunEvent::File { path, skipped, .. } in &events {
+            assert!(path.starts_with(&dir), "{}", path.display());
+            assert_eq!(*skipped, run == 2);
+            assert!(path.is_file());
+        }
+    }
+}
+
+fn outcome_files(events: &[rdl_core::gallerydl::RunEvent]) -> (u32, u64) {
+    let bytes = events
+        .iter()
+        .map(|rdl_core::gallerydl::RunEvent::File { size, .. }| size)
+        .sum();
+    (events.len() as u32, bytes)
+}

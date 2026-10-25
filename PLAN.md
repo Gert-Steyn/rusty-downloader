@@ -6,11 +6,11 @@ A full-featured download manager for Windows, modeled on **JDownloader**. It has
 
 ---
 
-## 0. Current Status (updated 2026-10-24)
+## 0. Current Status (updated 2026-10-25)
 
-**Where we are:** Phase 0 is done. Phase 1 milestones **1a–1e are done**. **Next up: 1f (gallery-dl).**
+**Where we are:** Phase 0 is done. Phase 1 milestones **1a–1f are done** (1f was verified against the real gallery-dl 1.32.17 and end to end in the running app, see "Resume here"). **Next up: 1g (desktop polish).**
 
-The app works today as an HTTP(S) and video download manager. You can paste, drop or copy links into the LinkGrabber, review and rename them, pick a video format, and start them. Plain files download segmented and resumable. Pages from sites yt-dlp supports are recognised automatically, playlists expand into one link per video, and yt-dlp and ffmpeg install themselves on first use. Pause, resume and remove work for both kinds, and everything survives an app restart.
+The app works today as an HTTP(S), video and gallery download manager. You can paste, drop or copy links into the LinkGrabber, review and rename them, pick a video format or gallery options, and start them. Plain files download segmented and resumable. Pages from sites yt-dlp supports are recognised automatically, and playlists expand into one link per video. Pages yt-dlp doesn't know (or can't read) go to gallery-dl, and a gallery becomes one download into its own folder. yt-dlp, gallery-dl and ffmpeg install themselves on first use. Pause, resume and remove work for all three kinds, and everything survives an app restart.
 
 ### Done so far
 
@@ -23,10 +23,11 @@ The app works today as an HTTP(S) and video download manager. You can paste, dro
 | 1c – Downloads UI | `bea4e42` | tauri-specta typed IPC, batched events, virtualised treegrid, details panel, add/remove dialogs |
 | 1d – LinkGrabber | `adba9eb` | Background probing + availability, archive-set grouping, inline renames, clipboard watcher, drag-drop, global paste |
 | 1e – Tools + yt-dlp | `462a74b` | Tool manager (install on first use, SHA-256 verified, versioned folders, rollback, daily yt-dlp auto-update), job-object subprocess runner, yt-dlp resolve/download, playlist expansion, format presets, Tools page |
+| 1f – gallery-dl | see git log | gallery-dl from Codeberg (stable) or `gdl-org/builds` (nightly), `-j` resolve into one gallery link, native download with file-count progress, managed per-site archives, flag schema + `--help` self-check, options dialog with impersonation and raw args, migration 4 |
 
-Tests: 90 Rust tests (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against a fake GitHub API; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Three opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools and pause/resume a real yt-dlp download (`RDL_LIVE_DIR=<folder> cargo test -p rdl-core --test tools_live -- --ignored`). `svelte-check` passes with 0 errors or warnings. Each milestone was also verified end to end in the running app (see "How to test in the real app" below).
+Tests: 123 Rust tests (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Milestones 1a–1e were also verified end to end in the running app (see "How to test in the real app" below); 1f's UI was checked in the browser with mock data only.
 
-### How 1e works (for picking up 1f)
+### How 1e works
 
 - **Tools** (`rdl-core::tools`): yt-dlp from `yt-dlp/yt-dlp` (or `yt-dlp-nightly-builds`), ffmpeg from `yt-dlp/FFmpeg-Builds` (the *shared* win64 GPL build, ~90 MB, `bin/` unpacked). **Decision: tools are downloaded on demand, not bundled.** yt-dlp installs the first time the LinkGrabber meets a web page; ffmpeg the first time a yt-dlp download starts.
   - Each install lives in `<data>/tools/<tool>/<release>-<sha8>/`. The `tools` row points at the active exe and keeps the previous one, so update and rollback are row updates and never touch files a running download holds. Older folders are pruned.
@@ -37,21 +38,47 @@ Tests: 90 Rust tests (unit tests; engine, manager and LinkGrabber suites against
 - **LinkGrabber:** a link whose probe returns HTML, or fails, is offered to yt-dlp. "Unsupported URL" falls back to the plain HTTP result. Playlists replace their link with one link per entry (untitled entries use the URL slug). Format presets: best, ≤4K/1080/720/480, MP3, M4A, custom `-f`. A size estimate comes from the `-J` formats.
 - **Test sites:** YouTube and Vimeo ask automated clients to sign in from this machine. Use `https://archive.org/details/BigBuckBunny_124` (video, format `0` = 46,935,223 bytes) and `https://soundcloud.com/forss/sets/soulhack` (11-track playlist).
 
+### How 1f works (for picking up 1g)
+
+- **Where gallery-dl comes from:** development moved to **Codeberg** in 2026; the GitHub releases of `mikf/gallery-dl` no longer carry binaries. Stable installs `gallery-dl.exe` from `codeberg.org/mikf/gallery-dl` (Forgejo's release API has the same JSON shape as GitHub's, at `https://codeberg.org/api/v1/`) and checks it against the release's `SHA256SUMS`. Nightly installs `gallery-dl_windows.exe` from GitHub `gdl-org/builds`, which has no checksum file, so it is checked against the SHA-256 `digest` GitHub records for each asset (`Upstream.sums = None`). Both auto-update daily like yt-dlp. `ToolsConfig.codeberg_base` lets tests point Codeberg at a local server.
+- **Resolve** (`rdl-core::gallerydl`): `--config-ignore -j --range 1-2000 -- <url>`, 90 s limit. `-j` prints one JSON array of messages at the end: `2` directory metadata, `3` file URL + metadata, `6` a sub-gallery URL, and an error as `[-1, {error, message}]` (older: `["HttpError", "..."]`). Unsupported URLs exit with status 64 and log `Unsupported URL`. Hitting the 2,000-file cap or the time limit marks the gallery `partial` (count is a lower bound). Title comes from the first metadata with `title`, `album`, `gallery`, `user`, ... (see `title_of`).
+- **LinkGrabber order:** HTML page (or failed probe) → yt-dlp → gallery-dl → plain HTTP. gallery-dl is also asked when yt-dlp *fails* on a page (image tweets make yt-dlp say "no video"); if both fail, the first tool that knew the site explains why. A find by yt-dlp's catch-all extractors (`Generic`, `HTML5MediaEmbed`) is held back until gallery-dl has had its turn: those match any page with an embedded video (on a Wikimedia category of 82 images they offered the one video), so a gallery-dl site extractor wins over them. A gallery stays **one** link (kind `gallerydl`); its name is the **folder** the files go into, and the gallery title replaces the default package name like a video title does.
+- **Download** (`manager/gallerydl_job.rs`): `-D <package folder>/<name>`, so the folder is the gallery's own, and a second run lands in the same place. With stdout piped, gallery-dl prints each finished file's absolute path, with `# ` in front when skipped (already on disk or in the archive). Progress is **files**, not bytes: `downloads.files_done/files_total` (migration 4), `Event::Progress.files`, and the UI shows `12/40`. Bytes are the sum of finished files' sizes, so there's no byte total or ETA. Pause kills; resume re-runs and the skipped files count as done again within seconds. A non-zero exit fails with the last `[...][error]` log line.
+- **Archives:** `--download-archive <data>/archives/gallery-dl/<host>.sqlite3`, one per site (by URL host, `www.` dropped), on by default ("Skip files downloaded from this site before"). This means re-downloading a gallery into a new folder fetches nothing; the option is in the dialog.
+- **Delete files:** each file a gallery download wrote, or skipped because it was already in the gallery's folder, is stored in `download_files`; "delete files" removes exactly those (for any status: a failed gallery still finished some), then the folder only if it's empty. Other files in the folder stay. Unfinished runs leave `*.part` files, which removal deletes.
+- **Flag schema:** `crates/rdl-core/src/gallerydl/flags.json` (embedded, versioned) lists the controls by group: output, selection, sign-in (cookies file, cookies from browser, netrc), network, impersonation (`-o browser=firefox|chrome`, `--user-agent browser`), post-processing, advanced (`-o` lines, `--config`). `GalleryDlOptions` stores values by schema id plus `archive`, `userConfig` (off = `--config-ignore`) and `rawArgs` (split like a command line). The `--help` self-check (`supported_flags`, cached per exe path) drops flags the installed version lacks at run time, and the dialog hides them. Values are validated on save.
+- **ffmpeg** is put on gallery-dl's `PATH` when already installed (for ugoira conversion) but never installed just for a gallery.
+
 ### Resume here
 
-- **Repo state:** 1e is committed on `main` (`462a74b`) plus this PLAN update. Check `git status -sb` for whether it has been pushed yet.
-- **Your machine:** testing installed yt-dlp 2026.10.21 and ffmpeg N-128018 into `%APPDATA%\rusty-downloader\tools`, which is what the app does on first use anyway. The app's DB is at schema `20261024000003`, and its downloads and LinkGrabber are empty. "Check for updates" on the Tools page should show both as current.
-- **Sanity check before starting:** `cargo test --workspace` (90 pass), `pnpm -C ui check`, then `pnpm dev` and open the Tools page.
-- **Optional, real network:** `RDL_LIVE_DIR=<some folder> cargo test -p rdl-core --test tools_live -- --ignored --nocapture` (about 110 MB of tools on the first run, reused after).
+- **Repo state:** 1f is committed on `main` (see "Done so far"). Check `git status -sb` for whether it has been pushed.
+- **Checked against real gallery-dl 1.32.17 (2026-10-25):**
+  - Install from Codeberg with its `SHA256SUMS` works.
+  - Every schema flag is in `--help`. The check found that `--chapter-range/--chapter-filter` are now `--child-range/--child-filter`, that `--abort` takes `N[:TARGET]`, and that `--ugoira` has no `mkv`; all three are fixed.
+  - `-j` output and the stdout path lines (`# ` for skips, including archive skips whose folder is gone) match the notes above. An unsupported URL exits 64 with `Unsupported URL`; a page with nothing on it returns `[]` and exit 0.
+  - Wikimedia Commons sends a directory message before every file with that file's `title`, so `title_of` now prefers a string `page`.
+  - A failed file logs only `Failed to download x`; the cause is in the warning before it, so the error now appends it (e.g. `429 Too many requests`).
+  - Not checked: the nightly install from `gdl-org/builds` (the API's `digest` field was confirmed, the install itself wasn't run).
+- **Run in the app (2026-10-25)** with `https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny`:
+  - The DB migrated to schema 4. gallery-dl installed itself on the first gallery page, with progress on the Tools task.
+  - The LinkGrabber row read "82 files · wikimediacommons category", 61.3 MB, folder `Category_Big Buck Bunny`. The Options… dialog showed every group with nothing hidden; Files `1-5`, a 1 s sleep and Mimic browser Firefox saved as "Options (3)…".
+  - The download ran 5 files into the gallery folder. Remove with "delete files" removed them and the folder.
+  - A second run (files 6–25, 2 s sleep) paused cleanly (no gallery-dl process left), resumed skipping the done files, then failed on Wikimedia's `429 Too many requests` with that cause in the error. Retry skipped the 4 done files and hit the same 429: Wikimedia throttles full-size downloads hard; use small ranges and longer sleeps when testing there.
+  - Fixed from that run: yt-dlp's `HTML5MediaEmbed` beating gallery-dl (see "LinkGrabber order"); "5 of 82 files" when a range was set (a Selection option or raw args now leave the total unknown, and finishing stores the real count); the UI showing the estimated 61.3 MB instead of the 1.6 MB downloaded; the file count dropping on resume while skipped files are re-reported; "delete files" not offered for a failed or paused gallery (it now deletes the files a gallery finished, whatever its status, and the dialog counts them); a drive-relative folder (`C:dir`) accepted by `set_dest_dir`.
+  - Still seen: rechecking a link whose handler changes keeps the old tool's file and package name (they may have been typed by the user). Only happens on recheck.
+  - Re-checked in the app after the fixes: the Remove dialog offered "Also delete 4 downloaded files" for the failed gallery and deleted them and its folder; `C:Users` was rejected as "not a full folder path"; a ranged download was created with no total or size, and on completion stored and showed "2 of 2 files", 267 KB; the count didn't drop across pause/resume (only a 1-file case, as Wikimedia's 429 cut the run short); a second download that skipped files already in the gallery's folder now records them, so "delete files" removes what the dialog counts (that was one more bug from this check).
+  - Cleaned up: all test downloads removed through the app, the stray `src-tauri\UsersGert…` folder deleted, the test archive `archives\gallery-dl\commons.wikimedia.org.sqlite3` deleted. The app DB is at schema 4 with empty Downloads and LinkGrabber; gallery-dl 1.32.17 stays installed in `%APPDATA%\rusty-downloader\tools`.
+- **Your machine:** yt-dlp 2026.10.21, gallery-dl 1.32.17 and ffmpeg N-128018 are in `%APPDATA%\rusty-downloader\tools`. The app's DB is at schema `20261025000004`; its downloads, LinkGrabber and gallery-dl archives are empty.
+- **Sanity check before starting:** `cargo test --workspace` (123 pass), `pnpm -C ui check`, then `pnpm dev` and open the Tools page.
+- **Optional, real network:** `RDL_LIVE_DIR=<some folder> cargo test -p rdl-core --test tools_live -- --ignored --nocapture` (about 135 MB of tools on the first run, reused after).
 
-### Next: 1f – gallery-dl (suggested order)
+### Next: 1g – desktop polish (suggested order)
 
-1. **Look first.** Check how `mikf/gallery-dl` publishes Windows releases (`gallery-dl.exe`, and whether a checksum file exists; if not, decide between pinning hashes, GitHub's asset `digest` field, or a signature). Run `gallery-dl --help` and `-j --simulate` on a couple of real gallery URLs and save the output as test fixtures. §5.3 warns that flags change between versions.
-2. **Tools:** add `ToolName::GalleryDl` with an `Upstream` entry in `tools/mod.rs`. Everything else (versioned folders, rollback, auto-update, Tools page card) follows. Add its text to `ABOUT` in `ui/src/routes/tools/+page.svelte`.
-3. **Resolver:** a `gallerydl` module next to `ytdlp` (`-j --simulate` → item count, first thumbnails, size if known). In `linkgrabber/media.rs`, decide the order (plan §6: yt-dlp first, then gallery-dl if an extractor matches) and store a gallery as **one** link, not expanded, since gallery-dl downloads the whole set itself.
-4. **Downloader:** `manager/gallerydl_job.rs` like `ytdlp_job.rs`. Progress = files done / resolved total, parsed from stdout (one path per file, `# ` prefix for skipped). Pause = kill, resume = re-run (gallery-dl skips existing files). Use `-D <package folder>` and a managed `--download-archive` per site under `<data>/archives/`.
-5. **Flag schema:** `gallery-dl-flags.json` (versioned) driving a per-download options drawer in the LinkGrabber, with the `--help` self-check hiding missing flags. Include the impersonation options and a raw args box.
-6. **Migration 4** if new columns are needed. The `downloads.kind` CHECK already allows `gallerydl`.
+1. **Settings page** first, since the others need settings: default folder, connections and active downloads, clipboard options ("ask first", URL filters), start with Windows. `rdl-core::settings` already stores typed values.
+2. **History + duplicate warnings:** write a `history` row (URL hash, final path, size) when a download completes. Warn in the LinkGrabber when a link was downloaded before. Remember SQLite reuses ids, so never key history on a download id. Galleries can record their folder.
+3. **Tray icon and menu:** live speed, pause/resume all, add from clipboard. Close to tray.
+4. **Toasts** on completion and failure, with Open and Show in folder.
+5. **Downloads table:** right-click menu, and drag to reorder priority.
 
 ### Deferred / known gaps (pick up in the milestone noted)
 
@@ -69,7 +96,17 @@ Tests: 90 Rust tests (unit tests; engine, manager and LinkGrabber suites against
   - Expired links (`LinkExpired`) need plugin refresh (Phase 6).
 - **Per-download headers and cookies:** not stored yet. Needed for browser hand-off (Phase 2).
 - **Windows 10:** the transparent window shows the desktop through it, because Mica is Windows 11 only. A fallback is needed if Windows 10 ever matters.
-- **Tool and plugin kinds:** `http` and `ytdlp` downloads run; `gallerydl` is next (1f), the rest later.
+- **Tool and plugin kinds:** `http`, `ytdlp` and `gallerydl` downloads run; the rest later.
+- **gallery-dl (1f follow-ups):**
+  - Rechecking a link whose handler changes (yt-dlp ↔ gallery-dl) keeps the earlier tool's file and package name.
+  - Sites that rate-limit (Wikimedia's 429) fail the download; gallery-dl's own `--sleep-429` isn't set by default.
+  - Resolving always uses default settings, so a gallery that needs cookies or sign-in fails at the LinkGrabber even if its options would fix that. Rechecking with the link's options, or a "start anyway" for failed galleries, would help.
+  - Thumbnails are stored (`Gallery.thumbnails`) but not shown: the CSP only allows local images, and many sites block hotlinking. Needs a fetch-through-Rust preview command.
+  - No TLS-fingerprint impersonation: gallery-dl 1.32.17's `--help` has no impersonation flag. Only `-o browser=` (headers and cipher order) and `--user-agent browser` are offered.
+  - No way to force a link to a handler (yt-dlp / gallery-dl / plain) from the LinkGrabber.
+  - No "resolve-only" mode (gallery-dl `-g` URLs into the HTTP engine), plan §5.3.
+  - Archive files are per host, not per gallery-dl category, so two domains of one site keep separate archives.
+  - Speed is averaged over finished files (5 s window), so it is jumpy for galleries of big files.
 - **yt-dlp (1e follow-ups):**
   - No cookies or accounts yet, so sites that demand sign-in (YouTube from some IPs, Vimeo) fail with yt-dlp's message. Needs Phase 2/4 cookie hand-off.
   - No subtitles, thumbnails, SponsorBlock, rate-limit or raw-args options yet (§5.2). The `YtDlpOptions` struct is where they go.
@@ -287,7 +324,7 @@ enum JobKind { Http, Ftp, Sftp, Torrent, YtDlp, GalleryDl }
 
 ### 5.1 Tool management
 - Downloaded on first use into `<data>/tools/` (so `<portable>/data/tools/` for portable builds). The installer may later seed the same folder.
-- **Tool updater**: checks the GitHub releases of `yt-dlp/yt-dlp` and `mikf/gallery-dl` on startup (at most daily) and on demand. Downloads into a temp folder, verifies the published checksums (yt-dlp `SHA2-256SUMS`), and swaps atomically. Keeps the previous version for rollback. Channel per tool: stable / nightly.
+- **Tool updater**: checks the releases of `yt-dlp/yt-dlp` (GitHub) and `mikf/gallery-dl` (Codeberg since 2026) on startup (at most daily) and on demand. Downloads into a temp folder, verifies the published checksums (yt-dlp `SHA2-256SUMS`), and swaps atomically. Keeps the previous version for rollback. Channel per tool: stable / nightly.
 - `ffmpeg.exe` (downloaded on demand, see §0) is used for yt-dlp merges and gallery-dl ugoira conversion. Its folder is passed explicitly (`--ffmpeg-location`).
 - Every tool runs with `CREATE_NO_WINDOW`, a job object (so children die with the app), and UTF-8 forced (`PYTHONIOENCODING=utf-8`).
 
@@ -401,7 +438,7 @@ Locations: installed builds use `%APPDATA%\rusty-downloader\` (db, logs, plugins
 | Phase | Scope | Exit criteria | Status |
 |---|---|---|---|
 | **0. Scaffold** | Workspace, Tauri + SvelteKit shell, SQLite migrations, tracing logs, CI, Fluent theme base | App launches, CI green | ✅ Done (CI never checked) |
-| **1. MVP** | Segmented HTTP engine (resume, retries, dynamic splitting, headers/cookies/auth), queues + concurrency, packages, LinkGrabber (paste/clipboard/drag-drop), yt-dlp + gallery-dl (resolve, download, progress, common flags, impersonation, archives) + tool updater, tray, toasts, history/duplicate detection, single instance, settings | Used as daily driver for HTTP, video and galleries | 🚧 1a–1e done, 1f next |
+| **1. MVP** | Segmented HTTP engine (resume, retries, dynamic splitting, headers/cookies/auth), queues + concurrency, packages, LinkGrabber (paste/clipboard/drag-drop), yt-dlp + gallery-dl (resolve, download, progress, common flags, impersonation, archives) + tool updater, tray, toasts, history/duplicate detection, single instance, settings | Used as daily driver for HTTP, video and galleries | 🚧 1a–1f done, 1g next |
 | **2. Browser** | MV3 extension (Chromium + Firefox), native host, download interception, context menus, cookie hand-off | Browser downloads flow into the app with cookies | ⏳ |
 | **3. Control** | Scheduler, speed limiting + profiles, keep-awake, on-complete actions, checksum verification | Overnight queue then shutdown works | ⏳ |
 | **4. Network & protocols** | Proxies + rules, interface binding + kill-switch, accounts in the keyring, FTP/FTPS, SFTP | Downloads via SOCKS5/VPN interface, FTP/SFTP resume | ⏳ |
@@ -419,9 +456,10 @@ Each milestone is a commit or series of commits that leaves the app working.
 | 1b | Download manager | Packages, downloads and queues persisted in SQLite. Per-queue concurrency, start/pause/remove, segment state saved every ~2 s, resume after restart, event stream. | ✅ `f2f4992` |
 | 1c | Downloads UI | Typed IPC (tauri-specta), batched progress events, virtualised downloads table with package rows, add-links dialog, details panel. | ✅ `bea4e42` |
 | 1d | LinkGrabber | Paste / clipboard watcher / drag-drop, background probing, availability badges, package grouping, confirm to queue. | ✅ `adba9eb` |
-| 1e | Tool manager + yt-dlp | Tool layout, version check/update with checksum verification, yt-dlp resolve (`-J`), format picker, JSON progress parsing. | ✅ |
-| 1f | gallery-dl | Resolve with `-j --simulate`, native download with stdout progress, flag schema + `--help` self-check, managed download archives, impersonation options. | ▶️ Next |
-| 1g | Desktop polish | Tray icon/menu, toasts, history + duplicate warnings, settings page (folders, connections, clipboard, startup). Toasts already exist for the LinkGrabber. | ⏳ |
+| 1e | Tool manager + yt-dlp | Tool layout, version check/update with checksum verification, yt-dlp resolve (`-J`), format picker, JSON progress parsing. | ✅ `462a74b` |
+| 1f | gallery-dl | Resolve with `-j`, native download with stdout progress, flag schema + `--help` self-check, managed download archives, impersonation options. | ✅ (verified with the real tool and in the app) |
+
+| 1g | Desktop polish | Tray icon/menu, toasts, history + duplicate warnings, settings page (folders, connections, clipboard, startup). Toasts already exist for the LinkGrabber. | ▶️ Next |
 
 ---
 

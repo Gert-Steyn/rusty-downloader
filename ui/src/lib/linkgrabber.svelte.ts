@@ -7,6 +7,7 @@ import {
 	events,
 	isTauri,
 	unwrap,
+	type GalleryDlOptions,
 	type GrabbedLink,
 	type GrabberEventBatch,
 	type LinkSource,
@@ -135,6 +136,8 @@ class GrabberStore {
 	recheck = (ids: number[]) => this.run(() => unwrap(commands.grabberRecheck(ids)));
 	setFormat = (ids: number[], options: YtDlpOptions) =>
 		this.run(() => unwrap(commands.grabberSetFormat(ids, options)));
+	setGalleryOptions = (ids: number[], options: GalleryDlOptions) =>
+		this.run(() => unwrap(commands.grabberSetGalleryOptions(ids, options)));
 
 	/** Queue the ticked links. Returns the number of packages created. */
 	async confirm(): Promise<number> {

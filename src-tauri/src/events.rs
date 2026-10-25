@@ -194,6 +194,7 @@ mod tests {
             total: Some(100),
             speed_bps: 1,
             connections: 1,
+            files: None,
         }
     }
 

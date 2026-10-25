@@ -36,6 +36,10 @@ export const commands = {
 	grabberRecheck: (ids: number[]) => typedError<null, CommandError>(__TAURI_INVOKE("grabber_recheck", { ids })),
 	/**  Choose the yt-dlp format for links (plain links are skipped). */
 	grabberSetFormat: (ids: number[], options: YtDlpOptions_Deserialize) => typedError<null, CommandError>(__TAURI_INVOKE("grabber_set_format", { ids, options })),
+	/**  Change gallery-dl settings for links (other links are skipped). */
+	grabberSetGalleryOptions: (ids: number[], options: GalleryDlOptions_Deserialize) => typedError<null, CommandError>(__TAURI_INVOKE("grabber_set_gallery_options", { ids, options })),
+	/**  The options drawer's controls, filtered by what the installed gallery-dl supports. */
+	gallerydlFlags: () => typedError<GalleryDlFlags_Serialize, CommandError>(__TAURI_INVOKE("gallerydl_flags")),
 	/**  Queue the links as downloads; returns the new package ids. */
 	grabberConfirm: (ids: number[]) => typedError<number[], CommandError>(__TAURI_INVOKE("grabber_confirm", { ids })),
 	getClipboardWatch: () => __TAURI_INVOKE<boolean>("get_clipboard_watch"),
@@ -118,7 +122,7 @@ export type DownloadEvents_Serialize = {
 };
 
 /**  Which handler runs a download. Stored as the `downloads.kind` text. */
-export type DownloadKind = "http" | "ytdlp";
+export type DownloadKind = "http" | "ytdlp" | "gallerydl";
 
 export type Download_Deserialize = {
 	id: number,
@@ -133,6 +137,10 @@ export type Download_Deserialize = {
 	error?: string | null,
 	/**  Format choice, for yt-dlp downloads. */
 	ytdlp?: YtDlpOptions_Deserialize | null,
+	/**  Settings, for gallery-dl downloads. */
+	gallerydl?: GalleryDlOptions_Deserialize | null,
+	/**  File count, for gallery-dl downloads. */
+	files?: FileCount_Deserialize | null,
 	title?: string | null,
 };
 
@@ -149,6 +157,10 @@ export type Download_Serialize = {
 	error: string | null,
 	/**  Format choice, for yt-dlp downloads. */
 	ytdlp: YtDlpOptions_Serialize | null,
+	/**  Settings, for gallery-dl downloads. */
+	gallerydl: GalleryDlOptions_Serialize | null,
+	/**  File count, for gallery-dl downloads. */
+	files: FileCount_Serialize | null,
 	title: string | null,
 };
 
@@ -166,7 +178,9 @@ export type Event = Event_Serialize | Event_Deserialize;
  */
 export type Event_Deserialize = { type: "packageAdded"; packageId: number } | { type: "packageRemoved"; packageId: number } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error?: string | null } | 
 /**  Name, size and destination are known after the first probe. */
-{ type: "resolved"; downloadId: number; filename: string; size?: number | null } | { type: "progress"; downloadId: number; downloaded: number; total?: number | null; speedBps: number; connections: number };
+{ type: "resolved"; downloadId: number; filename: string; size?: number | null } | { type: "progress"; downloadId: number; downloaded: number; total?: number | null; speedBps: number; connections: number; 
+/**  For gallery downloads, which count files rather than bytes. */
+files?: FileCount_Deserialize | null };
 
 /**
  *  Everything the UI needs to stay in sync without polling. Delivered on a
@@ -175,13 +189,224 @@ export type Event_Deserialize = { type: "packageAdded"; packageId: number } | { 
  */
 export type Event_Serialize = { type: "packageAdded"; packageId: number } | { type: "packageRemoved"; packageId: number } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error: string | null } | 
 /**  Name, size and destination are known after the first probe. */
-{ type: "resolved"; downloadId: number; filename: string; size: number | null } | { type: "progress"; downloadId: number; downloaded: number; total: number | null; speedBps: number; connections: number };
+{ type: "resolved"; downloadId: number; filename: string; size: number | null } | { type: "progress"; downloadId: number; downloaded: number; total: number | null; speedBps: number; connections: number; 
+/**  For gallery downloads, which count files rather than bytes. */
+files: FileCount_Serialize | null };
+
+/**
+ *  Files of a gallery download: done (downloaded or already there) out of
+ *  the total, when resolving counted them all.
+ */
+export type FileCount = FileCount_Serialize | FileCount_Deserialize;
+
+/**
+ *  Files of a gallery download: done (downloaded or already there) out of
+ *  the total, when resolving counted them all.
+ */
+export type FileCount_Deserialize = {
+	done: number,
+	total?: number | null,
+};
+
+/**
+ *  Files of a gallery download: done (downloaded or already there) out of
+ *  the total, when resolving counted them all.
+ */
+export type FileCount_Serialize = {
+	done: number,
+	total: number | null,
+};
+
+export type FlagChoice = {
+	value: string,
+	label: string,
+};
+
+export type FlagDef = FlagDef_Serialize | FlagDef_Deserialize;
+
+export type FlagDef_Deserialize = {
+	/**  Key in [`GalleryDlOptions::flags`]. */
+	id: string,
+	/**  The command-line option, as `--help` lists it. */
+	flag: string,
+	kind: FlagKind,
+	label: string,
+	help?: string | null,
+	placeholder?: string | null,
+	/**
+	 *  The argument after `flag`, with `{}` standing for the value
+	 *  (`browser={}` for `-o`). Without it the value is passed as is.
+	 */
+	template?: string | null,
+	choices?: FlagChoice[],
+};
+
+export type FlagDef_Serialize = {
+	/**  Key in [`GalleryDlOptions::flags`]. */
+	id: string,
+	/**  The command-line option, as `--help` lists it. */
+	flag: string,
+	kind: FlagKind,
+	label: string,
+	help: string | null,
+	placeholder: string | null,
+	/**
+	 *  The argument after `flag`, with `{}` standing for the value
+	 *  (`browser={}` for `-o`). Without it the value is passed as is.
+	 */
+	template: string | null,
+	choices: FlagChoice[],
+};
+
+export type FlagGroup = FlagGroup_Serialize | FlagGroup_Deserialize;
+
+export type FlagGroup_Deserialize = {
+	id: string,
+	label: string,
+	flags: FlagDef_Deserialize[],
+};
+
+export type FlagGroup_Serialize = {
+	id: string,
+	label: string,
+	flags: FlagDef_Serialize[],
+};
+
+export type FlagKind = 
+/**  On or off; on passes the flag (and `template`, if any). */
+"switch" | "text" | "number" | "choice" | 
+/**  One value per line; the flag repeats for each. */
+"lines";
+
+export type FlagSchema = FlagSchema_Serialize | FlagSchema_Deserialize;
+
+export type FlagSchema_Deserialize = {
+	version: number,
+	groups: FlagGroup_Deserialize[],
+};
+
+export type FlagSchema_Serialize = {
+	version: number,
+	groups: FlagGroup_Serialize[],
+};
 
 export type FormatPreset = 
 /**  Best video and best audio, merged. */
 "best" | "max2160" | "max1080" | "max720" | "max480" | "audioMp3" | "audioM4a" | 
 /**  The `custom_format` string as `-f`. */
 "custom";
+
+/**  What a gallery URL holds, as far as resolving found out. */
+export type Gallery = Gallery_Serialize | Gallery_Deserialize;
+
+export type GalleryDlFlags = GalleryDlFlags_Serialize | GalleryDlFlags_Deserialize;
+
+export type GalleryDlFlags_Deserialize = {
+	schema: FlagSchema_Deserialize,
+	/**
+	 *  Options the installed gallery-dl lists in `--help`; `None` when it
+	 *  isn't installed or the check failed, in which case show everything.
+	 */
+	available?: string[] | null,
+};
+
+export type GalleryDlFlags_Serialize = {
+	schema: FlagSchema_Serialize,
+	/**
+	 *  Options the installed gallery-dl lists in `--help`; `None` when it
+	 *  isn't installed or the check failed, in which case show everything.
+	 */
+	available: string[] | null,
+};
+
+/**  Per-download gallery-dl settings, stored as `handler_opts_json`. */
+export type GalleryDlOptions = GalleryDlOptions_Serialize | GalleryDlOptions_Deserialize;
+
+/**  Per-download gallery-dl settings, stored as `handler_opts_json`. */
+export type GalleryDlOptions_Deserialize = {
+	/**
+	 *  Skip files this site's download archive says were fetched before, so
+	 *  downloading a gallery again only gets what's new.
+	 */
+	archive?: boolean,
+	/**
+	 *  Load the user's own gallery-dl config file (off: `--config-ignore`,
+	 *  so runs behave the same everywhere).
+	 */
+	userConfig?: boolean,
+	/**  Values by schema flag id. Switches are `"true"` when on. */
+	flags?: { [key in string]: string },
+	/**  Extra arguments, split like a command line (quotes group words). */
+	rawArgs?: string | null,
+};
+
+/**  Per-download gallery-dl settings, stored as `handler_opts_json`. */
+export type GalleryDlOptions_Serialize = {
+	/**
+	 *  Skip files this site's download archive says were fetched before, so
+	 *  downloading a gallery again only gets what's new.
+	 */
+	archive: boolean,
+	/**
+	 *  Load the user's own gallery-dl config file (off: `--config-ignore`,
+	 *  so runs behave the same everywhere).
+	 */
+	userConfig: boolean,
+	/**  Values by schema flag id. Switches are `"true"` when on. */
+	flags: { [key in string]: string },
+	/**  Extra arguments, split like a command line (quotes group words). */
+	rawArgs: string | null,
+};
+
+/**  What a gallery URL holds, as far as resolving found out. */
+export type Gallery_Deserialize = {
+	title?: string | null,
+	/**  gallery-dl's extractor, e.g. `imgur`. */
+	category?: string | null,
+	/**  What kind of page it is to that extractor, e.g. `album` or `user`. */
+	subcategory?: string | null,
+	/**  Files found. */
+	files?: number,
+	/**
+	 *  Further galleries the URL leads to (the albums of a profile). Their
+	 *  files are only counted once they download.
+	 */
+	subGalleries?: number,
+	/**  Total size, when every file listed one. */
+	size?: number | null,
+	/**  First few image URLs, for a preview. */
+	thumbnails?: string[],
+	/**
+	 *  Resolving stopped early (too many files, or too slow), so `files` is
+	 *  a lower bound.
+	 */
+	partial?: boolean,
+};
+
+/**  What a gallery URL holds, as far as resolving found out. */
+export type Gallery_Serialize = {
+	title: string | null,
+	/**  gallery-dl's extractor, e.g. `imgur`. */
+	category: string | null,
+	/**  What kind of page it is to that extractor, e.g. `album` or `user`. */
+	subcategory: string | null,
+	/**  Files found. */
+	files: number,
+	/**
+	 *  Further galleries the URL leads to (the albums of a profile). Their
+	 *  files are only counted once they download.
+	 */
+	subGalleries: number,
+	/**  Total size, when every file listed one. */
+	size: number | null,
+	/**  First few image URLs, for a preview. */
+	thumbnails: string[],
+	/**
+	 *  Resolving stopped early (too many files, or too slow), so `files` is
+	 *  a lower bound.
+	 */
+	partial: boolean,
+};
 
 export type GrabResult = {
 	added: number,
@@ -207,6 +432,10 @@ export type GrabbedLink_Deserialize = {
 	media?: MediaSummary_Deserialize | null,
 	/**  Format choice, for `Ytdlp` links. */
 	ytdlp?: YtDlpOptions_Deserialize | null,
+	/**  What gallery-dl found, for `Gallerydl` links. */
+	gallery?: Gallery_Deserialize | null,
+	/**  Settings, for `Gallerydl` links. */
+	gallerydl?: GalleryDlOptions_Deserialize | null,
 };
 
 export type GrabbedLink_Serialize = {
@@ -225,6 +454,10 @@ export type GrabbedLink_Serialize = {
 	media: MediaSummary_Serialize | null,
 	/**  Format choice, for `Ytdlp` links. */
 	ytdlp: YtDlpOptions_Serialize | null,
+	/**  What gallery-dl found, for `Gallerydl` links. */
+	gallery: Gallery_Serialize | null,
+	/**  Settings, for `Gallerydl` links. */
+	gallerydl: GalleryDlOptions_Serialize | null,
 };
 
 export type GrabberEvent = GrabberEvent_Serialize | GrabberEvent_Deserialize;
@@ -381,7 +614,7 @@ export type ToolInfo_Serialize = {
 	error: string | null,
 };
 
-export type ToolName = "ytdlp" | "ffmpeg";
+export type ToolName = "ytdlp" | "gallerydl" | "ffmpeg";
 
 /**  What a tool is busy with right now. */
 export type ToolTask = ToolTask_Serialize | ToolTask_Deserialize;

@@ -45,6 +45,7 @@ impl AppState {
             db.clone(),
             ManagerConfig {
                 tools: Some(tools.clone()),
+                archives_dir: Some(paths.archives_dir.clone()),
                 ..ManagerConfig::default()
             },
         )

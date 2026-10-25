@@ -12,8 +12,20 @@ pub enum Media {
     Video(MediaInfo),
     Playlist {
         title: Option<String>,
+        /// yt-dlp's extractor, e.g. `YoutubeTab`.
+        extractor: Option<String>,
         entries: Vec<PlaylistEntry>,
     },
+}
+
+impl Media {
+    /// The yt-dlp extractor that recognised the page.
+    pub fn extractor(&self) -> Option<&str> {
+        match self {
+            Media::Video(info) => info.extractor.as_deref(),
+            Media::Playlist { extractor, .. } => extractor.as_deref(),
+        }
+    }
 }
 
 /// One video (or audio track), with its formats.
@@ -80,6 +92,7 @@ pub(super) fn media(json: &str) -> Result<Media> {
             .unwrap_or_default();
         return Ok(Media::Playlist {
             title: string(&v, "title"),
+            extractor: string(&v, "extractor_key").or_else(|| string(&v, "extractor")),
             entries,
         });
     }
@@ -204,14 +217,17 @@ mod tests {
 
     #[test]
     fn parses_a_flat_playlist() {
-        let json = r#"{"_type":"playlist","title":"Mix","entries":[
+        let json = r#"{"_type":"playlist","title":"Mix","extractor_key":"YoutubeTab","entries":[
             {"_type":"url","url":"https://www.youtube.com/watch?v=a","title":"A","duration":10},
             {"_type":"url","title":"no url"},
             {"_type":"url","url":"https://www.youtube.com/watch?v=b"}]}"#;
-        let Media::Playlist { title, entries } = media(json).unwrap() else {
+        let parsed = media(json).unwrap();
+        assert_eq!(parsed.extractor(), Some("YoutubeTab"));
+        let Media::Playlist { title, entries, .. } = parsed else {
             panic!("expected a playlist");
         };
         assert_eq!(title.as_deref(), Some("Mix"));
+
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].title.as_deref(), Some("A"));
         assert_eq!(entries[1].title, None);

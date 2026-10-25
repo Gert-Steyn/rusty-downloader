@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 
 use sqlx::AssertSqlSafe;
 
-use super::types::{Download, DownloadId, NewPackage, Package, PackageId, QueueId, Status};
+use super::types::{
+    Download, DownloadId, DownloadKind, FileCount, NewPackage, Package, PackageId, QueueId, Status,
+};
 use crate::Result;
 use crate::db::Pool;
 use crate::http::Segment;
@@ -27,16 +29,37 @@ pub(crate) struct DownloadRow {
     pub last_modified: Option<String>,
     pub handler_opts_json: Option<String>,
     pub title: Option<String>,
+    pub files_done: Option<i64>,
+    pub files_total: Option<i64>,
 }
 
 impl DownloadRow {
-    /// yt-dlp options; a row with unreadable options gets the defaults.
-    pub fn ytdlp_options(&self) -> Option<crate::ytdlp::YtDlpOptions> {
-        (self.kind == "ytdlp").then(|| {
+    pub fn kind(&self) -> DownloadKind {
+        DownloadKind::parse(&self.kind)
+    }
+
+    /// Handler options of `kind`; a row with unreadable options gets the defaults.
+    fn options<T: serde::de::DeserializeOwned + Default>(&self, kind: DownloadKind) -> Option<T> {
+        (self.kind() == kind).then(|| {
             self.handler_opts_json
                 .as_deref()
                 .and_then(|json| serde_json::from_str(json).ok())
                 .unwrap_or_default()
+        })
+    }
+
+    pub fn ytdlp_options(&self) -> Option<crate::ytdlp::YtDlpOptions> {
+        self.options(DownloadKind::Ytdlp)
+    }
+
+    pub fn gallerydl_options(&self) -> Option<crate::gallerydl::GalleryDlOptions> {
+        self.options(DownloadKind::Gallerydl)
+    }
+
+    pub fn files(&self) -> Option<FileCount> {
+        (self.kind() == DownloadKind::Gallerydl).then(|| FileCount {
+            done: self.files_done.unwrap_or(0) as u32,
+            total: self.files_total.map(|t| t as u32),
         })
     }
 
@@ -58,6 +81,8 @@ impl DownloadRow {
             status: self.status(),
             error: self.error.clone(),
             ytdlp: self.ytdlp_options(),
+            gallerydl: self.gallerydl_options(),
+            files: self.files(),
             title: self.title.clone(),
         }
     }
@@ -112,14 +137,15 @@ pub(crate) async fn insert_package(pool: &Pool, new: &NewPackage) -> Result<Pack
     .await?;
 
     for (position, download) in new.downloads.iter().enumerate() {
-        let opts = download
-            .ytdlp
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()?;
+        let opts = match (&download.ytdlp, &download.gallerydl) {
+            (Some(o), _) => Some(serde_json::to_string(o)?),
+            (None, Some(o)) => Some(serde_json::to_string(o)?),
+            (None, None) => None,
+        };
         sqlx::query(
-            "INSERT INTO downloads (package_id, kind, source_url, filename, handler_opts_json, title, position)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO downloads (package_id, kind, source_url, filename, handler_opts_json, title,
+                 files_total, size, position)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id)
         .bind(download.kind.as_str())
@@ -127,6 +153,8 @@ pub(crate) async fn insert_package(pool: &Pool, new: &NewPackage) -> Result<Pack
         .bind(download.filename.as_deref())
         .bind(opts)
         .bind(download.title.as_deref())
+        .bind(download.files_total.map(i64::from))
+        .bind(download.size.map(|s| s as i64))
         .bind(position as i64)
         .execute(&mut *tx)
         .await?;
@@ -331,6 +359,51 @@ pub(crate) async fn set_downloaded(pool: &Pool, id: DownloadId, downloaded: u64)
         .execute(pool)
         .await?;
     Ok(())
+}
+
+/// Progress of a gallery download: files done and their bytes.
+pub(crate) async fn set_files_done(
+    pool: &Pool,
+    id: DownloadId,
+    files: u32,
+    downloaded: u64,
+) -> Result<()> {
+    sqlx::query("UPDATE downloads SET files_done = ?, downloaded = ? WHERE id = ?")
+        .bind(i64::from(files))
+        .bind(downloaded as i64)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn set_files_total(pool: &Pool, id: DownloadId, total: u32) -> Result<()> {
+    sqlx::query("UPDATE downloads SET files_total = ? WHERE id = ?")
+        .bind(i64::from(total))
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Remember a file a gallery download wrote.
+pub(crate) async fn add_file(pool: &Pool, id: DownloadId, path: &Path, size: u64) -> Result<()> {
+    sqlx::query("INSERT OR REPLACE INTO download_files (download_id, path, size) VALUES (?, ?, ?)")
+        .bind(id)
+        .bind(path.to_string_lossy().into_owned())
+        .bind(size as i64)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn files_of(pool: &Pool, id: DownloadId) -> Result<Vec<PathBuf>> {
+    let paths: Vec<String> =
+        sqlx::query_scalar("SELECT path FROM download_files WHERE download_id = ? ORDER BY path")
+            .bind(id)
+            .fetch_all(pool)
+            .await?;
+    Ok(paths.into_iter().map(PathBuf::from).collect())
 }
 
 /// Whether another download already claimed `path` (case-insensitive, as on NTFS).

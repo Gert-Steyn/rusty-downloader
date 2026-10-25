@@ -7,12 +7,14 @@
 //! or wake the scheduler; they never block on a transfer except `remove`, which
 //! waits for the task to let go of its files.
 
+mod gallerydl_job;
 mod job;
 mod store;
 mod types;
 mod ytdlp_job;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -22,11 +24,11 @@ use tokio_util::sync::CancellationToken;
 use crate::db::Pool;
 use crate::http::{self, SegmentConfig, filename};
 use crate::tools::Tools;
-use crate::{Error, Result, ytdlp};
+use crate::{Error, Result, gallerydl, ytdlp};
 
 pub use types::{
-    DEFAULT_QUEUE, Download, DownloadId, DownloadKind, Event, NewDownload, NewPackage, Package,
-    PackageId, QueueId, Status,
+    DEFAULT_QUEUE, Download, DownloadId, DownloadKind, Event, FileCount, NewDownload, NewPackage,
+    Package, PackageId, QueueId, Status,
 };
 
 #[derive(Debug, Clone)]
@@ -37,8 +39,11 @@ pub struct ManagerConfig {
     /// Fallback re-check of the queues in case a wake-up was missed.
     pub rescan_interval: Duration,
     pub user_agent: Option<String>,
-    /// Runs yt-dlp downloads; without it they fail as unsupported.
+    /// Runs yt-dlp and gallery-dl downloads; without it they fail as unsupported.
     pub tools: Option<Tools>,
+    /// Where gallery-dl's per-site download archives live; `None` runs
+    /// without archives.
+    pub archives_dir: Option<PathBuf>,
 }
 
 impl Default for ManagerConfig {
@@ -49,6 +54,7 @@ impl Default for ManagerConfig {
             rescan_interval: Duration::from_secs(5),
             user_agent: None,
             tools: None,
+            archives_dir: None,
         }
     }
 }
@@ -225,8 +231,10 @@ impl Manager {
     }
 
     /// Remove a download, stopping it first. Its `.part` file is always deleted;
-    /// with `delete_files`, a completed file is deleted too. An emptied package
-    /// is removed as well.
+    /// with `delete_files`, a completed file is deleted too. A gallery deletes
+    /// the files it wrote whatever its status (a failed one still finished
+    /// some), then its folder if that leaves it empty. An emptied package is
+    /// removed as well.
     pub async fn remove(&self, id: DownloadId, delete_files: bool) -> Result<()> {
         if let Some(mut finished) = self.inner.request_stop(id, StopReason::Remove) {
             let _ = finished.wait_for(|done| *done).await;
@@ -236,17 +244,34 @@ impl Manager {
             .await?
             .ok_or_else(|| Error::NotFound(format!("download {id}")))?;
 
+        let completed = row.status() == Status::Completed;
         if let Some(dest) = row.dest_path.as_deref().map(std::path::Path::new) {
-            remove_file_if_exists(&job::part_path(dest)).await?;
-            if row.kind == DownloadKind::Ytdlp.as_str() && row.status() != Status::Completed {
-                for leftover in ytdlp::partial_files(dest) {
-                    remove_file_if_exists(&leftover).await?;
+            match row.kind() {
+                DownloadKind::Http => remove_file_if_exists(&job::part_path(dest)).await?,
+                DownloadKind::Ytdlp if !completed => {
+                    for leftover in ytdlp::partial_files(dest) {
+                        remove_file_if_exists(&leftover).await?;
+                    }
                 }
+                DownloadKind::Gallerydl if !completed => {
+                    for leftover in gallerydl::partial_files(dest) {
+                        remove_file_if_exists(&leftover).await?;
+                    }
+                }
+                _ => {}
             }
-            if delete_files && row.status() == Status::Completed {
+            // A gallery that stopped part-way still has whole files of its own.
+            if delete_files && row.kind() == DownloadKind::Gallerydl {
+                for file in store::files_of(pool, id).await? {
+                    remove_file_if_exists(&file).await?;
+                }
+                // Only succeeds when nothing else is in there.
+                let _ = tokio::fs::remove_dir(dest).await;
+            } else if delete_files && completed {
                 remove_file_if_exists(dest).await?;
             }
         }
+
         store::delete_download(pool, id).await?;
         tracing::info!(download = id, delete_files, "download removed");
         self.inner.emit(Event::DownloadRemoved {

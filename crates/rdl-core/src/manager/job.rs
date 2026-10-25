@@ -74,6 +74,7 @@ async fn execute(
     match row.kind.as_str() {
         "http" => {}
         "ytdlp" => return super::ytdlp_job::execute(inner, row, cancel).await,
+        "gallerydl" => return super::gallerydl_job::execute(inner, row, cancel).await,
         other => return Err(Error::Unsupported(format!("{other} downloads"))),
     }
     let pool = &inner.pool;
@@ -213,6 +214,7 @@ async fn forward_progress(inner: Arc<Inner>, id: i64, mut rx: watch::Receiver<Pr
             total: progress.total,
             speed_bps: speed as u64,
             connections: progress.connections,
+            files: None,
         });
 
         if last_save.elapsed() >= inner.config.save_interval && !progress.segments.is_empty() {

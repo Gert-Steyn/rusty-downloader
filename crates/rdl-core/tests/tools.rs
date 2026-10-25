@@ -12,15 +12,17 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use rdl_core::db;
-use rdl_core::tools::{ToolName, Tools, ToolsConfig};
+use rdl_core::tools::{ToolChannel, ToolName, Tools, ToolsConfig};
 use sha2::{Digest, Sha256};
 use url::Url;
 
-/// What the fake GitHub serves per repo: release tag and asset bytes.
+/// What the fake GitHub (and Codeberg, under `/codeberg/`) serves per repo:
+/// release tag and asset bytes.
 #[derive(Default)]
 struct Releases {
     ytdlp: Mutex<(String, Bytes)>,
     ffmpeg: Mutex<(String, Bytes)>,
+    gallerydl: Mutex<(String, Bytes)>,
     /// Serve this checksum instead of the real one.
     wrong_sum: Mutex<bool>,
 }
@@ -39,6 +41,27 @@ async fn release(
     Path((owner, repo)): Path<(String, String)>,
 ) -> impl IntoResponse {
     let (tag, asset, sums) = match (&*owner, &*repo) {
+        // Only reachable through the Codeberg root.
+        ("mikf", "gallery-dl") => (
+            r.gallerydl.lock().unwrap().0.clone(),
+            "gallery-dl.exe",
+            "SHA256SUMS",
+        ),
+        // No checksum file; GitHub's digest is the only hash.
+        ("gdl-org", "builds") => {
+            let (tag, data) = r.gallerydl.lock().unwrap().clone();
+            let asset = "gallery-dl_windows.exe";
+            let json = serde_json::json!({
+                "tag_name": tag,
+                "assets": [{
+                    "name": asset,
+                    "browser_download_url": base.join(&format!("dl/{repo}/{asset}")).unwrap().as_str(),
+                    "size": data.len(),
+                    "digest": format!("sha256:{}", sha(&data)),
+                }]
+            });
+            return (StatusCode::OK, json.to_string());
+        }
         ("yt-dlp", "yt-dlp") => (
             r.ytdlp.lock().unwrap().0.clone(),
             "yt-dlp.exe",
@@ -69,6 +92,7 @@ async fn asset(
 ) -> impl IntoResponse {
     let data = match &*repo {
         "yt-dlp" => r.ytdlp.lock().unwrap().1.clone(),
+        "gallery-dl" | "builds" => r.gallerydl.lock().unwrap().1.clone(),
         _ => r.ffmpeg.lock().unwrap().1.clone(),
     };
     if name.contains("SUM") || name.ends_with(".sha256") {
@@ -77,10 +101,10 @@ async fn asset(
         } else {
             sha(&data)
         };
-        let file = if repo == "yt-dlp" {
-            "yt-dlp.exe"
-        } else {
-            "ffmpeg-master-latest-win64-gpl-shared.zip"
+        let file = match &*repo {
+            "yt-dlp" => "yt-dlp.exe",
+            "gallery-dl" => "gallery-dl.exe",
+            _ => "ffmpeg-master-latest-win64-gpl-shared.zip",
         };
         return format!("{}  other\n{hash}  {file}\n", "1".repeat(64)).into_response();
     }
@@ -101,6 +125,10 @@ impl Fixture {
         let base = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
         let app = Router::new()
             .route("/repos/{owner}/{repo}/releases/latest", get(release))
+            .route(
+                "/codeberg/repos/{owner}/{repo}/releases/latest",
+                get(release),
+            )
             .route("/dl/{repo}/{name}", get(asset))
             .with_state((Arc::clone(&releases), base.clone()));
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -108,6 +136,7 @@ impl Fixture {
         let dir = tempfile::tempdir().unwrap();
         let pool = db::open(&dir.path().join("t.db")).await.unwrap();
         let config = ToolsConfig {
+            codeberg_base: base.join("codeberg/").unwrap(),
             api_base: base,
             verify_runs: false,
             ..ToolsConfig::default()
@@ -242,6 +271,31 @@ async fn unpacks_ffmpeg_bin_folder_from_zip() {
     assert!(bin.join("avcodec-62.dll").is_file());
     assert!(!bin.join("readme.txt").exists());
     assert_eq!(info.release.as_deref(), Some("2026-10-24"));
+}
+
+#[tokio::test]
+async fn installs_gallery_dl_from_codeberg_and_nightly_by_digest() {
+    let fx = Fixture::new().await;
+    *fx.releases.gallerydl.lock().unwrap() = ("v1.32.17".into(), Bytes::from_static(b"gdl"));
+    let stable = fx.tools.install(ToolName::Gallerydl).await.unwrap();
+    assert_eq!(stable.release.as_deref(), Some("v1.32.17"));
+    let exe = stable.path.unwrap();
+    assert_eq!(exe.file_name().unwrap(), "gallery-dl.exe");
+    assert_eq!(std::fs::read(&exe).unwrap(), b"gdl");
+
+    fx.tools
+        .set_channel(ToolName::Gallerydl, ToolChannel::Nightly)
+        .await
+        .unwrap();
+    *fx.releases.gallerydl.lock().unwrap() =
+        ("2026.10.25".into(), Bytes::from_static(b"gdl nightly"));
+    let nightly = fx.tools.install(ToolName::Gallerydl).await.unwrap();
+    assert_eq!(nightly.release.as_deref(), Some("2026.10.25"));
+    // Saved under the tool's own name, not the asset's.
+    let exe = nightly.path.unwrap();
+    assert_eq!(exe.file_name().unwrap(), "gallery-dl.exe");
+    assert_eq!(std::fs::read(&exe).unwrap(), b"gdl nightly");
+    assert_eq!(nightly.previous_version.as_deref(), Some("v1.32.17"));
 }
 
 #[tokio::test]

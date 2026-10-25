@@ -5,6 +5,11 @@ import type {
 	Download_Serialize,
 	DownloadEvents_Serialize,
 	Event_Serialize,
+	FileCount_Serialize,
+	FlagDef_Serialize,
+	GalleryDlFlags_Serialize,
+	GalleryDlOptions_Serialize,
+	Gallery_Serialize,
 	GrabbedLink_Serialize,
 	GrabberEvents_Serialize,
 	MediaSummary_Serialize,
@@ -36,6 +41,11 @@ export type GrabbedLink = GrabbedLink_Serialize;
 export type GrabberEventBatch = GrabberEvents_Serialize;
 export type MediaSummary = MediaSummary_Serialize;
 export type YtDlpOptions = YtDlpOptions_Serialize;
+export type Gallery = Gallery_Serialize;
+export type GalleryDlOptions = GalleryDlOptions_Serialize;
+export type GalleryDlFlags = GalleryDlFlags_Serialize;
+export type FlagDef = FlagDef_Serialize;
+export type FileCount = FileCount_Serialize;
 export type ToolInfo = ToolInfo_Serialize;
 export type ToolTask = ToolTask_Serialize;
 export type ToolEventBatch = ToolEvents_Serialize;

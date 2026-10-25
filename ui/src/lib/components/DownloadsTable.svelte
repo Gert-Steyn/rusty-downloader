@@ -14,7 +14,10 @@
 		formatBytes,
 		formatEta,
 		formatSpeed,
+		downloadPercent,
+		iconFor,
 		percent,
+		progressText,
 		summarize
 	} from '#lib/format.js';
 	import Icon from './Icon.svelte';
@@ -207,7 +210,7 @@
 					</div>
 				{:else}
 					{@const d = row.dl}
-					{@const pct = percent(d.downloaded, d.size)}
+					{@const pct = downloadPercent(d)}
 					{@const speed = live[d.id]?.speedBps ?? 0}
 					<div
 						id={row.key}
@@ -221,13 +224,13 @@
 						data-index={first + i}
 					>
 						<span class="name" role="gridcell">
-							<Icon name={d.kind === 'ytdlp' ? 'video' : 'file'} />
+							<Icon name={iconFor(d.kind)} />
 							<span class="label" title={d.sourceUrl}>{displayName(d)}</span>
 						</span>
-						<span class="num" role="gridcell">{formatBytes(d.size)}</span>
+						<span class="num" role="gridcell">{formatBytes(d.size ?? (d.files && d.downloaded ? d.downloaded : null))}</span>
 						<span class="progress" role="gridcell">
 							<ProgressBar value={pct} status={d.status} />
-							<span class="pct">{pct == null ? '' : `${pct.toFixed(pct < 10 ? 1 : 0)}%`}</span>
+							<span class="pct" title={d.files ? 'Files done' : undefined}>{progressText(d)}</span>
 						</span>
 						<span class="num" role="gridcell">{d.status === 'active' ? formatSpeed(speed) : '—'}</span>
 						<span class="num" role="gridcell">

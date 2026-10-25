@@ -39,6 +39,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             grabber_commands::grabber_set_folder,
             grabber_commands::grabber_recheck,
             grabber_commands::grabber_set_format,
+            grabber_commands::grabber_set_gallery_options,
+            grabber_commands::gallerydl_flags,
             grabber_commands::grabber_confirm,
             grabber_commands::get_clipboard_watch,
             grabber_commands::set_clipboard_watch,

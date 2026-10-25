@@ -10,6 +10,11 @@
 			body: 'Downloads video and audio from YouTube and thousands of other sites. Updated automatically once a day, because sites change often.',
 			size: 'about 18 MB'
 		},
+		gallerydl: {
+			title: 'gallery-dl',
+			body: 'Downloads image galleries, albums and profiles from hundreds of sites. Installed the first time a page needs it, and updated automatically once a day.',
+			size: 'about 23 MB'
+		},
 		ffmpeg: {
 			title: 'ffmpeg',
 			body: 'Merges separate video and audio streams and converts audio. Installed the first time a video download needs it; updated only when you ask.',
@@ -86,12 +91,12 @@
 						{tool.latestRelease ?? 'Not checked yet'}
 						{#if tool.lastCheck}<span class="muted"> · checked {formatDate(tool.lastCheck)}</span>{/if}
 					</dd>
-					{#if tool.name === 'ytdlp'}
+					{#if tool.name !== 'ffmpeg'}
 						<dt>Channel</dt>
 						<dd>
 							<select
 								class="select"
-								aria-label="yt-dlp release channel"
+								aria-label="{about.title} release channel"
 								value={tool.channel}
 								disabled={busy(tool)}
 								onchange={(e) => tools.setChannel(tool.name, e.currentTarget.value as 'stable' | 'nightly')}
@@ -147,8 +152,8 @@
 		{/each}
 	</div>
 	<p class="footnote muted">
-		Tools are downloaded from their official GitHub releases and checked against the published SHA-256 checksums
-		before use. The previous version is kept, so a bad update can be rolled back.
+		Tools are downloaded from their official releases (GitHub, and Codeberg for gallery-dl) and checked against the
+		published SHA-256 checksums before use. The previous version is kept, so a bad update can be rolled back.
 	</p>
 </div>
 

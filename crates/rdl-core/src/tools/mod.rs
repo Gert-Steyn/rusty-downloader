@@ -1,5 +1,6 @@
-//! External tools: yt-dlp and ffmpeg, downloaded on first use into
-//! `<data>/tools/` and kept up to date from their GitHub releases.
+//! External tools: yt-dlp, gallery-dl and ffmpeg, downloaded on first use
+//! into `<data>/tools/` and kept up to date from their releases (GitHub, and
+//! Codeberg for gallery-dl).
 //!
 //! Each install goes into its own folder (`tools/yt-dlp/<release>-<sha>/`) and
 //! the `tools` row points at the active one, so an update never touches files
@@ -32,16 +33,18 @@ use crate::{Error, Result, process};
 #[serde(rename_all = "lowercase")]
 pub enum ToolName {
     Ytdlp,
+    Gallerydl,
     Ffmpeg,
 }
 
 impl ToolName {
-    pub const ALL: [ToolName; 2] = [ToolName::Ytdlp, ToolName::Ffmpeg];
+    pub const ALL: [ToolName; 3] = [ToolName::Ytdlp, ToolName::Gallerydl, ToolName::Ffmpeg];
 
     /// Name in the database and on disk.
     pub fn as_str(self) -> &'static str {
         match self {
             ToolName::Ytdlp => "yt-dlp",
+            ToolName::Gallerydl => "gallery-dl",
             ToolName::Ffmpeg => "ffmpeg",
         }
     }
@@ -49,15 +52,22 @@ impl ToolName {
     fn exe(self) -> &'static str {
         match self {
             ToolName::Ytdlp => "yt-dlp.exe",
+            ToolName::Gallerydl => "gallery-dl.exe",
             ToolName::Ffmpeg => "ffmpeg.exe",
         }
     }
 
     fn version_arg(self) -> &'static str {
         match self {
-            ToolName::Ytdlp => "--version",
+            ToolName::Ytdlp | ToolName::Gallerydl => "--version",
             ToolName::Ffmpeg => "-version",
         }
+    }
+
+    /// Extractor tools break when sites change, so background checks install
+    /// their updates. ffmpeg is large and rarely matters.
+    fn auto_updates(self) -> bool {
+        matches!(self, ToolName::Ytdlp | ToolName::Gallerydl)
     }
 }
 
@@ -78,12 +88,23 @@ impl ToolChannel {
     }
 }
 
+/// Release hosts. Codeberg (Forgejo) answers with the same release JSON as
+/// GitHub, under its own API root.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Forge {
+    GitHub,
+    Codeberg,
+}
+
 /// Where a tool's releases come from.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Upstream {
+    pub forge: Forge,
     pub repo: &'static str,
     pub asset: &'static str,
-    pub sums: &'static str,
+    /// Checksum file in the release. `None` uses the SHA-256 `digest` GitHub
+    /// computes for every asset, for repos that publish no list.
+    pub sums: Option<&'static str>,
     /// The asset is a zip whose `bin/` folder holds the tool.
     pub zipped: bool,
 }
@@ -91,23 +112,43 @@ pub(crate) struct Upstream {
 fn upstream(name: ToolName, channel: ToolChannel) -> Upstream {
     match (name, channel) {
         (ToolName::Ytdlp, ToolChannel::Stable) => Upstream {
+            forge: Forge::GitHub,
             repo: "yt-dlp/yt-dlp",
             asset: "yt-dlp.exe",
-            sums: "SHA2-256SUMS",
+            sums: Some("SHA2-256SUMS"),
             zipped: false,
         },
         (ToolName::Ytdlp, ToolChannel::Nightly) => Upstream {
+            forge: Forge::GitHub,
             repo: "yt-dlp/yt-dlp-nightly-builds",
             asset: "yt-dlp.exe",
-            sums: "SHA2-256SUMS",
+            sums: Some("SHA2-256SUMS"),
+            zipped: false,
+        },
+        // gallery-dl moved to Codeberg; its GitHub releases no longer carry
+        // binaries.
+        (ToolName::Gallerydl, ToolChannel::Stable) => Upstream {
+            forge: Forge::Codeberg,
+            repo: "mikf/gallery-dl",
+            asset: "gallery-dl.exe",
+            sums: Some("SHA256SUMS"),
+            zipped: false,
+        },
+        // Daily builds of the main branch, without a checksum file.
+        (ToolName::Gallerydl, ToolChannel::Nightly) => Upstream {
+            forge: Forge::GitHub,
+            repo: "gdl-org/builds",
+            asset: "gallery-dl_windows.exe",
+            sums: None,
             zipped: false,
         },
         // The builds yt-dlp recommends. The shared build is half the size of
         // the static one; its DLLs sit next to ffmpeg.exe in `bin/`.
         (ToolName::Ffmpeg, _) => Upstream {
+            forge: Forge::GitHub,
             repo: "yt-dlp/FFmpeg-Builds",
             asset: "ffmpeg-master-latest-win64-gpl-shared.zip",
-            sums: "checksums.sha256",
+            sums: Some("checksums.sha256"),
             zipped: true,
         },
     }
@@ -117,10 +158,12 @@ fn upstream(name: ToolName, channel: ToolChannel) -> Upstream {
 pub struct ToolsConfig {
     /// GitHub API root; tests point this at a local server.
     pub api_base: Url,
+    /// Codeberg API root (`…/api/v1/`).
+    pub codeberg_base: Url,
     /// Background checks run at most this often per tool.
     pub check_interval: Duration,
-    /// Install yt-dlp updates found by background checks. ffmpeg is only
-    /// ever updated on request: it is large and rarely matters.
+    /// Install yt-dlp and gallery-dl updates found by background checks.
+    /// ffmpeg is only ever updated on request: it is large and rarely matters.
     pub auto_update: bool,
     /// Run the new binary before switching to it. Tests serve fake binaries
     /// and turn this off; the version is then the release name.
@@ -131,6 +174,7 @@ impl Default for ToolsConfig {
     fn default() -> Self {
         Self {
             api_base: Url::parse("https://api.github.com/").expect("valid URL"),
+            codeberg_base: Url::parse("https://codeberg.org/api/v1/").expect("valid URL"),
             check_interval: Duration::from_secs(24 * 60 * 60),
             auto_update: true,
             verify_runs: true,
@@ -414,8 +458,8 @@ impl Tools {
         self.info(name).await
     }
 
-    /// Check installed tools that are due, and apply yt-dlp updates if
-    /// enabled. Errors are recorded on the tool, not returned.
+    /// Check installed tools that are due, and apply yt-dlp and gallery-dl
+    /// updates if enabled. Errors are recorded on the tool, not returned.
     pub async fn check_due(&self) {
         for name in ToolName::ALL {
             let Ok(row) = self.row(name).await else {
@@ -430,10 +474,10 @@ impl Tools {
             }
             match self.check(name).await {
                 Ok(info) if info.update_available => {
-                    if name == ToolName::Ytdlp && self.inner.config.auto_update {
-                        tracing::info!(to = ?info.latest_release, "updating yt-dlp");
+                    if name.auto_updates() && self.inner.config.auto_update {
+                        tracing::info!(tool = name.as_str(), to = ?info.latest_release, "updating");
                         if let Err(e) = self.install(name).await {
-                            tracing::warn!(error = %e, "yt-dlp update failed");
+                            tracing::warn!(tool = name.as_str(), error = %e, "update failed");
                         }
                     }
                 }
@@ -564,7 +608,11 @@ impl Tools {
 
     async fn fetch_latest(&self, name: ToolName, channel: ToolChannel) -> Result<github::Latest> {
         let up = upstream(name, channel);
-        let latest = github::latest(&self.inner.client, &self.inner.config.api_base, &up).await?;
+        let api = match up.forge {
+            Forge::GitHub => &self.inner.config.api_base,
+            Forge::Codeberg => &self.inner.config.codeberg_base,
+        };
+        let latest = github::latest(&self.inner.client, api, &up).await?;
         sqlx::query(
             "UPDATE tools SET latest_release = ?, latest_sha256 = ?,
                  last_check = CAST(unixepoch('subsec') * 1000 AS INTEGER)
@@ -721,7 +769,7 @@ async fn detect_version(name: ToolName, exe: &Path) -> Result<String> {
 fn parse_version(name: ToolName, stdout: &str) -> Option<String> {
     let first = stdout.lines().map(str::trim).find(|l| !l.is_empty())?;
     match name {
-        ToolName::Ytdlp => Some(first.to_owned()),
+        ToolName::Ytdlp | ToolName::Gallerydl => Some(first.to_owned()),
         // "ffmpeg version N-121490-g0123abcd-20261024 Copyright (c) ..."
         ToolName::Ffmpeg => first
             .strip_prefix("ffmpeg version ")

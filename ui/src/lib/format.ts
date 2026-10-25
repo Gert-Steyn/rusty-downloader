@@ -36,6 +36,30 @@ export function percent(done: number, total: number | null | undefined): number 
 	return Math.min(100, (done / total) * 100);
 }
 
+/**
+ * Progress of one download, 0–100 or null when unknown. Galleries count
+ * files, since their total size is rarely known up front.
+ */
+export function downloadPercent(d: Download): number | null {
+	if (d.status === 'completed') return 100;
+	if (d.files) return d.files.total ? percent(d.files.done, d.files.total) : null;
+	return percent(d.downloaded, d.size);
+}
+
+/** Short progress text: `42%`, or `12/40 files` for a gallery. */
+export function progressText(d: Download): string {
+	if (d.files && d.status !== 'completed') {
+		if (!d.files.done && !d.files.total) return '';
+		return d.files.total ? `${d.files.done}/${d.files.total}` : `${d.files.done} files`;
+	}
+	const pct = downloadPercent(d);
+	return pct == null ? '' : `${pct.toFixed(pct < 10 ? 1 : 0)}%`;
+}
+
+export function iconFor(kind: string): 'video' | 'gallery' | 'file' {
+	return kind === 'ytdlp' ? 'video' : kind === 'gallerydl' ? 'gallery' : 'file';
+}
+
 /** `3:07` or `1:02:03`. */
 export function formatDuration(seconds: number | null | undefined): string {
 	if (seconds == null || !Number.isFinite(seconds)) return '';
@@ -63,6 +87,7 @@ export const STATUS_LABELS: Record<Status, string> = {
 export function displayName(d: Download): string {
 	if (d.filename) return d.filename;
 	// yt-dlp picks the name itself: show the planned file, else the title.
+	// (A gallery's planned path is its folder.)
 	const planned = d.destPath?.split(/[\\/]/).pop();
 	if (planned) return planned;
 	if (d.title) return d.title;

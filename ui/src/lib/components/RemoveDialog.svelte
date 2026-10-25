@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Download } from '#lib/api.js';
 	import { downloads } from '#lib/downloads.svelte.js';
 	import { displayName } from '#lib/format.js';
 	import type { Selection } from './DownloadsTable.svelte';
@@ -12,14 +13,20 @@
 
 	let deleteFiles = $state(false);
 
+	/** Files on disk that "delete" would remove: a gallery's finished files, even if it stopped part-way. */
+	function filesOnDisk(d: Download): number {
+		if (d.files) return d.files.done;
+		return d.status === 'completed' ? 1 : 0;
+	}
+
 	const subject = $derived.by(() => {
 		if (target?.kind === 'download') {
 			const d = downloads.download(target.id);
-			return d ? { name: displayName(d), completed: d.status === 'completed' ? 1 : 0 } : null;
+			return d ? { name: displayName(d), completed: filesOnDisk(d) } : null;
 		}
 		if (target?.kind === 'package') {
 			const p = downloads.package(target.id);
-			return p ? { name: p.name, completed: p.downloads.filter((d) => d.status === 'completed').length } : null;
+			return p ? { name: p.name, completed: p.downloads.reduce((n, d) => n + filesOnDisk(d), 0) } : null;
 		}
 		return null;
 	});

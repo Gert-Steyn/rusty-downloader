@@ -5,10 +5,13 @@
 //! browser. Each is stored at once and probed in the background with bounded
 //! concurrency. A link that turns out to be a web page (or can't be probed)
 //! is handed to yt-dlp, which recognises video sites; playlists expand into
-//! one link per video (see `media`). User edits (file and package names, folders) always win over
-//! what a probe finishes with later. Confirming hands links to the
-//! [`Manager`] as packages and removes them from here.
+//! one link per video (see `media`). Pages yt-dlp doesn't know, or can't
+//! read, go to gallery-dl next; a gallery stays one link (see `gallery`).
+//! User edits (file and package names, folders) always win over what a probe
+//! finishes with later. Confirming hands links to the [`Manager`] as packages
+//! and removes them from here.
 
+mod gallery;
 mod links;
 mod media;
 
@@ -21,6 +24,7 @@ use tokio::sync::{Semaphore, broadcast};
 use url::Url;
 
 use crate::db::Pool;
+use crate::gallerydl::{self, Gallery, GalleryDlOptions};
 use crate::http::{self, DownloadSpec, filename};
 use crate::manager::{DEFAULT_QUEUE, DownloadKind, Manager, NewDownload, NewPackage, PackageId};
 use crate::tools::Tools;
@@ -101,6 +105,10 @@ pub struct GrabbedLink {
     pub media: Option<MediaSummary>,
     /// Format choice, for `Ytdlp` links.
     pub ytdlp: Option<YtDlpOptions>,
+    /// What gallery-dl found, for `Gallerydl` links.
+    pub gallery: Option<Gallery>,
+    /// Settings, for `Gallerydl` links.
+    pub gallerydl: Option<GalleryDlOptions>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -160,20 +168,19 @@ struct LinkRow {
 
 impl LinkRow {
     fn kind(&self) -> DownloadKind {
-        match self.kind.as_deref() {
-            Some("ytdlp") => DownloadKind::Ytdlp,
-            _ => DownloadKind::Http,
-        }
+        DownloadKind::parse(self.kind.as_deref().unwrap_or_default())
     }
 
-    fn media_info(&self) -> Option<MediaInfo> {
-        (self.kind() == DownloadKind::Ytdlp)
+    /// `info_json`, if this is a `kind` link.
+    fn info<T: serde::de::DeserializeOwned>(&self, kind: DownloadKind) -> Option<T> {
+        (self.kind() == kind)
             .then(|| serde_json::from_str(self.info_json.as_deref()?).ok())
             .flatten()
     }
 
-    fn ytdlp_options(&self) -> Option<YtDlpOptions> {
-        (self.kind() == DownloadKind::Ytdlp).then(|| {
+    /// Handler options, if this is a `kind` link; unreadable ones get the defaults.
+    fn options<T: serde::de::DeserializeOwned + Default>(&self, kind: DownloadKind) -> Option<T> {
+        (self.kind() == kind).then(|| {
             self.handler_opts_json
                 .as_deref()
                 .and_then(|json| serde_json::from_str(json).ok())
@@ -181,10 +188,16 @@ impl LinkRow {
         })
     }
 
+    fn media_info(&self) -> Option<MediaInfo> {
+        self.info(DownloadKind::Ytdlp)
+    }
+
     fn into_link(self) -> GrabbedLink {
         let kind = self.kind();
         let media = self.media_info().map(|info| MediaSummary::from_info(&info));
-        let ytdlp = self.ytdlp_options();
+        let ytdlp = self.options(DownloadKind::Ytdlp);
+        let gallery = self.info(DownloadKind::Gallerydl);
+        let gallerydl = self.options(DownloadKind::Gallerydl);
         let host = Url::parse(&self.source_url)
             .ok()
             .and_then(|u| u.host_str().map(str::to_owned))
@@ -202,6 +215,8 @@ impl LinkRow {
             kind,
             media,
             ytdlp,
+            gallery,
+            gallerydl,
         }
     }
 }
@@ -337,6 +352,13 @@ impl LinkGrabber {
 
     /// Choose the folder for links; `None` restores the default folder.
     pub async fn set_dest_dir(&self, ids: &[LinkId], dir: Option<&Path>) -> Result<()> {
+        // `C:dir` is relative to the app's working folder on C:, which is never meant.
+        if let Some(d) = dir.filter(|d| !d.is_absolute()) {
+            return Err(Error::InvalidInput(format!(
+                "\"{}\" is not a full folder path.",
+                d.display()
+            )));
+        }
         let dir = dir.map(|d| d.to_string_lossy().into_owned());
         let pool = &self.inner.pool;
         for id in ids {
@@ -367,6 +389,31 @@ impl LinkGrabber {
             sqlx::query("UPDATE link_grabber SET handler_opts_json = ?, size = ? WHERE id = ?")
                 .bind(&json)
                 .bind(size.map(|s| s as i64))
+                .bind(id)
+                .execute(&self.inner.pool)
+                .await?;
+            self.updated(*id).await?;
+        }
+        Ok(())
+    }
+
+    /// Change gallery-dl settings for links; other links are left alone.
+    pub async fn set_gallery_options(
+        &self,
+        ids: &[LinkId],
+        options: &GalleryDlOptions,
+    ) -> Result<()> {
+        options.validate(gallerydl::schema())?;
+        let json = serde_json::to_string(options)?;
+        for id in ids {
+            let Some(row) = self.row(*id).await? else {
+                continue;
+            };
+            if row.kind() != DownloadKind::Gallerydl {
+                continue;
+            }
+            sqlx::query("UPDATE link_grabber SET handler_opts_json = ? WHERE id = ?")
+                .bind(&json)
                 .bind(id)
                 .execute(&self.inner.pool)
                 .await?;
@@ -479,11 +526,29 @@ impl LinkGrabber {
 
 fn new_download(link: &GrabbedLink) -> Option<NewDownload> {
     let url = Url::parse(&link.url).ok()?;
-    if link.kind != DownloadKind::Ytdlp {
-        return Some(NewDownload {
-            filename: link.filename.clone(),
-            ..NewDownload::new(url)
-        });
+    match link.kind {
+        DownloadKind::Ytdlp => {}
+        DownloadKind::Gallerydl => {
+            let gallery = link.gallery.clone().unwrap_or_default();
+            let options = link.gallerydl.clone().unwrap_or_default();
+            // A range or filter makes the resolved count and size wrong.
+            let whole = !options.narrows(gallerydl::schema());
+            return Some(NewDownload {
+                filename: link.filename.clone(),
+                kind: DownloadKind::Gallerydl,
+                title: gallery.title.clone(),
+                files_total: gallery.known_total().filter(|_| whole),
+                size: link.size.filter(|_| whole),
+                gallerydl: Some(options),
+                ..NewDownload::new(url)
+            });
+        }
+        DownloadKind::Http => {
+            return Some(NewDownload {
+                filename: link.filename.clone(),
+                ..NewDownload::new(url)
+            });
+        }
     }
     let title = link.media.as_ref().and_then(|m| m.title.clone());
     // The name only overrides yt-dlp's own `title [id]` when the user changed
@@ -493,11 +558,11 @@ fn new_download(link: &GrabbedLink) -> Option<NewDownload> {
         .clone()
         .filter(|name| Some(name) != title.as_ref().map(|t| filename::sanitize(t)).as_ref());
     Some(NewDownload {
-        url,
         filename: renamed,
         kind: DownloadKind::Ytdlp,
         ytdlp: Some(link.ytdlp.clone().unwrap_or_default()),
         title,
+        ..NewDownload::new(url)
     })
 }
 
@@ -547,12 +612,49 @@ async fn probe_link(
     if let Ok(parsed) = &parsed
         && media::worth_asking(&result)
     {
-        match media::resolve_link(inner, id, parsed, default_package).await {
-            Ok(media::Verdict::Handled) => return updated(inner, id).await,
-            Ok(media::Verdict::NotMedia) => {}
+        // yt-dlp first, then gallery-dl. A find by yt-dlp's catch-all
+        // extractor only counts if gallery-dl has nothing. The first tool
+        // that knows the site but fails explains the failure, unless the
+        // other one succeeds.
+        let mut failure: Option<(DownloadKind, String)> = None;
+        let mut generic = None;
+        match media::lookup(inner, parsed).await {
+            Ok(media::Lookup::Found(found)) if media::is_generic(&found) => generic = Some(found),
+            Ok(media::Lookup::Found(found)) => {
+                match media::record(inner, id, found, default_package).await? {
+                    media::Verdict::Failed(message) => {
+                        failure = Some((DownloadKind::Ytdlp, message))
+                    }
+                    _ => return updated(inner, id).await,
+                }
+            }
+            Ok(media::Lookup::NotMedia) => {}
+            Ok(media::Lookup::Failed(message)) => failure = Some((DownloadKind::Ytdlp, message)),
             Err(e) => tracing::warn!(link = id, error = %e, "yt-dlp check failed"),
         }
+        match gallery::resolve_link(inner, id, parsed, default_package).await {
+            Ok(media::Verdict::Handled) => return updated(inner, id).await,
+            Ok(media::Verdict::NotMedia) => {}
+            Ok(media::Verdict::Failed(message)) => {
+                failure.get_or_insert((DownloadKind::Gallerydl, message));
+            }
+            Err(e) => tracing::warn!(link = id, error = %e, "gallery-dl check failed"),
+        }
+        if let Some(found) = generic {
+            match media::record(inner, id, found, default_package).await? {
+                media::Verdict::Failed(message) => {
+                    failure.get_or_insert((DownloadKind::Ytdlp, message));
+                }
+                _ => return updated(inner, id).await,
+            }
+        }
+
+        if let Some((kind, message)) = failure {
+            media::record_failure(inner, id, kind, &message).await?;
+            return updated(inner, id).await;
+        }
     }
+
     match result {
         Ok(probe) => {
             // COALESCE keeps a name the user typed while the probe ran.

@@ -6,9 +6,11 @@
 	import EditableText from '#lib/components/EditableText.svelte';
 	import EmptyState from '#lib/components/EmptyState.svelte';
 	import FormatPicker from '#lib/components/FormatPicker.svelte';
+	import GalleryOptionsDialog from '#lib/components/GalleryOptionsDialog.svelte';
 	import Icon from '#lib/components/Icon.svelte';
-	import { isTauri, type GrabbedLink, type YtDlpOptions } from '#lib/api.js';
-	import { formatBytes, formatDuration } from '#lib/format.js';
+	import { isTauri, type GalleryDlOptions, type GrabbedLink, type YtDlpOptions } from '#lib/api.js';
+	import { formatBytes, formatDuration, iconFor } from '#lib/format.js';
+	import { DEFAULT_GALLERY_OPTIONS, changedCount, galleryLine, sameOptions } from '#lib/gallerydl.js';
 	import { grabber, type LinkGroup } from '#lib/linkgrabber.svelte.js';
 
 	let adding = $state(false);
@@ -36,6 +38,30 @@
 		return group.links.filter((l) => l.kind === 'ytdlp');
 	}
 
+	function galleryLinks(group: LinkGroup): GrabbedLink[] {
+		return group.links.filter((l) => l.kind === 'gallerydl');
+	}
+
+	// The gallery-dl options dialog, for one gallery or all of a package's.
+	let galleryEdit = $state<{ ids: number[]; title: string; options: GalleryDlOptions; mixed: boolean } | null>(null);
+	let galleryEditOpen = $state(false);
+
+	function editGalleries(links: GrabbedLink[], title: string) {
+		const first = links[0]?.gallerydl ?? DEFAULT_GALLERY_OPTIONS;
+		galleryEdit = {
+			ids: links.map((l) => l.id),
+			title,
+			options: first,
+			mixed: links.some((l) => !sameOptions(l.gallerydl ?? DEFAULT_GALLERY_OPTIONS, first))
+		};
+		galleryEditOpen = true;
+	}
+
+	function optionsLabel(links: GrabbedLink[]): string {
+		const changed = Math.max(...links.map((l) => changedCount(l.gallerydl)));
+		return changed ? `Options (${changed})…` : 'Options…';
+	}
+
 	/** The group's shared choice, or `mixed` when its videos differ. */
 	function groupFormat(links: GrabbedLink[]) {
 		const first = links[0]?.ytdlp ?? DEFAULT_OPTIONS;
@@ -47,6 +73,7 @@
 	}
 
 	function mediaLine(link: GrabbedLink): string {
+		if (link.gallery) return galleryLine(link.gallery);
 		const m = link.media;
 		if (!m) return '';
 		return [formatDuration(m.duration), m.uploader, m.isLive ? 'Live' : null].filter(Boolean).join(' · ');
@@ -157,6 +184,15 @@
 									heights={f.heights}
 									onchange={(o) => grabber.setFormat(media.map((l) => l.id), o)}
 								/>
+							{:else if galleryLinks(group).length > 1}
+								{@const galleries = galleryLinks(group)}
+								<button
+									class="btn small"
+									title="gallery-dl options for every gallery in {group.name}"
+									onclick={() => editGalleries(galleries, `Options for ${galleries.length} galleries`)}
+								>
+									{optionsLabel(galleries)}
+								</button>
 							{/if}
 						</span>
 						<span class="num">{formatBytes(groupSize(group))}</span>
@@ -175,17 +211,28 @@
 								onchange={(e) => grabber.setChecked([link.id], e.currentTarget.checked)}
 							/>
 							<span class="name" title={link.url}>
-								<Icon name={link.kind === 'ytdlp' ? 'video' : 'file'} />
+								<Icon name={iconFor(link.kind)} />
 								<span class="label">
 									{#if link.filename}
-										<EditableText value={link.filename} label="File name" onsave={(n) => grabber.rename(link.id, n)} />
+										<EditableText
+											value={link.filename}
+											label={link.kind === 'gallerydl' ? 'Folder name' : 'File name'}
+											onsave={(n) => grabber.rename(link.id, n)}
+										/>
 									{:else}
 										<span class="pending">{link.url}</span>
 									{/if}
 									{#if mediaLine(link)}<span class="meta">{mediaLine(link)}</span>{/if}
 								</span>
 							</span>
-							<span class="host" title={link.media?.extractor ? `${link.host} · ${link.media.extractor} (yt-dlp)` : link.host}>
+							<span
+								class="host"
+								title={link.media?.extractor
+									? `${link.host} · ${link.media.extractor} (yt-dlp)`
+									: link.gallery?.category
+										? `${link.host} · ${link.gallery.category} (gallery-dl)`
+										: link.host}
+							>
 								{link.host}
 							</span>
 							<span class="format">
@@ -196,6 +243,14 @@
 										heights={link.media?.heights ?? []}
 										onchange={(o) => grabber.setFormat([link.id], o)}
 									/>
+								{:else if link.kind === 'gallerydl'}
+									<button
+										class="btn small"
+										title="gallery-dl options: selection, sign-in, impersonation, post-processing"
+										onclick={() => editGalleries([link], `Options for ${link.filename ?? 'this gallery'}`)}
+									>
+										{optionsLabel([link])}
+									</button>
 								{/if}
 							</span>
 							<span class="num" title={link.kind === 'ytdlp' && link.size != null ? 'Estimated from the formats on offer' : undefined}>
@@ -209,6 +264,17 @@
 		</div>
 	{/if}
 </div>
+
+{#if galleryEdit}
+	{@const edit = galleryEdit}
+	<GalleryOptionsDialog
+		bind:open={galleryEditOpen}
+		title={edit.title}
+		options={edit.options}
+		mixed={edit.mixed}
+		onsave={(o) => grabber.setGalleryOptions(edit.ids, o)}
+	/>
+{/if}
 
 <Dialog bind:open={adding} title="Add links to the LinkGrabber" width={560} onsubmit={submitAdd}>
 	<label class="field">

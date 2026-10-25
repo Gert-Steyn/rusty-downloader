@@ -129,6 +129,7 @@ class DownloadsStore {
 					if (!d) break;
 					d.downloaded = event.downloaded;
 					if (event.total != null) d.size = event.total;
+					if (event.files) d.files = event.files;
 					this.live[event.downloadId] = {
 						speedBps: event.speedBps,
 						connections: event.connections
@@ -143,7 +144,16 @@ class DownloadsStore {
 					}
 					d.status = event.status;
 					d.error = event.error;
-					if (event.status === 'completed' && d.size != null) d.downloaded = d.size;
+					if (event.status === 'completed') {
+						if (d.files) {
+							// A gallery's size was an estimate; what it downloaded is the truth.
+							d.size = d.downloaded;
+							d.files.total = d.files.done;
+						} else if (d.size != null) {
+							d.downloaded = d.size;
+						}
+					}
+
 					if (event.status !== 'active') delete this.live[event.downloadId];
 					break;
 				}

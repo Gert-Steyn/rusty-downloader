@@ -3,8 +3,10 @@
 
 use std::path::PathBuf;
 
+use rdl_core::gallerydl::{self, FlagSchema, GalleryDlOptions};
 use rdl_core::linkgrabber::{GrabbedLink, LinkId, LinkSource, extract_links};
 use rdl_core::manager::PackageId;
+use rdl_core::tools::ToolName;
 use rdl_core::ytdlp::YtDlpOptions;
 use serde::Serialize;
 use specta::Type;
@@ -105,6 +107,46 @@ pub async fn grabber_set_format(
     options: YtDlpOptions,
 ) -> CommandResult<()> {
     Ok(state.grabber.set_format(&ids, &options).await?)
+}
+
+/// Change gallery-dl settings for links (other links are skipped).
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_set_gallery_options(
+    state: State<'_, AppState>,
+    ids: Vec<LinkId>,
+    options: GalleryDlOptions,
+) -> CommandResult<()> {
+    Ok(state.grabber.set_gallery_options(&ids, &options).await?)
+}
+
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GalleryDlFlags {
+    pub schema: FlagSchema,
+    /// Options the installed gallery-dl lists in `--help`; `None` when it
+    /// isn't installed or the check failed, in which case show everything.
+    pub available: Option<Vec<String>>,
+}
+
+/// The options drawer's controls, filtered by what the installed gallery-dl supports.
+#[tauri::command]
+#[specta::specta]
+pub async fn gallerydl_flags(state: State<'_, AppState>) -> CommandResult<GalleryDlFlags> {
+    let available = match state.tools.path(ToolName::Gallerydl).await? {
+        Some(exe) => match gallerydl::supported_flags(&exe).await {
+            Ok(flags) => Some(flags.iter().cloned().collect()),
+            Err(e) => {
+                tracing::warn!(error = %e, "gallery-dl self-check failed");
+                None
+            }
+        },
+        None => None,
+    };
+    Ok(GalleryDlFlags {
+        schema: gallerydl::schema().clone(),
+        available,
+    })
 }
 
 /// Queue the links as downloads; returns the new package ids.

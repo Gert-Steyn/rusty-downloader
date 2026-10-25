@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use url::Url;
 
+use crate::gallerydl::GalleryDlOptions;
 use crate::ytdlp::YtDlpOptions;
 
 pub type PackageId = i64;
@@ -57,6 +58,7 @@ pub enum DownloadKind {
     #[default]
     Http,
     Ytdlp,
+    Gallerydl,
 }
 
 impl DownloadKind {
@@ -64,21 +66,47 @@ impl DownloadKind {
         match self {
             DownloadKind::Http => "http",
             DownloadKind::Ytdlp => "ytdlp",
+            DownloadKind::Gallerydl => "gallerydl",
         }
     }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "ytdlp" => DownloadKind::Ytdlp,
+            "gallerydl" => DownloadKind::Gallerydl,
+            _ => DownloadKind::Http,
+        }
+    }
+}
+
+/// Files of a gallery download: done (downloaded or already there) out of
+/// the total, when resolving counted them all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct FileCount {
+    pub done: u32,
+    pub total: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
 pub struct NewDownload {
     pub url: Url,
     /// Overrides the server-provided name. Sanitised on insert. For yt-dlp
-    /// this is the name without extension (yt-dlp picks the extension).
+    /// this is the name without extension (yt-dlp picks the extension); for
+    /// gallery-dl it is the gallery's folder.
     pub filename: Option<String>,
     pub kind: DownloadKind,
     /// Format choice for `Ytdlp` downloads.
     pub ytdlp: Option<YtDlpOptions>,
-    /// Media title, shown until the file name is known.
+    /// Settings for `Gallerydl` downloads.
+    pub gallerydl: Option<GalleryDlOptions>,
+    /// Media or gallery title, shown until the file name is known.
     pub title: Option<String>,
+    /// Files in a gallery, when known in advance.
+    pub files_total: Option<u32>,
+    /// Size in bytes, when known in advance (a gallery whose files list it).
+    pub size: Option<u64>,
 }
 
 impl NewDownload {
@@ -88,7 +116,10 @@ impl NewDownload {
             filename: None,
             kind: DownloadKind::Http,
             ytdlp: None,
+            gallerydl: None,
             title: None,
+            files_total: None,
+            size: None,
         }
     }
 }
@@ -117,6 +148,10 @@ pub struct Download {
     pub error: Option<String>,
     /// Format choice, for yt-dlp downloads.
     pub ytdlp: Option<YtDlpOptions>,
+    /// Settings, for gallery-dl downloads.
+    pub gallerydl: Option<GalleryDlOptions>,
+    /// File count, for gallery-dl downloads.
+    pub files: Option<FileCount>,
     pub title: Option<String>,
 }
 
@@ -170,6 +205,8 @@ pub enum Event {
         total: Option<u64>,
         speed_bps: u64,
         connections: usize,
+        /// For gallery downloads, which count files rather than bytes.
+        files: Option<FileCount>,
     },
 }
 
@@ -190,5 +227,16 @@ mod tests {
             assert_eq!(Status::parse(s.as_str()), Some(s));
         }
         assert_eq!(Status::parse("bogus"), None);
+    }
+
+    #[test]
+    fn kind_round_trips_through_text() {
+        for k in [
+            DownloadKind::Http,
+            DownloadKind::Ytdlp,
+            DownloadKind::Gallerydl,
+        ] {
+            assert_eq!(DownloadKind::parse(k.as_str()), k);
+        }
     }
 }

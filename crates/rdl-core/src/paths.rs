@@ -19,6 +19,8 @@ pub struct AppPaths {
     pub plugins_dir: PathBuf,
     /// yt-dlp, ffmpeg and friends, managed by [`crate::tools`].
     pub tools_dir: PathBuf,
+    /// gallery-dl download archives, one per site.
+    pub archives_dir: PathBuf,
     pub db_file: PathBuf,
 }
 
@@ -48,6 +50,7 @@ impl AppPaths {
             logs_dir: data_dir.join("logs"),
             plugins_dir: data_dir.join("plugins"),
             tools_dir: data_dir.join("tools"),
+            archives_dir: data_dir.join("archives"),
             db_file: data_dir.join(DB_FILE_NAME),
             data_dir,
         }
@@ -59,6 +62,7 @@ impl AppPaths {
             &self.logs_dir,
             &self.plugins_dir,
             &self.tools_dir,
+            &self.archives_dir,
         ] {
             std::fs::create_dir_all(dir)?;
         }

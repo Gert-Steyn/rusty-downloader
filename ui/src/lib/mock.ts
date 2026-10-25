@@ -1,6 +1,14 @@
 // Sample data for previewing the UI in a plain browser (`pnpm ui:dev`).
 // Never loaded inside the app.
-import type { Availability, Download, GrabbedLink, Package, Status, ToolInfo } from './api.js';
+import type {
+	Availability,
+	Download,
+	GalleryDlFlags,
+	GrabbedLink,
+	Package,
+	Status,
+	ToolInfo
+} from './api.js';
 import type { Live } from './downloads.svelte.js';
 
 const MB = 1024 * 1024;
@@ -26,6 +34,8 @@ function dl(
 		status,
 		error,
 		ytdlp: null,
+		gallerydl: null,
+		files: null,
 		title: null
 	};
 }
@@ -61,6 +71,18 @@ export function packages(): Package[] {
 				ytdlp: { preset: 'max1080', customFormat: null },
 				title: 'Big Buck Bunny'
 			}
+		]),
+		pkg(6, 'Mountain trip', [
+			{
+				...dl(6, 'Mountain trip', null, 0, 'active'),
+				kind: 'gallerydl',
+				sourceUrl: 'https://imgur.com/a/mountain',
+				destPath: 'C:\\Users\\You\\Downloads\\Mountain trip',
+				downloaded: 31 * MB,
+				gallerydl: { archive: true, userConfig: false, flags: { range: '1-40' }, rawArgs: null },
+				files: { done: 12, total: 40 },
+				title: 'Mountain trip'
+			}
 		])
 	];
 }
@@ -85,7 +107,9 @@ export function grabbedLinks(): GrabbedLink[] {
 		destDir: null,
 		kind: 'http',
 		media: null,
-		ytdlp: null
+		ytdlp: null,
+		gallery: null,
+		gallerydl: null
 	});
 	const video = (
 		vid: string,
@@ -114,7 +138,34 @@ export function grabbedLinks(): GrabbedLink[] {
 			heights,
 			isLive: false
 		},
-		ytdlp: { preset: 'best', customFormat: null }
+		ytdlp: { preset: 'best', customFormat: null },
+		gallery: null,
+		gallerydl: null
+	});
+	const gallery = (path: string, title: string, files: number, category: string, sub: string): GrabbedLink => ({
+		id: id++,
+		url: `https://imgur.com/${path}`,
+		host: 'imgur.com',
+		filename: title,
+		size: files * 2 * MB,
+		availability: 'online',
+		error: null,
+		package: title,
+		destDir: null,
+		kind: 'gallerydl',
+		media: null,
+		ytdlp: null,
+		gallery: {
+			title,
+			category,
+			subcategory: sub,
+			files,
+			subGalleries: 0,
+			size: files * 2 * MB,
+			thumbnails: [],
+			partial: false
+		},
+		gallerydl: { archive: true, userConfig: false, flags: {}, rawArgs: null }
 	});
 	return [
 		link('movie.part1.rar', 'movie', 'online', 1024 * MB),
@@ -125,7 +176,8 @@ export function grabbedLinks(): GrabbedLink[] {
 		link('slow/report.docx', 'files.example.net', 'error', null, 'operation timed out'),
 		video('aqz-KE-bpKQ', 'Big Buck Bunny 60fps 4K', 'Big Buck Bunny 60fps 4K', 640 * MB, [2160, 1440, 1080, 720, 480, 360], 634),
 		video('eRsGyueVLvQ', 'Sintel', 'Open Movies', null, [], 888),
-		video('R6MlUcmOul8', 'Tears of Steel', 'Open Movies', null, [], 734)
+		video('R6MlUcmOul8', 'Tears of Steel', 'Open Movies', null, [], 734),
+		gallery('a/mountain', 'Mountain trip', 40, 'imgur', 'album')
 	];
 }
 
@@ -148,6 +200,20 @@ export function tools(): ToolInfo[] {
 			error: null
 		},
 		{
+			name: 'gallerydl',
+			channel: 'stable',
+			path: 'C:\\Users\\You\\AppData\\Roaming\\rusty-downloader\\tools\\gallery-dl\\v1.32.17-77c8f4c6\\gallery-dl.exe',
+			version: '1.32.17',
+			release: 'v1.32.17',
+			installedAt: now - 3 * day,
+			latestRelease: 'v1.32.17',
+			updateAvailable: false,
+			lastCheck: now - 2 * 60 * 60 * 1000,
+			previousVersion: null,
+			task: null,
+			error: null
+		},
+		{
 			name: 'ffmpeg',
 			channel: 'stable',
 			path: null,
@@ -162,6 +228,53 @@ export function tools(): ToolInfo[] {
 			error: null
 		}
 	];
+}
+
+/** A cut-down schema; the real one is `crates/rdl-core/src/gallerydl/flags.json`. */
+export function galleryFlags(): GalleryDlFlags {
+	return {
+		schema: {
+			version: 1,
+			groups: [
+				{
+					id: 'selection',
+					label: 'Selection',
+					flags: [
+						{ id: 'range', flag: '--range', kind: 'text', label: 'Files', help: null, placeholder: '1-20', template: null, choices: [] },
+						{ id: 'abort', flag: '--abort', kind: 'number', label: 'Stop after N existing files', help: null, placeholder: '10', template: null, choices: [] }
+					]
+				},
+				{
+					id: 'impersonation',
+					label: 'Impersonation',
+					flags: [
+						{
+							id: 'browser',
+							flag: '-o',
+							kind: 'choice',
+							label: 'Mimic browser',
+							help: "Sends the browser's headers and TLS cipher order.",
+							placeholder: null,
+							template: 'browser={}',
+							choices: [
+								{ value: 'firefox', label: 'Firefox' },
+								{ value: 'chrome', label: 'Chrome' }
+							]
+						}
+					]
+				},
+				{
+					id: 'postprocess',
+					label: 'Metadata and post-processing',
+					flags: [
+						{ id: 'zip', flag: '--zip', kind: 'switch', label: 'Pack into a .zip', help: null, placeholder: null, template: null, choices: [] },
+						{ id: 'ugoira', flag: '--ugoira', kind: 'choice', label: 'Convert Pixiv ugoira to', help: null, placeholder: null, template: null, choices: [{ value: 'webm', label: 'WebM' }] }
+					]
+				}
+			]
+		},
+		available: ['--range', '--abort', '-o', '--zip']
+	};
 }
 
 export function live(): Record<number, Live> {

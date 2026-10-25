@@ -31,6 +31,7 @@ fn config() -> ManagerConfig {
         rescan_interval: Duration::from_millis(200),
         user_agent: None,
         tools: None,
+        archives_dir: None,
     }
 }
 

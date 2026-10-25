@@ -4,6 +4,7 @@
 
 pub mod db;
 pub mod error;
+pub mod gallerydl;
 pub mod http;
 pub mod linkgrabber;
 pub mod logging;

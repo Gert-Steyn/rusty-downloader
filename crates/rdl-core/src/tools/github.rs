@@ -1,10 +1,11 @@
-//! Finding a tool's newest release on GitHub and its published checksum.
+//! Finding a tool's newest release and its checksum, on GitHub or on
+//! Codeberg (whose release API returns the same fields).
 
 use reqwest::Url;
 use reqwest::header::ACCEPT;
 use serde::Deserialize;
 
-use super::Upstream;
+use super::{Forge, Upstream};
 use crate::{Error, Result};
 
 /// The asset to install, as published right now.
@@ -15,7 +16,8 @@ pub(super) struct Latest {
     pub release: String,
     pub url: Url,
     pub size: Option<u64>,
-    /// Lowercase hex SHA-256 from the release's checksum file.
+    /// Lowercase hex SHA-256 from the release's checksum file (or the asset's
+    /// digest).
     pub sha256: String,
 }
 
@@ -31,9 +33,15 @@ struct Asset {
     browser_download_url: String,
     size: Option<u64>,
     updated_at: Option<String>,
+    /// `sha256:<hex>`, computed by GitHub on upload.
+    digest: Option<String>,
 }
 
 pub(super) async fn latest(client: &reqwest::Client, api: &Url, up: &Upstream) -> Result<Latest> {
+    let host = match up.forge {
+        Forge::GitHub => "GitHub",
+        Forge::Codeberg => "Codeberg",
+    };
     let url = api
         .join(&format!("repos/{}/releases/latest", up.repo))
         .map_err(|e| Error::InvalidUrl(e.to_string()))?;
@@ -46,10 +54,10 @@ pub(super) async fn latest(client: &reqwest::Client, api: &Url, up: &Upstream) -
         let status = response.status().as_u16();
         return Err(Error::Tool(match status {
             403 | 429 => format!(
-                "GitHub refused the update check for {} (rate limited); try again later",
+                "{host} refused the update check for {} (rate limited); try again later",
                 up.repo
             ),
-            _ => format!("GitHub returned HTTP {status} for {}", up.repo),
+            _ => format!("{host} returned HTTP {status} for {}", up.repo),
         }));
     }
     let release: Release = serde_json::from_str(&response.text().await?)?;
@@ -67,18 +75,30 @@ pub(super) async fn latest(client: &reqwest::Client, api: &Url, up: &Upstream) -
             })
     };
     let asset = find(up.asset)?;
-    let sums_asset = find(up.sums)?;
-
-    let sums_url = parse_url(&sums_asset.browser_download_url)?;
-    let response = client.get(sums_url.clone()).send().await?;
-    crate::http::check_status(response.status(), &sums_url)?;
-    let sums = response.text().await?;
-    let sha256 = checksum_for(&sums, up.asset).ok_or_else(|| {
-        Error::Tool(format!(
-            "{} does not list a checksum for {}",
-            up.sums, up.asset
-        ))
-    })?;
+    let sha256 = match up.sums {
+        Some(sums_name) => {
+            let sums_url = parse_url(&find(sums_name)?.browser_download_url)?;
+            let response = client.get(sums_url.clone()).send().await?;
+            crate::http::check_status(response.status(), &sums_url)?;
+            let sums = response.text().await?;
+            checksum_for(&sums, up.asset).ok_or_else(|| {
+                Error::Tool(format!(
+                    "{sums_name} does not list a checksum for {}",
+                    up.asset
+                ))
+            })?
+        }
+        None => asset
+            .digest
+            .as_deref()
+            .and_then(sha256_digest)
+            .ok_or_else(|| {
+                Error::Tool(format!(
+                    "{host} lists no SHA-256 digest for {} in {}",
+                    up.asset, up.repo
+                ))
+            })?,
+    };
 
     let release_name = match (&*release.tag_name, &asset.updated_at) {
         ("latest", Some(at)) => at.get(..10).unwrap_or(at).to_owned(),
@@ -102,9 +122,18 @@ pub(super) fn checksum_for(sums: &str, file: &str) -> Option<String> {
     sums.lines().find_map(|line| {
         let (hash, name) = line.trim().split_once(char::is_whitespace)?;
         let name = name.trim_start().trim_start_matches('*');
-        (name == file && hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
-            .then(|| hash.to_ascii_lowercase())
+        (name == file && is_sha256_hex(hash)).then(|| hash.to_ascii_lowercase())
     })
+}
+
+/// The hex part of a GitHub asset digest (`sha256:<hex>`).
+fn sha256_digest(digest: &str) -> Option<String> {
+    let hex = digest.strip_prefix("sha256:")?;
+    is_sha256_hex(hex).then(|| hex.to_ascii_lowercase())
+}
+
+fn is_sha256_hex(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 #[cfg(test)]
@@ -120,5 +149,16 @@ mod tests {
         assert_eq!(checksum_for(&sums, "yt-dlp"), Some(a));
         assert_eq!(checksum_for(&sums, "yt-dlp_x86.exe"), None);
         assert_eq!(checksum_for("short  yt-dlp.exe", "yt-dlp.exe"), None);
+    }
+
+    #[test]
+    fn reads_asset_digests() {
+        let hex = "5B".repeat(32);
+        assert_eq!(
+            sha256_digest(&format!("sha256:{hex}")),
+            Some("5b".repeat(32))
+        );
+        assert_eq!(sha256_digest(&format!("sha512:{hex}")), None);
+        assert_eq!(sha256_digest("sha256:abc"), None);
     }
 }

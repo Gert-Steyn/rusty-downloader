@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "groups": [
+    {
+      "id": "output",
+      "label": "Output",
+      "flags": [
+        { "id": "filename", "flag": "--filename", "kind": "text", "label": "File name format", "placeholder": "{num:>03}.{extension}", "help": "gallery-dl format string for file names." },
+        { "id": "no-part", "flag": "--no-part", "kind": "switch", "label": "Write files directly (no .part files)" },
+        { "id": "no-skip", "flag": "--no-skip", "kind": "switch", "label": "Re-download files that already exist" },
+        { "id": "no-mtime", "flag": "--no-mtime", "kind": "switch", "label": "Don't set file dates from the server" }
+      ]
+    },
+    {
+      "id": "selection",
+      "label": "Selection",
+      "flags": [
+        { "id": "range", "flag": "--range", "kind": "text", "label": "Files", "placeholder": "1-20", "help": "Which files to download, by position: '5', '8-20' or '1:24:3'." },
+        { "id": "post-range", "flag": "--post-range", "kind": "text", "label": "Posts", "placeholder": "1-10", "help": "Like Files, for posts." },
+        { "id": "child-range", "flag": "--child-range", "kind": "text", "label": "Chapters / sub-galleries", "placeholder": "1-5", "help": "Like Files, for manga chapters and other sub-galleries." },
+        { "id": "filter", "flag": "--filter", "kind": "text", "label": "File filter", "placeholder": "image_width >= 1200 and extension in ('jpg', 'png')", "help": "Python expression; files where it is false are skipped." },
+        { "id": "post-filter", "flag": "--post-filter", "kind": "text", "label": "Post filter", "placeholder": "date >= datetime(2026, 1, 1)" },
+        { "id": "child-filter", "flag": "--child-filter", "kind": "text", "label": "Chapter filter", "placeholder": "lang == 'en'" },
+        { "id": "filesize-min", "flag": "--filesize-min", "kind": "text", "label": "Smallest file", "placeholder": "500k" },
+        { "id": "filesize-max", "flag": "--filesize-max", "kind": "text", "label": "Largest file", "placeholder": "2.5M" },
+        { "id": "date-after", "flag": "--date-after", "kind": "text", "label": "Posts after", "placeholder": "2026-01-31", "help": "ISO 8601 date; extraction stops at the first older post." },
+        { "id": "date-before", "flag": "--date-before", "kind": "text", "label": "Posts before", "placeholder": "2026-10-31" },
+        { "id": "abort", "flag": "--abort", "kind": "text", "label": "Stop after N existing files", "placeholder": "10 or 3:manga", "help": "Stops the current extractor once N files in a row were already there; :TARGET says how far up to stop." },
+        { "id": "terminate", "flag": "--terminate", "kind": "number", "label": "Stop everything after N existing files", "placeholder": "10" }
+      ]
+    },
+    {
+      "id": "auth",
+      "label": "Sign-in",
+      "flags": [
+        { "id": "cookies", "flag": "--cookies", "kind": "text", "label": "Cookies file", "placeholder": "C:\\path\\cookies.txt", "help": "A Netscape cookies.txt file." },
+        {
+          "id": "cookies-from-browser", "flag": "--cookies-from-browser", "kind": "choice", "label": "Cookies from browser",
+          "help": "Chrome and Edge encrypt their cookies; Firefox works most reliably.",
+          "choices": [
+            { "value": "firefox", "label": "Firefox" },
+            { "value": "chrome", "label": "Chrome" },
+            { "value": "edge", "label": "Edge" },
+            { "value": "brave", "label": "Brave" },
+            { "value": "vivaldi", "label": "Vivaldi" },
+            { "value": "opera", "label": "Opera" }
+          ]
+        },
+        { "id": "netrc", "flag": "--netrc", "kind": "switch", "label": "Use .netrc for usernames and passwords" }
+      ]
+    },
+    {
+      "id": "network",
+      "label": "Network",
+      "flags": [
+        { "id": "proxy", "flag": "--proxy", "kind": "text", "label": "Proxy", "placeholder": "socks5://127.0.0.1:1080" },
+        { "id": "source-address", "flag": "--source-address", "kind": "text", "label": "Source address", "placeholder": "192.168.1.20", "help": "Local IP to send from, to pick a network interface." },
+        { "id": "limit-rate", "flag": "--limit-rate", "kind": "text", "label": "Speed limit", "placeholder": "800k", "help": "Bytes per second, with k or M suffix." },
+        { "id": "retries", "flag": "--retries", "kind": "number", "label": "Retries", "placeholder": "4" },
+        { "id": "http-timeout", "flag": "--http-timeout", "kind": "number", "label": "Timeout (seconds)", "placeholder": "30" },
+        { "id": "sleep", "flag": "--sleep", "kind": "text", "label": "Wait between files (s)", "placeholder": "2.5 or 2-5" },
+        { "id": "sleep-request", "flag": "--sleep-request", "kind": "text", "label": "Wait between requests (s)", "placeholder": "1" },
+        { "id": "sleep-extractor", "flag": "--sleep-extractor", "kind": "text", "label": "Wait before starting (s)", "placeholder": "0" },
+        { "id": "user-agent", "flag": "--user-agent", "kind": "text", "label": "User agent", "placeholder": "Mozilla/5.0 ..." }
+      ]
+    },
+    {
+      "id": "impersonation",
+      "label": "Impersonation",
+      "flags": [
+        {
+          "id": "browser", "flag": "-o", "template": "browser={}", "kind": "choice", "label": "Mimic browser",
+          "help": "Sends the browser's headers and TLS cipher order, which gets past some bot checks.",
+          "choices": [
+            { "value": "firefox", "label": "Firefox" },
+            { "value": "chrome", "label": "Chrome" }
+          ]
+        },
+        { "id": "browser-user-agent", "flag": "--user-agent", "template": "browser", "kind": "switch", "label": "Use your default browser's user agent" }
+      ]
+    },
+    {
+      "id": "postprocess",
+      "label": "Metadata and post-processing",
+      "flags": [
+        { "id": "write-metadata", "flag": "--write-metadata", "kind": "switch", "label": "Save metadata as JSON next to each file" },
+        { "id": "write-info-json", "flag": "--write-info-json", "kind": "switch", "label": "Save gallery info as info.json" },
+        { "id": "write-tags", "flag": "--write-tags", "kind": "switch", "label": "Save tags as text files" },
+        { "id": "zip", "flag": "--zip", "kind": "switch", "label": "Pack into a .zip" },
+        { "id": "cbz", "flag": "--cbz", "kind": "switch", "label": "Pack into a .cbz (comics)" },
+        {
+          "id": "ugoira", "flag": "--ugoira", "kind": "choice", "label": "Convert Pixiv ugoira to",
+          "help": "Uses ffmpeg when it is installed.",
+          "choices": [
+            { "value": "webm", "label": "WebM" },
+            { "value": "mp4", "label": "MP4" },
+            { "value": "gif", "label": "GIF" },
+            { "value": "vp9", "label": "WebM (VP9)" },
+            { "value": "copy", "label": "Copy frames (no re-encode)" },
+            { "value": "zip", "label": "Keep the frame ZIP" }
+          ]
+        },
+        { "id": "postprocessor", "flag": "--postprocessor", "kind": "lines", "label": "Post-processors", "placeholder": "one name per line", "help": "Post-processors from your gallery-dl config, by name." },
+        { "id": "exec", "flag": "--exec", "kind": "text", "label": "Run for each file", "placeholder": "magick {} {}.png", "help": "{} is the file's path." },
+        { "id": "exec-after", "flag": "--exec-after", "kind": "text", "label": "Run when done", "placeholder": "cmd /c echo done" },
+        { "id": "no-postprocessors", "flag": "--no-postprocessors", "kind": "switch", "label": "Turn off all post-processors" }
+      ]
+    },
+    {
+      "id": "advanced",
+      "label": "Advanced",
+      "flags": [
+        { "id": "option", "flag": "--option", "kind": "lines", "label": "Options (-o)", "placeholder": "extractor.twitter.retweets=false", "help": "KEY=VALUE, one per line." },
+        { "id": "config", "flag": "--config", "kind": "text", "label": "Extra config file", "placeholder": "C:\\path\\gallery-dl.conf" }
+      ]
+    }
+  ]
+}
