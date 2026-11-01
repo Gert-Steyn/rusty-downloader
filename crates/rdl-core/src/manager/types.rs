@@ -4,6 +4,7 @@ use serde::Serialize;
 use url::Url;
 
 use super::queues::OnComplete;
+use crate::checksum::Checksum;
 use crate::gallerydl::GalleryDlOptions;
 use crate::request::RequestContext;
 use crate::ytdlp::YtDlpOptions;
@@ -160,6 +161,8 @@ pub struct Download {
     pub title: Option<String>,
     /// The download's own speed limit in bytes per second.
     pub speed_limit: Option<u64>,
+    /// The expected checksum, and whether the file matched it.
+    pub checksum: Option<Checksum>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -217,6 +220,11 @@ pub enum Event {
     SpeedLimitChanged {
         download_id: DownloadId,
         speed_limit: Option<u64>,
+    },
+    /// A download's expected checksum was set or cleared, or its file was checked.
+    ChecksumChanged {
+        download_id: DownloadId,
+        checksum: Option<Checksum>,
     },
     /// Name, size and destination are known after the first probe.
     Resolved {

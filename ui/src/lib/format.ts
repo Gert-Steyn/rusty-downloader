@@ -1,4 +1,4 @@
-import type { Download, Package, Status } from './api.js';
+import type { ChecksumAlgo, Download, Package, Status } from './api.js';
 
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
 
@@ -87,6 +87,13 @@ export function formatDate(ms: number | null | undefined): string {
 	if (ms == null) return '—';
 	return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
+
+export const CHECKSUM_LABELS: Record<ChecksumAlgo, string> = {
+	md5: 'MD5',
+	sha1: 'SHA-1',
+	sha256: 'SHA-256',
+	crc32: 'CRC32'
+};
 
 export const STATUS_LABELS: Record<Status, string> = {
 	queued: 'Queued',

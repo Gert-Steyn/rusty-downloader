@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use rdl_core::checksum::ChecksumAlgo;
 use rdl_core::linkgrabber::default_package_name;
 use rdl_core::manager::{
     DEFAULT_QUEUE, Download, DownloadId, NewDownload, NewPackage, Package, PackageId, Status,
@@ -146,6 +147,20 @@ pub async fn set_download_speed_limit(
     limit: Option<u64>,
 ) -> CommandResult<()> {
     Ok(state.downloads.set_download_speed_limit(id, limit).await?)
+}
+
+/// A download's expected checksum from pasted text (`algo`: `None`
+/// recognises it by length); empty text removes it. A finished file is
+/// checked at once.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_checksum(
+    state: State<'_, AppState>,
+    id: DownloadId,
+    algo: Option<ChecksumAlgo>,
+    text: String,
+) -> CommandResult<()> {
+    Ok(state.downloads.set_checksum(id, algo, &text).await?)
 }
 
 #[tauri::command]

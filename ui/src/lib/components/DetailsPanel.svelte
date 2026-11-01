@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { downloads } from '#lib/downloads.svelte.js';
 	import {
+		CHECKSUM_LABELS,
 		STATUS_LABELS,
 		displayName,
 		formatBytes,
@@ -94,6 +95,20 @@
 				<dd>
 					gallery-dl · {changed ? `${changed} setting${changed === 1 ? '' : 's'} changed` : 'defaults'}
 					{#if download.gallerydl.archive}· skips files fetched before{/if}
+				</dd>
+			{/if}
+			{#if download.checksum}
+				{@const c = download.checksum}
+				<dt>Checksum</dt>
+				<dd class="wide">
+					<span class="mono selectable">{CHECKSUM_LABELS[c.algo]} {c.value}</span>
+					{#if c.verified === true}
+						<span class="check ok">✓ Matches</span>
+					{:else if c.verified === false}
+						<span class="check bad">✗ Doesn't match</span>
+					{:else}
+						<span class="check">Not checked yet</span>
+					{/if}
 				</dd>
 			{/if}
 			<dt>Source</dt>
@@ -213,6 +228,16 @@
 	.mono {
 		font-family: var(--font-mono);
 		font-size: 12px;
+	}
+	.check {
+		margin-left: 8px;
+		color: var(--text-secondary);
+	}
+	.check.ok {
+		color: var(--success);
+	}
+	.check.bad {
+		color: var(--critical);
 	}
 	.empty {
 		margin: 0;

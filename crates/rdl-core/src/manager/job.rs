@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use super::store::{self, DownloadRow, Resolved};
-use super::{Event, Inner, RunningJob, Status, StopReason};
+use super::{DownloadKind, Event, Inner, RunningJob, Status, StopReason, checksums};
 use crate::http::{self, DownloadSpec, Outcome, ProbeResult, Progress, filename, segments};
 use crate::ratelimit::RateLimiter;
 use crate::{Error, Result, history};
@@ -26,13 +26,6 @@ pub(super) fn part_path(dest: &Path) -> PathBuf {
 
 /// Mark the download active and spawn its task.
 pub(super) async fn start(inner: &Arc<Inner>, row: DownloadRow, queue_id: i64) -> Result<()> {
-    store::mark_active(&inner.pool, row.id).await?;
-    inner.emit(Event::StatusChanged {
-        download_id: row.id,
-        status: Status::Active,
-        error: None,
-    });
-
     let cancel = CancellationToken::new();
     let stop = Arc::new(Mutex::new(None));
     let (finished_tx, finished_rx) = watch::channel(false);
@@ -47,18 +40,48 @@ pub(super) async fn start(inner: &Arc<Inner>, row: DownloadRow, queue_id: i64) -
             limit: Arc::clone(&limit),
         },
     );
+    // Registered as running first, so a pause from here on reaches the task;
+    // one that came earlier has already moved it out of `queued`.
+    if !store::mark_active(&inner.pool, row.id).await? {
+        inner.running().remove(&row.id);
+        return Ok(());
+    }
+    inner.emit(Event::StatusChanged {
+        download_id: row.id,
+        status: Status::Active,
+        error: None,
+    });
     tracing::info!(download = row.id, url = %row.source_url, "download started");
 
     let inner = Arc::clone(inner);
     tokio::spawn(async move {
         let mut last = None;
-        let result = execute(&inner, &row, &cancel, &limit, &mut last).await;
+        let mut result = execute(&inner, &row, &cancel, &limit, &mut last).await;
+        // A gallery is many files; a checksum belongs to one.
+        if let (Ok(Outcome::Completed { path, .. }), false) =
+            (&result, row.kind() == DownloadKind::Gallerydl)
+        {
+            if let Err(e) = checksums::check_finished(&inner, row.id, path, &cancel).await {
+                result = Err(e);
+            }
+        }
+        let list = match &result {
+            Ok(Outcome::Completed { path, .. }) if row.kind() == DownloadKind::Http => {
+                Some(path.clone())
+            }
+            _ => None,
+        };
         let reason = *stop.lock().unwrap_or_else(|e| e.into_inner());
         // Completed or failed: either way it's done, as far as its queue goes.
         let ended = matches!(result, Ok(Outcome::Completed { .. }) | Err(_))
             && reason != Some(StopReason::Remove);
         if let Err(e) = finalize(&inner, &row, result, reason, last).await {
             tracing::error!(download = row.id, error = %e, "could not record download outcome");
+        }
+        if let Some(path) = list {
+            if let Err(e) = checksums::apply_list(&inner, row.package_id, row.id, &path).await {
+                tracing::warn!(download = row.id, error = %e, "could not read checksum list");
+            }
         }
         // The queue it ended in: its package may have moved meanwhile.
         let queue = inner.running().remove(&row.id).map(|job| job.queue_id);
@@ -82,6 +105,13 @@ async fn execute(
     limit: &Arc<RateLimiter>,
     last: &mut Option<Progress>,
 ) -> Result<Outcome> {
+    // The file that failed its checksum last time goes; this is the retry.
+    if row.checksum_ok == Some(0) && row.kind() != DownloadKind::Gallerydl {
+        if let (Some(dest), Some(value)) = (&row.dest_path, &row.checksum_value) {
+            super::remove_file_if_exists(Path::new(dest)).await?;
+            store::set_checksum_ok(&inner.pool, row.id, value, None).await?;
+        }
+    }
     match row.kind.as_str() {
         "http" => {}
         "ytdlp" => return super::ytdlp_job::execute(inner, row, cancel).await,
@@ -253,17 +283,7 @@ async fn finalize(
     let (status, error) = match result {
         Ok(Outcome::Completed { size, path }) => {
             store::mark_completed(pool, id, size).await?;
-            let package = store::get_package(pool, row.package_id).await?;
-            let finished = history::Finished {
-                url: &row.source_url,
-                path: &path,
-                size: Some(size),
-                kind: &row.kind,
-                package: package.as_ref().map(|p| p.name.as_str()),
-            };
-            if let Err(e) = history::record(pool, &finished).await {
-                tracing::warn!(download = id, error = %e, "could not record history");
-            }
+            record_history(inner, row, &path, size).await;
             (Status::Completed, None)
         }
         Ok(Outcome::Paused) => {
@@ -283,6 +303,13 @@ async fn finalize(
             if matches!(err, Error::RemoteChanged) {
                 // The partial data is useless; the next attempt starts over.
                 store::clear_segments(pool, id).await?;
+            } else if matches!(err, Error::ChecksumMismatch { .. }) {
+                // The whole file is there, it's just wrong; a retry starts over.
+                let size = store::get_download(pool, id).await?.and_then(|r| r.size);
+                store::clear_segments(pool, id).await?;
+                if let Some(size) = size {
+                    store::set_downloaded(pool, id, size as u64).await?;
+                }
             } else if let Some(progress) = &last {
                 store::save_segments(pool, id, &progress.segments).await?;
             }
@@ -301,6 +328,25 @@ async fn finalize(
         error,
     });
     Ok(())
+}
+
+/// Add a completed download to the history; a failure is only logged.
+pub(super) async fn record_history(inner: &Inner, row: &DownloadRow, path: &Path, size: u64) {
+    let pool = &inner.pool;
+    let package = store::get_package(pool, row.package_id)
+        .await
+        .ok()
+        .flatten();
+    let finished = history::Finished {
+        url: &row.source_url,
+        path,
+        size: Some(size),
+        kind: &row.kind,
+        package: package.as_ref().map(|p| p.name.as_str()),
+    };
+    if let Err(e) = history::record(pool, &finished).await {
+        tracing::warn!(download = row.id, error = %e, "could not record history");
+    }
 }
 
 #[cfg(test)]

@@ -10,6 +10,7 @@ use super::types::{
     Download, DownloadId, DownloadKind, FileCount, NewPackage, Package, PackageId, QueueId, Status,
 };
 use crate::Result;
+use crate::checksum::{Checksum, ChecksumAlgo};
 use crate::db::Pool;
 use crate::http::Segment;
 use crate::request::RequestContext;
@@ -35,9 +36,21 @@ pub(crate) struct DownloadRow {
     pub files_total: Option<i64>,
     pub request_json: Option<String>,
     pub speed_limit: Option<i64>,
+    pub checksum_algo: Option<String>,
+    pub checksum_value: Option<String>,
+    pub checksum_ok: Option<i64>,
 }
 
 impl DownloadRow {
+    /// The expected checksum, if one was set.
+    pub fn checksum(&self) -> Option<Checksum> {
+        Some(Checksum {
+            algo: ChecksumAlgo::parse(self.checksum_algo.as_deref()?)?,
+            value: self.checksum_value.clone()?,
+            verified: self.checksum_ok.map(|ok| ok != 0),
+        })
+    }
+
     pub fn speed_limit(&self) -> Option<u64> {
         self.speed_limit.map(|l| l as u64)
     }
@@ -98,6 +111,7 @@ impl DownloadRow {
             files: self.files(),
             title: self.title.clone(),
             speed_limit: self.speed_limit(),
+            checksum: self.checksum(),
         }
     }
 }
@@ -452,16 +466,18 @@ pub(crate) async fn requeue_interrupted(pool: &Pool) -> Result<u64> {
     )
 }
 
-pub(crate) async fn mark_active(pool: &Pool, id: DownloadId) -> Result<()> {
-    sqlx::query(
+/// Queued → active; returns false if it isn't queued any more (paused or
+/// removed meanwhile).
+pub(crate) async fn mark_active(pool: &Pool, id: DownloadId) -> Result<bool> {
+    let result = sqlx::query(
         "UPDATE downloads SET status = 'active', error = NULL,
              started_at = COALESCE(started_at, CAST(unixepoch('subsec') * 1000 AS INTEGER))
-         WHERE id = ?",
+         WHERE id = ? AND status = 'queued'",
     )
     .bind(id)
     .execute(pool)
     .await?;
-    Ok(())
+    Ok(result.rows_affected() > 0)
 }
 
 pub(crate) async fn set_status(
@@ -544,6 +560,52 @@ pub(crate) async fn set_speed_limit(
         .execute(pool)
         .await?;
     Ok(result.rows_affected() > 0)
+}
+
+/// Set or clear the expected checksum, forgetting any earlier check.
+/// Returns whether the download exists.
+pub(crate) async fn set_checksum(
+    pool: &Pool,
+    id: DownloadId,
+    checksum: Option<(ChecksumAlgo, &str)>,
+) -> Result<bool> {
+    let result = sqlx::query(
+        "UPDATE downloads SET checksum_algo = ?, checksum_value = ?, checksum_ok = NULL WHERE id = ?",
+    )
+    .bind(checksum.map(|(algo, _)| algo.as_str()))
+    .bind(checksum.map(|(_, value)| value))
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Record whether the file matched `value`, unless the expected value has
+/// changed meanwhile. Returns whether it was recorded.
+pub(crate) async fn set_checksum_ok(
+    pool: &Pool,
+    id: DownloadId,
+    value: &str,
+    ok: Option<bool>,
+) -> Result<bool> {
+    let result =
+        sqlx::query("UPDATE downloads SET checksum_ok = ? WHERE id = ? AND checksum_value = ?")
+            .bind(ok.map(i64::from))
+            .bind(id)
+            .bind(value)
+            .execute(pool)
+            .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Every download in a package, in order.
+pub(crate) async fn package_downloads(pool: &Pool, package: PackageId) -> Result<Vec<DownloadRow>> {
+    Ok(
+        sqlx::query_as("SELECT * FROM downloads WHERE package_id = ? ORDER BY position, id")
+            .bind(package)
+            .fetch_all(pool)
+            .await?,
+    )
 }
 
 pub(crate) async fn set_downloaded(pool: &Pool, id: DownloadId, downloaded: u64) -> Result<()> {

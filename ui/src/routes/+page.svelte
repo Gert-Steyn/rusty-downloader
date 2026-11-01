@@ -1,5 +1,6 @@
 <script lang="ts">
 	import AddLinksDialog from '#lib/components/AddLinksDialog.svelte';
+	import ChecksumDialog from '#lib/components/ChecksumDialog.svelte';
 	import ContextMenu, { type MenuItem } from '#lib/components/ContextMenu.svelte';
 	import DetailsPanel from '#lib/components/DetailsPanel.svelte';
 	import DownloadsTable, { type Selection } from '#lib/components/DownloadsTable.svelte';
@@ -8,7 +9,7 @@
 	import RemoveDialog from '#lib/components/RemoveDialog.svelte';
 	import SpeedLimitDialog from '#lib/components/SpeedLimitDialog.svelte';
 	import { downloads } from '#lib/downloads.svelte.js';
-	import { formatSpeed } from '#lib/format.js';
+	import { CHECKSUM_LABELS, formatSpeed } from '#lib/format.js';
 	import { queues } from '#lib/queues.svelte.js';
 
 	let selection = $state<Selection>(null);
@@ -64,6 +65,8 @@
 	let menuItems = $state<MenuItem[]>([]);
 	let limiting = $state<number | null>(null);
 	let limitOpen = $state(false);
+	let checking = $state<number | null>(null);
+	let checksumOpen = $state(false);
 
 	function openMenu(target: NonNullable<Selection>, x: number, y: number) {
 		menuItems = target.kind === 'download' ? downloadMenu(target.id) : packageMenu(target.id);
@@ -95,6 +98,19 @@
 					limitOpen = true;
 				}
 			},
+			// A gallery is many files; a checksum belongs to one.
+			...(d.kind === 'gallerydl'
+				? []
+				: [
+						{
+							label: d.checksum ? `Checksum (${CHECKSUM_LABELS[d.checksum.algo]})…` : 'Checksum…',
+							icon: 'checksum',
+							action: () => {
+								checking = id;
+								checksumOpen = true;
+							}
+						} satisfies MenuItem
+					]),
 			'separator',
 			{ label: 'Remove…', icon: 'trash', danger: true, action: askRemove }
 		];
@@ -224,6 +240,7 @@
 />
 <RemoveDialog bind:open={removing} target={removeTarget} />
 <SpeedLimitDialog bind:open={limitOpen} id={limiting} />
+<ChecksumDialog bind:open={checksumOpen} id={checking} />
 <ContextMenu bind:at={menuAt} items={menuItems} />
 
 

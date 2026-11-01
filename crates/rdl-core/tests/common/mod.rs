@@ -4,6 +4,7 @@
 // Each test binary uses a different subset of these helpers.
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::io;
 use std::sync::atomic::{AtomicU16, AtomicU64, AtomicUsize, Ordering};
@@ -12,7 +13,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::{Body, Bytes};
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
@@ -31,11 +32,18 @@ pub struct Server {
     pub port: AtomicU16,
     /// `Cookie` header of every request to `/private` (`None`: none sent).
     pub private_cookies: Mutex<Vec<Option<String>>>,
+    /// Bodies served at `/text/{name}`.
+    pub texts: Mutex<HashMap<String, String>>,
 }
 
 impl Server {
     pub fn served(&self) -> u64 {
         self.bytes_served.load(Ordering::SeqCst)
+    }
+
+    /// Serve `body` at `/text/{name}`.
+    pub fn set_text(&self, name: &str, body: &str) {
+        self.texts.lock().unwrap().insert(name.into(), body.into());
     }
 
     pub fn set_etag(&self, etag: &str) {
@@ -57,6 +65,7 @@ enum Mode {
 /// Routes: `/file` `/slow` `/flaky` `/named/{name}` (ranged, same bytes and ETag), `/plain`
 /// (ignores Range), `/chunked` (no length), `/redirect` → `/file`, `/gone` (410),
 /// `/private` (like `/file`, but 403 without cookie `sid=ok` and a referer),
+/// `/text/{name}` (what [`Server::set_text`] put there),
 /// `/to-localhost` → `/private` on `localhost` instead of 127.0.0.1.
 pub async fn spawn_server() -> (Url, Arc<Server>) {
     let mut data = vec![0u8; SIZE];
@@ -68,6 +77,7 @@ pub async fn spawn_server() -> (Url, Arc<Server>) {
         flaky_drops_left: AtomicUsize::new(3),
         port: AtomicU16::new(0),
         private_cookies: Mutex::new(Vec::new()),
+        texts: Mutex::new(HashMap::new()),
     });
 
     let app = Router::new()
@@ -80,6 +90,17 @@ pub async fn spawn_server() -> (Url, Arc<Server>) {
         .route("/redirect", get(|| async { Redirect::temporary("/file") }))
         .route("/gone", get(|| async { StatusCode::GONE }))
         .route("/private", get(private))
+        .route(
+            "/text/{name}",
+            get(
+                |State(s): State<Arc<Server>>, Path(name): Path<String>| async move {
+                    match s.texts.lock().unwrap().get(&name) {
+                        Some(body) => body.clone().into_response(),
+                        None => StatusCode::NOT_FOUND.into_response(),
+                    }
+                },
+            ),
+        )
         .route(
             "/to-localhost",
             get(|State(s): State<Arc<Server>>| async move {

@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use common::{KIB, SIZE, Server, spawn_server};
+use rdl_core::checksum::{self, Checksum, ChecksumAlgo};
 use rdl_core::db::{self, Pool};
 use rdl_core::http::SegmentConfig;
 use rdl_core::manager::{
@@ -663,7 +664,7 @@ impl Fixture {
 #[tokio::test]
 async fn queues_are_added_changed_moved_into_and_removed() {
     let (base, _server) = spawn_server().await;
-    let fx = Fixture::new().await;
+    let mut fx = Fixture::new().await;
     let night = fx.manager.add_queue(" Night ").await.unwrap();
     assert!(
         fx.manager.add_queue("Night").await.is_err(),
@@ -693,6 +694,7 @@ async fn queues_are_added_changed_moved_into_and_removed() {
     let id = fx.add(&[url(&base, "slow")]).await[0];
     let package = fx.manager.get(id).await.unwrap().package_id;
     fx.manager.pause(id).await.unwrap();
+    fx.wait_status(id, Status::Paused).await;
     fx.manager
         .move_package_to_queue(package, night)
         .await
@@ -805,5 +807,129 @@ async fn a_queue_reports_once_when_its_downloads_are_done() {
     )
     .await;
     assert!(quiet.is_err(), "a paused queue isn't finished");
+    fx.manager.shutdown().await;
+}
+
+/// Whether the download's file matched its checksum, once it has been checked.
+async fn verified(fx: &Fixture, id: DownloadId) -> bool {
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            let checksum = fx.manager.get(id).await.unwrap().checksum;
+            if let Some(verified) = checksum.and_then(|c| c.verified) {
+                return verified;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for the checksum check")
+}
+
+#[tokio::test]
+async fn a_checksum_set_while_downloading_is_checked_when_it_finishes() {
+    let (base, server) = spawn_server().await;
+    let mut fx = Fixture::new().await;
+    let sha = checksum::of_bytes(ChecksumAlgo::Sha256, &server.data);
+    let id = fx.add(&[url(&base, "slow")]).await[0];
+    fx.manager
+        .set_checksum(id, None, &format!("SHA256: {}", sha.to_uppercase()))
+        .await
+        .unwrap();
+    fx.wait_status(id, Status::Completed).await;
+    assert_eq!(
+        fx.manager.get(id).await.unwrap().checksum,
+        Some(Checksum {
+            algo: ChecksumAlgo::Sha256,
+            value: sha,
+            verified: Some(true)
+        })
+    );
+
+    assert!(
+        fx.manager
+            .set_checksum(id, Some(ChecksumAlgo::Md5), "cbf43926")
+            .await
+            .is_err()
+    );
+    fx.manager.set_checksum(id, None, " ").await.unwrap();
+    assert_eq!(fx.manager.get(id).await.unwrap().checksum, None);
+    fx.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_mismatch_fails_keeps_the_file_and_a_retry_downloads_again() {
+    let (base, server) = spawn_server().await;
+    let mut fx = Fixture::new().await;
+    let id = fx.add(&[url(&base, "slow")]).await[0];
+    fx.manager
+        .set_checksum(id, Some(ChecksumAlgo::Crc32), "00000000")
+        .await
+        .unwrap();
+    assert_eq!(finished(&mut fx, id).await, Status::Failed);
+    let download = fx.manager.get(id).await.unwrap();
+    assert!(
+        download.error.unwrap().contains("checksum mismatch"),
+        "wrong error"
+    );
+    assert_eq!(download.checksum.unwrap().verified, Some(false));
+    assert_eq!(download.downloaded, SIZE as u64, "the whole file is there");
+    assert_file(&fx, "test.bin", &server);
+
+    // Retrying replaces the file; it still doesn't match.
+    let served = server.served();
+    fx.manager.resume(id).await.unwrap();
+    assert_eq!(finished(&mut fx, id).await, Status::Failed);
+    assert!(
+        server.served() - served >= SIZE as u64,
+        "not downloaded again"
+    );
+
+    // The right value completes it without downloading again.
+    let served = server.served();
+    let crc = checksum::of_bytes(ChecksumAlgo::Crc32, &server.data);
+    fx.manager.set_checksum(id, None, &crc).await.unwrap();
+    fx.wait_status(id, Status::Completed).await;
+    assert!(verified(&fx, id).await);
+    assert_eq!(server.served(), served);
+
+    // A value that doesn't match fails a completed download.
+    fx.manager
+        .set_checksum(id, None, "d41d8cd98f00b204e9800998ecf8427e")
+        .await
+        .unwrap();
+    fx.wait_status(id, Status::Failed).await;
+    assert!(!verified(&fx, id).await);
+    assert_file(&fx, "test.bin", &server);
+    fx.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn checksum_lists_in_the_package_are_used() {
+    let (base, server) = spawn_server().await;
+    let mut fx = Fixture::new().await;
+    fx.manager.set_queue_limit(DEFAULT_QUEUE, 1).await.unwrap();
+    let crc = checksum::of_bytes(ChecksumAlgo::Crc32, &server.data).to_uppercase();
+    server.set_text(
+        "sums.sfv",
+        &format!("; made by hand\r\ndata.bin {crc}\r\nother.bin DEADBEEF\r\n"),
+    );
+    let ids = fx
+        .add(&[
+            url(&base, "named/data.bin"),
+            url(&base, "text/sums.sfv"),
+            url(&base, "named/other.bin"),
+        ])
+        .await;
+
+    // other.bin got its value before it started, and doesn't match it.
+    assert_eq!(finished(&mut fx, ids[2]).await, Status::Failed);
+    assert!(!verified(&fx, ids[2]).await);
+    // data.bin had finished before the list came: checked afterwards.
+    assert!(verified(&fx, ids[0]).await);
+    assert_eq!(
+        fx.manager.get(ids[0]).await.unwrap().status,
+        Status::Completed
+    );
+    assert_eq!(fx.manager.get(ids[1]).await.unwrap().checksum, None);
     fx.manager.shutdown().await;
 }

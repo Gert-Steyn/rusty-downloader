@@ -73,6 +73,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             speed::speed_limit_status,
             speed::set_speed_limit_on,
             commands::set_download_speed_limit,
+            commands::set_checksum,
             queue_commands::list_queues,
             queue_commands::add_queue,
             queue_commands::update_queue,

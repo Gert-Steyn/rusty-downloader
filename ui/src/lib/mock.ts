@@ -40,7 +40,8 @@ function dl(
 		gallerydl: null,
 		files: null,
 		title: null,
-		speedLimit: null
+		speedLimit: null,
+		checksum: null
 	};
 }
 
@@ -56,7 +57,10 @@ export function packages(): Package[] {
 	return [
 		pkg(1, 'Ubuntu ISO', [dl(1, 'ubuntu-26.04-desktop-amd64.iso', 6144 * MB, 0.42, 'active')]),
 		pkg(2, 'Dataset (3 parts)', [
-			dl(2, 'dataset.part1.rar', 1024 * MB, 1, 'completed'),
+			{
+				...dl(2, 'dataset.part1.rar', 1024 * MB, 1, 'completed'),
+				checksum: { algo: 'crc32', value: '1a2b3c4d', verified: true }
+			},
 			dl(2, 'dataset.part2.rar', 1024 * MB, 0.17, 'active'),
 			dl(2, 'dataset.part3.rar', 512 * MB, 0, 'queued')
 		]),

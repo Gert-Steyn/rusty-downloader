@@ -7,6 +7,7 @@
 //! or wake the scheduler; they never block on a transfer except `remove`, which
 //! waits for the task to let go of its files.
 
+mod checksums;
 mod gallerydl_job;
 mod job;
 mod queues;
@@ -24,6 +25,7 @@ use std::time::Duration;
 use tokio::sync::{Notify, broadcast, watch};
 use tokio_util::sync::CancellationToken;
 
+use crate::checksum::{self, ChecksumAlgo};
 use crate::db::Pool;
 use crate::http::{self, SegmentConfig, filename};
 use crate::ratelimit::{RateLimiter, Throttle};
@@ -236,6 +238,33 @@ impl Manager {
         Ok(())
     }
 
+    /// Set a download's expected checksum from pasted text, or clear it with
+    /// empty text. `algo` says which kind it is; `None` recognises it by its
+    /// length. A finished file is checked at once, in the background, and
+    /// one still downloading when it finishes. A mismatch fails the download
+    /// (the file stays until a retry); a match after a mismatch completes it.
+    pub async fn set_checksum(
+        &self,
+        id: DownloadId,
+        algo: Option<ChecksumAlgo>,
+        text: &str,
+    ) -> Result<()> {
+        let row = store::get_download(&self.inner.pool, id)
+            .await?
+            .ok_or_else(|| Error::NotFound(format!("download {id}")))?;
+        if row.kind() == DownloadKind::Gallerydl {
+            return Err(Error::InvalidInput(
+                "A gallery is many files, so it can't have one checksum.".into(),
+            ));
+        }
+        let parsed = match text.trim() {
+            "" => None,
+            text => Some(checksum::parse_value(algo, text)?),
+        };
+        let checksum = parsed.as_ref().map(|(algo, value)| (*algo, value.as_str()));
+        checksums::set(&self.inner, &row, checksum).await
+    }
+
     /// Every queue with its settings and what's in it, in order.
     pub async fn list_queues(&self) -> Result<Vec<Queue>> {
         let pool = &self.inner.pool;
@@ -424,6 +453,9 @@ impl Manager {
         let pool = &self.inner.pool;
         if store::transition(pool, id, &[Status::Queued], Status::Paused).await? {
             self.status_changed(id, Status::Paused, None);
+        } else {
+            // It started meanwhile; a job is registered before it leaves `queued`.
+            self.inner.request_stop(id, StopReason::Pause);
         }
         Ok(())
     }

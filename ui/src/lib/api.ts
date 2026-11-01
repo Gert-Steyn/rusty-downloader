@@ -2,6 +2,7 @@
 import { isTauri } from '@tauri-apps/api/core';
 import type {
 	ActiveLimit_Serialize,
+	Checksum_Serialize,
 	Queue_Serialize,
 	QueueChanges_Deserialize,
 	QueueSchedule_Serialize,
@@ -30,6 +31,7 @@ export { commands, events } from './bindings.js';
 export type {
 	AppInfo,
 	Availability,
+	ChecksumAlgo,
 	FormatPreset,
 	LinkSource,
 	OnComplete,
@@ -44,6 +46,7 @@ export { isTauri };
 // The backend serialises these; the UI only ever receives them.
 export type Package = Package_Serialize;
 export type Download = Download_Serialize;
+export type Checksum = Checksum_Serialize;
 export type DownloadEvent = Event_Serialize;
 export type DownloadEventBatch = DownloadEvents_Serialize;
 export type GrabbedLink = GrabbedLink_Serialize;

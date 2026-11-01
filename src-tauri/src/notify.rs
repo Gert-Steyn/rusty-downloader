@@ -376,6 +376,7 @@ mod tests {
             files: None,
             title: None,
             speed_limit: None,
+            checksum: None,
         }
     }
 

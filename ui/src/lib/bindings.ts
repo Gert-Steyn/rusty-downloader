@@ -79,6 +79,12 @@ export const commands = {
 	setSpeedLimitOn: (on: boolean) => typedError<ActiveLimit_Serialize, CommandError>(__TAURI_INVOKE("set_speed_limit_on", { on })),
 	/**  A download's own speed limit in bytes per second; `None` removes it. */
 	setDownloadSpeedLimit: (id: number, limit: number | null) => typedError<null, CommandError>(__TAURI_INVOKE("set_download_speed_limit", { id, limit })),
+	/**
+	 *  A download's expected checksum from pasted text (`algo`: `None`
+	 *  recognises it by length); empty text removes it. A finished file is
+	 *  checked at once.
+	 */
+	setChecksum: (id: number, algo: ChecksumAlgo | null, text: string) => typedError<null, CommandError>(__TAURI_INVOKE("set_checksum", { id, algo, text })),
 	listQueues: () => typedError<Queue_Serialize[], CommandError>(__TAURI_INVOKE("list_queues")),
 	addQueue: (name: string) => typedError<number, CommandError>(__TAURI_INVOKE("add_queue", { name })),
 	/**
@@ -167,6 +173,36 @@ export type Availability = "unknown" | "checking" | "online" |
 "error";
 
 /**
+ *  A download's expected checksum, and whether its file matched it
+ *  (`None`: not checked yet).
+ */
+export type Checksum = Checksum_Serialize | Checksum_Deserialize;
+
+export type ChecksumAlgo = "md5" | "sha1" | "sha256" | "crc32";
+
+/**
+ *  A download's expected checksum, and whether its file matched it
+ *  (`None`: not checked yet).
+ */
+export type Checksum_Deserialize = {
+	algo: ChecksumAlgo,
+	/**  Lowercase hex. */
+	value: string,
+	verified?: boolean | null,
+};
+
+/**
+ *  A download's expected checksum, and whether its file matched it
+ *  (`None`: not checked yet).
+ */
+export type Checksum_Serialize = {
+	algo: ChecksumAlgo,
+	/**  Lowercase hex. */
+	value: string,
+	verified: boolean | null,
+};
+
+/**
  *  Links were copied while "ask first" is on. `text` holds them one per line,
  *  ready for `grabber_add`.
  */
@@ -217,6 +253,8 @@ export type Download_Deserialize = {
 	title?: string | null,
 	/**  The download's own speed limit in bytes per second. */
 	speedLimit?: number | null,
+	/**  The expected checksum, and whether the file matched it. */
+	checksum?: Checksum_Deserialize | null,
 };
 
 export type Download_Serialize = {
@@ -239,6 +277,8 @@ export type Download_Serialize = {
 	title: string | null,
 	/**  The download's own speed limit in bytes per second. */
 	speedLimit: number | null,
+	/**  The expected checksum, and whether the file matched it. */
+	checksum: Checksum_Serialize | null,
 };
 
 /**
@@ -265,6 +305,8 @@ export type Event_Deserialize = { type: "packageAdded"; packageId: number } | { 
 { type: "queueFinished"; queueId: number; onComplete: OnComplete } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error?: string | null } | 
 /**  A download's own speed limit changed. */
 { type: "speedLimitChanged"; downloadId: number; speedLimit?: number | null } | 
+/**  A download's expected checksum was set or cleared, or its file was checked. */
+{ type: "checksumChanged"; downloadId: number; checksum?: Checksum_Deserialize | null } | 
 /**  Name, size and destination are known after the first probe. */
 { type: "resolved"; downloadId: number; filename: string; size?: number | null } | { type: "progress"; downloadId: number; downloaded: number; total?: number | null; speedBps: number; connections: number; 
 /**  For gallery downloads, which count files rather than bytes. */
@@ -287,6 +329,8 @@ export type Event_Serialize = { type: "packageAdded"; packageId: number } | { ty
 { type: "queueFinished"; queueId: number; onComplete: OnComplete } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error: string | null } | 
 /**  A download's own speed limit changed. */
 { type: "speedLimitChanged"; downloadId: number; speedLimit: number | null } | 
+/**  A download's expected checksum was set or cleared, or its file was checked. */
+{ type: "checksumChanged"; downloadId: number; checksum: Checksum_Serialize | null } | 
 /**  Name, size and destination are known after the first probe. */
 { type: "resolved"; downloadId: number; filename: string; size: number | null } | { type: "progress"; downloadId: number; downloaded: number; total: number | null; speedBps: number; connections: number; 
 /**  For gallery downloads, which count files rather than bytes. */

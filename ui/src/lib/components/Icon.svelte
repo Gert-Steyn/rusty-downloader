@@ -25,7 +25,8 @@
 		copy: 'M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1',
 		'move-top': 'M5 4h14M12 20V9M7 14l5-5 5 5',
 		'move-bottom': 'M5 20h14M12 4v11M7 10l5 5 5-5',
-		speed: 'M12 15l4.5-4.5M3.5 18a9.5 9.5 0 1 1 17 0'
+		speed: 'M12 15l4.5-4.5M3.5 18a9.5 9.5 0 1 1 17 0',
+		checksum: 'M12 3l7 3v6c0 4.5-3 8-7 9-4-1-7-4.5-7-9V6zM9 12l2 2 4-4'
 	} as const;
 
 	export type IconName = keyof typeof paths;

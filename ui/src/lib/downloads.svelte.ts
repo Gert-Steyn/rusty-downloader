@@ -5,6 +5,7 @@ import {
 	events,
 	isTauri,
 	unwrap,
+	type ChecksumAlgo,
 	type Download,
 	type DownloadEventBatch,
 	type Package
@@ -112,6 +113,12 @@ class DownloadsStore {
 	/** A download's own speed limit in bytes per second; `null` removes it. */
 	setSpeedLimit = (id: number, limit: number | null) =>
 		this.run(() => unwrap(commands.setDownloadSpeedLimit(id, limit)));
+	/**
+	 * A download's expected checksum from pasted text (`algo: null` recognises it
+	 * by length); empty text removes it. Throws, so the dialog can show why.
+	 */
+	setChecksum = (id: number, algo: ChecksumAlgo | null, text: string) =>
+		unwrap(commands.setChecksum(id, algo, text));
 	/** Put a package before another (`null`: last); the order is the start order. */
 	movePackage = (id: number, before: number | null) =>
 		this.run(() => unwrap(commands.movePackage(id, before)));
@@ -173,6 +180,11 @@ class DownloadsStore {
 				case 'speedLimitChanged': {
 					const d = this.#byId.get(event.downloadId);
 					if (d) d.speedLimit = event.speedLimit;
+					break;
+				}
+				case 'checksumChanged': {
+					const d = this.#byId.get(event.downloadId);
+					if (d) d.checksum = event.checksum;
 					break;
 				}
 				case 'packageAdded':

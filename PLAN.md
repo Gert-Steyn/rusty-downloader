@@ -6,11 +6,11 @@ A full-featured download manager for Windows, modeled on **JDownloader**. It has
 
 ---
 
-## 0. Current Status (updated 2026-10-25)
+## 0. Current Status (updated 2026-11-01)
 
-**Where we are:** Phases 0, 1 and **2 (browser integration, 2a–2e) are done**; only a live Firefox run is still owed (see the 2d/2e follow-ups). Phase 3 is under way: **3a (keep-awake), 3b (speed limits) and 3c (queues, schedules, on-complete actions) are done**. **Next up: 3d, checksums**, the last part of Phase 3. To pick up where the last session stopped, read **"Resume here"** below.
+**Where we are:** Phases 0, 1 and **2 (browser integration, 2a–2e) are done**; only a live Firefox run is still owed (see the 2d/2e follow-ups). **Phase 3 (3a keep-awake, 3b speed limits, 3c queues, 3d checksums) is built**; only its exit check by hand (an overnight queue ending in a real shutdown) is owed. **Next up: Phase 4** (proxies, accounts, FTP/SFTP). To pick up where the last session stopped, read **"Resume here"** below.
 
-The app works as an HTTP(S), video and gallery download manager that lives in the tray. You can paste, drop or copy links into the LinkGrabber (optionally "ask first", with ignore patterns), review and rename them, pick a video format or gallery options, and start them. Links you downloaded before are flagged. Plain files download segmented and resumable. Pages from sites yt-dlp supports are recognised automatically, and playlists expand into one link per video. Pages yt-dlp doesn't know (or can't read) go to gallery-dl, and a gallery becomes one download into its own folder. yt-dlp, gallery-dl and ffmpeg install themselves on first use. Finished downloads go into History; Windows notifications report finished packages and failures. A browser extension (Edge, Chrome, Brave; Firefox untested) sends links, selections, pages and matching downloads to the app with the browser's cookies, starting the app if needed. Windows doesn't go to sleep while downloads run. Speed can be capped from the status bar, per download, or by a weekly schedule. Packages can go in separate queues that run only at set times and sleep, shut down or close the app when done, after a minute's countdown you can cancel. Settings cover the download folder, limits, clipboard, start with Windows, the tray and keep-awake. Everything survives an app restart.
+The app works as an HTTP(S), video and gallery download manager that lives in the tray. You can paste, drop or copy links into the LinkGrabber (optionally "ask first", with ignore patterns), review and rename them, pick a video format or gallery options, and start them. Links you downloaded before are flagged. Plain files download segmented and resumable. Pages from sites yt-dlp supports are recognised automatically, and playlists expand into one link per video. Pages yt-dlp doesn't know (or can't read) go to gallery-dl, and a gallery becomes one download into its own folder. yt-dlp, gallery-dl and ffmpeg install themselves on first use. Finished downloads go into History; Windows notifications report finished packages and failures. A browser extension (Edge, Chrome, Brave; Firefox untested) sends links, selections, pages and matching downloads to the app with the browser's cookies, starting the app if needed. Windows doesn't go to sleep while downloads run. Speed can be capped from the status bar, per download, or by a weekly schedule. Packages can go in separate queues that run only at set times and sleep, shut down or close the app when done, after a minute's countdown you can cancel. A download can carry an MD5 / SHA-1 / SHA-256 / CRC32 checksum, typed in or taken from a `.sfv` / `.md5` / `.sha1` / `.sha256` file in its package, and fails if its file doesn't match. Settings cover the download folder, limits, clipboard, start with Windows, the tray and keep-awake. Everything survives an app restart.
 
 ### Done so far
 
@@ -32,9 +32,10 @@ The app works as an HTTP(S), video and gallery download manager that lives in th
 | 2e – Registration | `8ad707b` | App registers the host for Chrome, Edge, Brave, Chromium and Firefox on every start; `pnpm dev` builds the host, `pnpm build` bundles it next to the app |
 | 3a – Keep-awake | `744f4d3` | A Windows power request ("system required") held while downloads run, released when none do; "Keep the computer awake while downloading" setting (on by default) |
 | 3b – Speed limits | `3489fb7` | Token-bucket limiter in the engine; global limit (status bar switch), per-download limits (right-click, migration 7), weekly schedule rules in Settings; `--limit-rate` for yt-dlp / gallery-dl |
+| 3d – Checksums | `<3d>` | `rdl-core::checksum` (MD5, SHA-1, SHA-256, CRC32; pasted values recognised by length; list parsing), check after each plain / yt-dlp download, a mismatch fails and keeps the file, a retry deletes it, `.sfv`/`.md5`/`.sha1`/`.sha256` lists in the package fill in values, "Checksum…" dialog and ✓/✗ in details, migration 8; fixed a pause-vs-start race |
 | 3c – Queues | `45ee68e` | Queues page (add, rename, remove, downloads at once), weekly window per queue (stops and requeues at close), "when finished" action (sleep, hibernate, shut down, close the app) after a cancellable 60 s countdown, "Move to <queue>" in the package menu |
 
-Tests: 183 Rust tests and 9 extension tests (`pnpm ext:test`) (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; pipe suite against real named pipes; native-host suite driving the real host binary over stdin/stdout; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
+Tests: 192 Rust tests and 9 extension tests (`pnpm ext:test`) (unit tests; engine, manager and LinkGrabber suites against a local misbehaving HTTP server; tool-manager suite against fake GitHub and Codeberg APIs; gallery-dl suite against a fake `gallery-dl.cmd`; pipe suite against real named pipes; native-host suite driving the real host binary over stdin/stdout; app tests). They include a check that `ui/src/lib/bindings.ts` is up to date. Five opt-in network tests in `crates/rdl-core/tests/tools_live.rs` install the real tools, pause/resume a real yt-dlp download, check the gallery-dl flag schema against the real `--help`, and resolve and download a real gallery twice (`RDL_LIVE_DIR=<folder> RDL_LIVE_GALLERY=https://commons.wikimedia.org/wiki/Category:Big_Buck_Bunny cargo test -p rdl-core --test tools_live -- --ignored --test-threads 1`). `svelte-check` passes with 0 errors or warnings. Every milestone was also verified end to end in the running app (see "How to test in the real app" below). CI on GitHub passes (checked by hand after 1f).
 
 ### How 1e works
 
@@ -94,6 +95,18 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
 - **Connection:** one per browser session, reused. If writing to it fails (the app closed it after 60 s idle, or restarted), it reconnects and checks again. A message is never sent twice, so a lost reply can't add links twice.
 - **Checked against the real app (2026-10-25)**, with a script playing the browser and the debug binaries side by side: with the app off, `ping` answered `notRunning` without starting it; `add` started it in the tray (0.6 s warm, 4.9 s on the first run), passed the trust check, and the link reached the LinkGrabber with a "1 link from the browser" notification; a second host session reached the running app. Cleaned up afterwards.
 - **Not done here:** browsers can't find the host until 2e registers it (`HKCU\…\NativeMessagingHosts`).
+
+### How 3d works
+
+- **`rdl-core::checksum`:** `ChecksumAlgo` (`md5`/`sha1`/`sha256`/`crc32`, the values the first migration's `downloads.checksum_algo` CHECK allows), `of_file` (1 MiB reads on a blocking thread, stops when its token fires), `of_bytes`, `parse_value` (the first hex word of a known length, of the chosen algorithm's length if one is given, so `SHA256: AB12…`, `ab12… *file.iso` and a bare value all work), `parse_list` (md5sum style `hash *name`, BSD `SHA256 (name) = hash`, SFV `name HASH`; `;`/`#` comments, a BOM, folders in names dropped) and `ChecksumAlgo::for_list` (by extension). Crates `md-5`, `sha1` (0.11, the same `digest` as `sha2`), `crc32fast`.
+- **Storage:** `checksum_algo` / `checksum_value` (lowercase hex) existed; migration 8 adds `checksum_ok` (NULL not checked, 1 matched, 0 didn't). `Download.checksum` is `{algo, value, verified}`; `Event::ChecksumChanged` carries it.
+- **Manager** (`manager/checksums.rs`): `set_checksum(id, algo, text)`, empty text clears; refused for galleries (many files). After a plain or yt-dlp download finishes (`job::start`, before `finalize`) its file is hashed against the value read fresh from the DB, so one set while it runs counts. Hashing is cancellable; a pause during it lets the download complete unchecked. A mismatch is `Error::ChecksumMismatch` ("checksum mismatch for beta.bin: expected …, got …"): the download fails, the file stays, the segments are cleared and `downloaded` stays at the full size. A retry deletes that file first (`checksum_ok = 0`) and downloads again.
+  - Setting a value on a download whose file is there (completed, or failed on its checksum) checks it in the background: a completed one that doesn't match fails, a failed one that now matches completes (with history), without downloading again. A result is only recorded if the value didn't change while hashing.
+  - **Lists:** when a plain download finishes as `.sfv` / `.md5` / `.sha1` / `.sha256` (at most 1 MiB), each other download in its package with no checksum yet whose saved name, given name or link's last part matches an entry (case ignored) gets that value. Finished ones are checked at once, the rest when they finish.
+- **Race fixed on the way:** a pause arriving between the scheduler picking a queued download and marking it active was lost, and the download ran anyway (the flaky "paused queue" test, which also failed on the code before 3d). Now the job is registered as running before it's marked active, `mark_active` only moves `queued` → `active`, and `pause` asks the job to stop if moving it out of `queued` failed. That test then passed 25 runs in a row (about 1 in 8 failed before).
+- **UI:** "Checksum…" in a download's right-click menu (not for galleries): algorithm ("Recognise it" or one of the four) and a text field; the command's error shows in the dialog. The details panel shows "CRC32 68ba51c9 ✓ Matches" / "✗ Doesn't match" / "Not checked yet".
+- **Tests:** known vectors per algorithm, file hashing and cancel, pasted values, SFV and md5sum/BSD lists; manager tests: a value set mid-download is checked at the end; a mismatch fails and keeps the file, a retry downloads again, the right value then completes it with no new request, and a wrong value fails a completed one; a `.sfv` in the package checks the file that finished before it and fails the one after it.
+- **Checked in the app (2026-11-01)** with three files from a local server: the package's `sums.sfv` gave `alpha.bin` "✓ Matches" (it had finished first) and failed `beta.bin` ("expected deadbeef"); right-click → "Checksum (CRC32)…" showed the value; "Recognise it" with `MD5: 25C6…` pasted completed `beta.bin` with "✓ Matches" without fetching it again; a wrong SHA-1 failed the completed `alpha.bin`, Retry fetched it again and it failed again; a short SHA-256 got "That isn't a SHA-256 checksum: expected 64 hex digits.". Screenshots caught the algorithm drop-down on a line of its own (a global `.field` rule) and a failed download showing "0 B of 6.00 MB"; both fixed. Cleaned up afterwards (package, files, history).
 
 ### How 3c works
 
@@ -178,33 +191,28 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
 
 ### Resume here
 
-*Last session ended 2026-10-25, after 3c. Read this first, then "Next: Phase 3".*
+*Last session ended 2026-11-01, after 3d. Read this first.*
 
-- **Repo state:** `main` is clean and pushed; 3c is the last milestone (`45ee68e`). CI on GitHub hasn't been checked since 1f (the 2d/2e push added the extension checks and the host to the installer build).
-- **Start here: 3d, checksums** (the last part of Phase 3). Suggested shape:
-  - `rdl-core::checksum`: MD5 / SHA-1 / SHA-256 / CRC32 of a finished file, streamed, off the async threads. `sha2` is already a dependency; add `md-5`, `sha1`, `crc32fast` (§3.2).
-  - The columns exist since the first migration: `downloads.checksum_algo` (`md5`/`sha1`/`sha256`/`crc32`) and `checksum_value`. Add `Manager::set_checksum(id, algo, value)` and show it on `Download`.
-  - Verify after a plain download completes (in `job::finalize`, before history), and also for yt-dlp / gallery-dl files if a value is set. A mismatch marks the download failed with "checksum mismatch" (`Error::ChecksumMismatch` already exists) and keeps the file.
-  - Pick up `.sfv` (CRC32), `.md5`, `.sha1`, `.sha256` files that are downloaded into the same package: parse them (`hash *name` / `name hash` lines) and check the files they name, or fill in the expected values before those finish.
-  - UI: the value in the details panel with a ✓/✗ once verified; "Checksum…" in the download's right-click menu (algorithm + value, pasted text with a hash recognised by length).
-  - Tests: known vectors per algorithm, a mismatch failing a download from the test server, `.sfv` / `.md5` parsing.
-  - Then the Phase 3 exit check: an overnight queue that ends in a real shutdown, done by hand (see "How 3c works"), and Phase 3 is done; Phase 4 (proxies, accounts, FTP/SFTP) is next.
+- **Repo state:** `main` holds 3d (`<3d>`), not pushed yet. CI on GitHub hasn't been checked since 1f.
+- **Phase 3 exit check** (by hand): an overnight queue that ends in a real shutdown (see "How 3c works"). Then Phase 3 is done.
+- **Next: Phase 4** (proxies + rules, interface binding + kill-switch, accounts in the keyring, FTP/FTPS, SFTP). Split it into milestones first, like Phase 1.
 - **Loose ends worth a session of their own:** Firefox run of the extension and a real sign-in download (Phase 2 above); a real sleep / hibernate / shutdown from a queue (3c follow-ups); yt-dlp and gallery-dl under `--limit-rate` (3b follow-ups); clicking the tray menu and notification buttons ("Not verified" below).
+- **Clippy here:** on 2026-11-01 `cargo clippy` failed because Windows Application Control blocked a freshly rebuilt proc-macro DLL (`sqlx_macros-*.dll`, os error 4551); `cargo test` uses its own copy and works. Clippy wasn't run for 3d: check it in CI.
 - **Disk space:** `target\` had grown to about 80 GB (78 GB in `target\debug`: incremental caches and debug info for every crate, never cleaned by Cargo). Not changed yet. Suggested: add `[profile.dev.package."*"] debug = false` to the workspace `Cargo.toml` (keeps debug info for our own crates), then run `cargo clean` once (the next build takes about 5–10 minutes).
-- **Your machine:** yt-dlp 2026.10.21, gallery-dl 1.32.17 and ffmpeg N-128018 are in `%APPDATA%\rusty-downloader\tools`. The app's DB is at schema `20261028000007` with only the Main queue (defaults), and empty downloads, LinkGrabber and history; settings are at their defaults. The app re-writes two registrations on every start and they stay: notifications (`HKCU\Software\Classes\AppUserModelId\dev.rustydownloader.app`) and the browser host (`HKCU\Software\…\NativeMessagingHosts\dev.rustydownloader.host`, now pointing at the debug host in `target\debug`).
-- **Sanity check before starting:** `cargo test --workspace` (183 pass), `pnpm ext:test` (9), `pnpm -C ui check`, then `pnpm dev` and open the Queues page and Settings.
+- **Your machine:** yt-dlp 2026.10.21, gallery-dl 1.32.17 and ffmpeg N-128018 are in `%APPDATA%\rusty-downloader\tools`. The app's DB is at schema `20261101000008` with only the Main queue (defaults), and empty downloads, LinkGrabber and history; settings are at their defaults. The app re-writes two registrations on every start and they stay: notifications (`HKCU\Software\Classes\AppUserModelId\dev.rustydownloader.app`) and the browser host (`HKCU\Software\…\NativeMessagingHosts\dev.rustydownloader.host`, now pointing at the debug host in `target\debug`).
+- **Sanity check before starting:** `cargo test --workspace` (192 pass), `pnpm ext:test` (9), `pnpm -C ui check`, then `pnpm dev` and open the Queues page and Settings.
 - **Optional, real network:** `RDL_LIVE_DIR=<some folder> cargo test -p rdl-core --test tools_live -- --ignored --nocapture` (about 135 MB of tools on the first run, reused after).
 
 ### Phase 2 – browser integration (done)
 
 2a request context, 2b pipe server, 2c native host, 2d extension, 2e registration; see "How 2a works" to "How 2e works". Still owed: a run in Firefox (load `extension/dist/firefox/manifest.json` from `about:debugging`, grant site access in the options page, then repeat the Edge checks) and a download from a real site that needs sign-in.
 
-### Next: Phase 3 – control (suggested order)
+### Phase 3 – control (built; exit check owed)
 
 1. ~~**Keep-awake**~~ done as 3a (see "How 3a works").
 2. ~~**Speed limits**~~ done as 3b (see "How 3b works").
 3. ~~**Scheduler and Queues page**~~ done as 3c (see "How 3c works"). The exit criterion (overnight queue, then shutdown) was checked with shutdown as a dry run; a real shutdown hasn't been run.
-4. **Checksums (3d):** MD5 / SHA-1 / SHA-256 / CRC32 typed in or found in `.sfv` / `.md5` / `.sha256` files in the package; a mismatch fails the download.
+4. ~~**Checksums**~~ done as 3d (see "How 3d works").
 
 ### Deferred / known gaps (pick up in the milestone noted)
 
@@ -247,6 +255,12 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
   - The registry entries stay after uninstalling (no NSIS uninstall hook yet); they point at a host that's gone, which browsers report as "not found". A dev build overwrites an installed copy's registration until the installed app starts again.
   - No in-app status for the browser bridge (registered? extension seen?) and no switch to turn it off.
   - Not tried under a real browser yet (needs 2d and 2e), so the job breakaway and the stdin/stdout handling are only tested against a script.
+- **Checksums (3d follow-ups):**
+  - Galleries get no checksums, and lists only apply inside their own package. A list whose entries match nothing is ignored silently.
+  - No "checking…" state: a big file sits at 100% while it's hashed. A pause during hashing completes it unchecked.
+  - A checksum can't come with a link (browser, LinkGrabber, `NewDownload`); it's set afterwards.
+  - Lists with other names (`SHA256SUMS`, `.txt`) aren't recognised; only the four extensions are.
+  - yt-dlp downloads are checked against the final file after post-processing, which rarely has a published hash.
 - **Queues (3c follow-ups):**
   - Shutdown, sleep and hibernate were only run as dry runs (and their commands are untested); only "close the app" ran for real. Hibernate fails when hibernation is switched off (`powercfg /h on`).
   - Nothing wakes the computer for a queue's window: if it's asleep at the start time, the queue starts when it wakes. A wake timer (`SetWaitableTimer` with resume) would need its own setting.
@@ -617,8 +631,8 @@ Locations: installed builds use `%APPDATA%\rusty-downloader\` (db, logs, plugins
 | **0. Scaffold** | Workspace, Tauri + SvelteKit shell, SQLite migrations, tracing logs, CI, Fluent theme base | App launches, CI green | ✅ Done (CI never checked) |
 | **1. MVP** | Segmented HTTP engine (resume, retries, dynamic splitting, headers/cookies/auth), queues + concurrency, packages, LinkGrabber (paste/clipboard/drag-drop), yt-dlp + gallery-dl (resolve, download, progress, common flags, impersonation, archives) + tool updater, tray, toasts, history/duplicate detection, single instance, settings | Used as daily driver for HTTP, video and galleries | ✅ Done |
 | **2. Browser** | MV3 extension (Chromium + Firefox), native host, download interception, context menus, cookie hand-off | Browser downloads flow into the app with cookies | ✅ Done in Edge (Firefox not run) |
-| **3. Control** | Scheduler, speed limiting + profiles, keep-awake, on-complete actions, checksum verification | Overnight queue then shutdown works | ▶️ Next |
-| **4. Network & protocols** | Proxies + rules, interface binding + kill-switch, accounts in the keyring, FTP/FTPS, SFTP | Downloads via SOCKS5/VPN interface, FTP/SFTP resume | ⏳ |
+| **3. Control** | Scheduler, speed limiting + profiles, keep-awake, on-complete actions, checksum verification | Overnight queue then shutdown works | ✅ Built (real shutdown not run yet) |
+| **4. Network & protocols** | Proxies + rules, interface binding + kill-switch, accounts in the keyring, FTP/FTPS, SFTP | Downloads via SOCKS5/VPN interface, FTP/SFTP resume | ▶️ Next |
 | **5. Torrent** | librqbit integration, magnet/.torrent associations, seeding limits (ratio/time) | Torrent download + seed from the same UI | ⏳ |
 | **6. Plugins & extract** | Rhai plugin host + API, 2–3 reference plugins, auto-extract with password lists | A hoster resolved via plugin, archive auto-extracted | ⏳ |
 | **7. Remote & release polish** | axum remote UI/API, portable build, auto-update pipeline, installer polish | Install, auto-update and phone control work end to end | ⏳ |
