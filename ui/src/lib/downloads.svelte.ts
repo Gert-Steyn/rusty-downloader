@@ -6,6 +6,7 @@ import {
 	isTauri,
 	unwrap,
 	type ChecksumAlgo,
+	type ProxyChoice,
 	type Download,
 	type DownloadEventBatch,
 	type Package
@@ -119,6 +120,9 @@ class DownloadsStore {
 	 */
 	setChecksum = (id: number, algo: ChecksumAlgo | null, text: string) =>
 		unwrap(commands.setChecksum(id, algo, text));
+	/** Which connection a download uses, from its next start. */
+	setProxy = (id: number, proxy: ProxyChoice) =>
+		this.run(() => unwrap(commands.setDownloadProxy(id, proxy)));
 	/** Put a package before another (`null`: last); the order is the start order. */
 	movePackage = (id: number, before: number | null) =>
 		this.run(() => unwrap(commands.movePackage(id, before)));
@@ -180,6 +184,11 @@ class DownloadsStore {
 				case 'speedLimitChanged': {
 					const d = this.#byId.get(event.downloadId);
 					if (d) d.speedLimit = event.speedLimit;
+					break;
+				}
+				case 'proxyChanged': {
+					const d = this.#byId.get(event.downloadId);
+					if (d) d.proxy = event.proxy;
 					break;
 				}
 				case 'checksumChanged': {

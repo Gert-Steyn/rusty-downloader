@@ -27,7 +27,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::checksum::{self, ChecksumAlgo};
 use crate::db::Pool;
-use crate::http::{self, SegmentConfig, filename};
+use crate::http::{SegmentConfig, filename};
+use crate::network::Network;
+use crate::proxy::ProxyChoice;
 use crate::ratelimit::{RateLimiter, Throttle};
 use crate::tools::Tools;
 use crate::{Error, Result, gallerydl, ytdlp};
@@ -51,6 +53,8 @@ pub struct ManagerConfig {
     /// Where gallery-dl's per-site download archives live; `None` runs
     /// without archives.
     pub archives_dir: Option<PathBuf>,
+    /// Proxies; `None` connects directly.
+    pub network: Option<Network>,
 }
 
 impl Default for ManagerConfig {
@@ -62,6 +66,7 @@ impl Default for ManagerConfig {
             user_agent: None,
             tools: None,
             archives_dir: None,
+            network: None,
         }
     }
 }
@@ -74,7 +79,7 @@ pub struct Manager {
 
 struct Inner {
     pool: Pool,
-    client: reqwest::Client,
+    network: Network,
     config: ManagerConfig,
     events: broadcast::Sender<Event>,
     running: Mutex<HashMap<DownloadId, RunningJob>>,
@@ -192,7 +197,10 @@ impl Manager {
         let (events, _) = broadcast::channel(1024);
         let inner = Arc::new(Inner {
             max_connections: AtomicUsize::new(config.segment.max_connections),
-            client: http::client(config.user_agent.as_deref())?,
+            network: config
+                .network
+                .clone()
+                .unwrap_or_else(|| Network::direct(config.user_agent.as_deref())),
             pool,
             config,
             events,
@@ -263,6 +271,19 @@ impl Manager {
         };
         let checksum = parsed.as_ref().map(|(algo, value)| (*algo, value.as_str()));
         checksums::set(&self.inner, &row, checksum).await
+    }
+
+    /// Which connection a download uses. Takes effect when it next starts.
+    pub async fn set_download_proxy(&self, id: DownloadId, proxy: ProxyChoice) -> Result<()> {
+        if !store::set_proxy(&self.inner.pool, id, proxy).await? {
+            return Err(Error::NotFound(format!("download {id}")));
+        }
+        tracing::info!(download = id, ?proxy, "download's connection changed");
+        self.inner.emit(Event::ProxyChanged {
+            download_id: id,
+            proxy,
+        });
+        Ok(())
     }
 
     /// Every queue with its settings and what's in it, in order.

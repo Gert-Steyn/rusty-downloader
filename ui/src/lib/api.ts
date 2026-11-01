@@ -3,6 +3,10 @@ import { isTauri } from '@tauri-apps/api/core';
 import type {
 	ActiveLimit_Serialize,
 	Checksum_Serialize,
+	ProxyInput_Deserialize,
+	ProxyOverview_Serialize,
+	ProxyProfile_Serialize,
+	ProxySettings_Serialize,
 	Queue_Serialize,
 	QueueChanges_Deserialize,
 	QueueSchedule_Serialize,
@@ -32,6 +36,8 @@ export type {
 	AppInfo,
 	Availability,
 	ChecksumAlgo,
+	ProxyChoice,
+	ProxyKind,
 	FormatPreset,
 	LinkSource,
 	OnComplete,
@@ -47,6 +53,10 @@ export { isTauri };
 export type Package = Package_Serialize;
 export type Download = Download_Serialize;
 export type Checksum = Checksum_Serialize;
+export type ProxyOverview = ProxyOverview_Serialize;
+export type ProxyProfile = ProxyProfile_Serialize;
+export type ProxySettings = ProxySettings_Serialize;
+export type ProxyInput = ProxyInput_Deserialize;
 export type DownloadEvent = Event_Serialize;
 export type DownloadEventBatch = DownloadEvents_Serialize;
 export type GrabbedLink = GrabbedLink_Serialize;

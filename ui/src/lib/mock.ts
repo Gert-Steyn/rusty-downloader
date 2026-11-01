@@ -41,7 +41,8 @@ function dl(
 		files: null,
 		title: null,
 		speedLimit: null,
-		checksum: null
+		checksum: null,
+		proxy: { mode: 'auto' }
 	};
 }
 

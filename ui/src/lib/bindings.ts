@@ -85,6 +85,21 @@ export const commands = {
 	 *  checked at once.
 	 */
 	setChecksum: (id: number, algo: ChecksumAlgo | null, text: string) => typedError<null, CommandError>(__TAURI_INVOKE("set_checksum", { id, algo, text })),
+	/**  Which connection a download uses; it applies when the download next starts. */
+	setDownloadProxy: (id: number, proxy: ProxyChoice) => typedError<null, CommandError>(__TAURI_INVOKE("set_download_proxy", { id, proxy })),
+	proxyOverview: () => typedError<ProxyOverview_Serialize, CommandError>(__TAURI_INVOKE("proxy_overview")),
+	/**  A new profile; returns its id. */
+	proxyAdd: (input: ProxyInput_Deserialize) => typedError<number, CommandError>(__TAURI_INVOKE("proxy_add", { input })),
+	/**  `input.password`: `null` keeps the stored one, `""` removes it. */
+	proxyUpdate: (id: number, input: ProxyInput_Deserialize) => typedError<null, CommandError>(__TAURI_INVOKE("proxy_update", { id, input })),
+	proxyRemove: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("proxy_remove", { id })),
+	/**  The default proxy and the rules, saved as a whole. */
+	proxySetSettings: (settings: ProxySettings_Deserialize) => typedError<null, CommandError>(__TAURI_INVOKE("proxy_set_settings", { settings })),
+	/**
+	 *  Fetch a small page through `choice` (by default Windows' connectivity
+	 *  check); returns how long the answer took in milliseconds.
+	 */
+	proxyTest: (choice: ProxyChoice, url: string | null) => typedError<number, CommandError>(__TAURI_INVOKE("proxy_test", { choice, url })),
 	listQueues: () => typedError<Queue_Serialize[], CommandError>(__TAURI_INVOKE("list_queues")),
 	addQueue: (name: string) => typedError<number, CommandError>(__TAURI_INVOKE("add_queue", { name })),
 	/**
@@ -255,6 +270,8 @@ export type Download_Deserialize = {
 	speedLimit?: number | null,
 	/**  The expected checksum, and whether the file matched it. */
 	checksum?: Checksum_Deserialize | null,
+	/**  Which connection it uses. */
+	proxy: ProxyChoice,
 };
 
 export type Download_Serialize = {
@@ -279,6 +296,8 @@ export type Download_Serialize = {
 	speedLimit: number | null,
 	/**  The expected checksum, and whether the file matched it. */
 	checksum: Checksum_Serialize | null,
+	/**  Which connection it uses. */
+	proxy: ProxyChoice,
 };
 
 /**
@@ -307,6 +326,8 @@ export type Event_Deserialize = { type: "packageAdded"; packageId: number } | { 
 { type: "speedLimitChanged"; downloadId: number; speedLimit?: number | null } | 
 /**  A download's expected checksum was set or cleared, or its file was checked. */
 { type: "checksumChanged"; downloadId: number; checksum?: Checksum_Deserialize | null } | 
+/**  A download's connection choice changed. */
+{ type: "proxyChanged"; downloadId: number; proxy: ProxyChoice } | 
 /**  Name, size and destination are known after the first probe. */
 { type: "resolved"; downloadId: number; filename: string; size?: number | null } | { type: "progress"; downloadId: number; downloaded: number; total?: number | null; speedBps: number; connections: number; 
 /**  For gallery downloads, which count files rather than bytes. */
@@ -331,6 +352,8 @@ export type Event_Serialize = { type: "packageAdded"; packageId: number } | { ty
 { type: "speedLimitChanged"; downloadId: number; speedLimit: number | null } | 
 /**  A download's expected checksum was set or cleared, or its file was checked. */
 { type: "checksumChanged"; downloadId: number; checksum: Checksum_Serialize | null } | 
+/**  A download's connection choice changed. */
+{ type: "proxyChanged"; downloadId: number; proxy: ProxyChoice } | 
 /**  Name, size and destination are known after the first probe. */
 { type: "resolved"; downloadId: number; filename: string; size: number | null } | { type: "progress"; downloadId: number; downloaded: number; total: number | null; speedBps: number; connections: number; 
 /**  For gallery downloads, which count files rather than bytes. */
@@ -758,6 +781,114 @@ export type PreviousDownload = {
 	finishedAt: number,
 	path: string,
 	exists: boolean,
+};
+
+/**  Which connection a download uses. */
+export type ProxyChoice = 
+/**  The rules decide, then the default. */
+{ mode: "auto" } | { mode: "direct" } | { mode: "profile"; id: number };
+
+/**  A new or changed profile. */
+export type ProxyInput = ProxyInput_Serialize | ProxyInput_Deserialize;
+
+/**  A new or changed profile. */
+export type ProxyInput_Deserialize = {
+	name: string,
+	kind: ProxyKind,
+	host: string,
+	port: number,
+	username?: string | null,
+	/**  `None` keeps the stored password; an empty one removes it. */
+	password?: string | null,
+};
+
+/**  A new or changed profile. */
+export type ProxyInput_Serialize = {
+	name: string,
+	kind: ProxyKind,
+	host: string,
+	port: number,
+	username: string | null,
+	/**  `None` keeps the stored password; an empty one removes it. */
+	password: string | null,
+};
+
+export type ProxyKind = "http" | "https" | "socks5";
+
+export type ProxyOverview = ProxyOverview_Serialize | ProxyOverview_Deserialize;
+
+export type ProxyOverview_Deserialize = {
+	profiles: ProxyProfile_Deserialize[],
+	settings: ProxySettings_Deserialize,
+};
+
+export type ProxyOverview_Serialize = {
+	profiles: ProxyProfile_Serialize[],
+	settings: ProxySettings_Serialize,
+};
+
+/**  A proxy as the UI sees it: never the password, only whether there is one. */
+export type ProxyProfile = ProxyProfile_Serialize | ProxyProfile_Deserialize;
+
+/**  A proxy as the UI sees it: never the password, only whether there is one. */
+export type ProxyProfile_Deserialize = {
+	id: number,
+	name: string,
+	kind: ProxyKind,
+	host: string,
+	port: number,
+	username?: string | null,
+	hasPassword: boolean,
+};
+
+/**  A proxy as the UI sees it: never the password, only whether there is one. */
+export type ProxyProfile_Serialize = {
+	id: number,
+	name: string,
+	kind: ProxyKind,
+	host: string,
+	port: number,
+	username: string | null,
+	hasPassword: boolean,
+};
+
+/**  Sites matching `pattern` connect through `profile` (`None`: directly). */
+export type ProxyRule = ProxyRule_Serialize | ProxyRule_Deserialize;
+
+/**  Sites matching `pattern` connect through `profile` (`None`: directly). */
+export type ProxyRule_Deserialize = {
+	pattern: string,
+	profile?: number | null,
+};
+
+/**  Sites matching `pattern` connect through `profile` (`None`: directly). */
+export type ProxyRule_Serialize = {
+	pattern: string,
+	profile: number | null,
+};
+
+/**
+ *  The rules in order (first match wins) and the profile for everything
+ *  else (`None`: connect directly).
+ */
+export type ProxySettings = ProxySettings_Serialize | ProxySettings_Deserialize;
+
+/**
+ *  The rules in order (first match wins) and the profile for everything
+ *  else (`None`: connect directly).
+ */
+export type ProxySettings_Deserialize = {
+	default?: number | null,
+	rules: ProxyRule_Deserialize[],
+};
+
+/**
+ *  The rules in order (first match wins) and the profile for everything
+ *  else (`None`: connect directly).
+ */
+export type ProxySettings_Serialize = {
+	default: number | null,
+	rules: ProxyRule_Serialize[],
 };
 
 /**  A queue as the Queues page shows it. */

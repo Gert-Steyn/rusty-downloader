@@ -29,6 +29,8 @@ use crate::gallerydl::{self, Gallery, GalleryDlOptions};
 use crate::history::{self, PreviousDownload};
 use crate::http::{self, DownloadSpec, filename};
 use crate::manager::{DEFAULT_QUEUE, DownloadKind, Manager, NewDownload, NewPackage, PackageId};
+use crate::network::Network;
+use crate::proxy::ProxyChoice;
 use crate::request::RequestContext;
 use crate::tools::Tools;
 use crate::ytdlp::{MediaInfo, YtDlpOptions};
@@ -152,7 +154,7 @@ pub struct LinkGrabber {
 
 struct Inner {
     pool: Pool,
-    client: reqwest::Client,
+    network: Network,
     events: broadcast::Sender<GrabberEvent>,
     probes: Arc<Semaphore>,
     tools: Option<Tools>,
@@ -254,12 +256,13 @@ impl LinkRow {
 
 impl LinkGrabber {
     /// Load the grabber and re-check links whose probe didn't finish last run.
-    /// Without `tools`, every link is checked as a plain file.
-    pub async fn start(pool: Pool, user_agent: Option<&str>, tools: Option<Tools>) -> Result<Self> {
+    /// Without `network` links are checked over direct connections; without
+    /// `tools`, every link is checked as a plain file.
+    pub async fn start(pool: Pool, network: Option<Network>, tools: Option<Tools>) -> Result<Self> {
         let (events, _) = broadcast::channel(256);
         let grabber = Self {
             inner: Arc::new(Inner {
-                client: http::client(user_agent)?,
+                network: network.unwrap_or_else(|| Network::direct(None)),
                 pool,
                 events,
                 probes: Arc::new(Semaphore::new(PROBE_CONCURRENCY)),
@@ -710,7 +713,10 @@ async fn probe_link(
     let result = match &parsed {
         Ok(parsed) => {
             let spec = DownloadSpec::with_request(parsed.clone(), request.clone());
-            http::probe(&inner.client, &spec).await
+            match inner.network.client(parsed, ProxyChoice::Auto) {
+                Ok(client) => http::probe(&client, &spec).await,
+                Err(e) => Err(e),
+            }
         }
         Err(e) => Err(Error::InvalidUrl(e.to_string())),
     };
@@ -762,28 +768,25 @@ async fn probe_link(
 
     match result {
         Ok(probe) => {
-            // COALESCE keeps a name the user typed while the probe ran.
+            // COALESCE keeps a name the user typed while the probe ran. A
+            // split archive moves to its set's package (unless the package was
+            // renamed meanwhile) in the same statement, so the link is never
+            // seen online in the wrong package.
+            let set = default_package.and(archive_set_name(&probe.filename));
             sqlx::query(
                 "UPDATE link_grabber SET kind = 'http', info_json = NULL, availability = 'online',
-                     error = NULL, filename = COALESCE(filename, ?), size = ?
-                 WHERE id = ?",
+                     error = NULL, filename = COALESCE(filename, ?1), size = ?2,
+                     proposed_package = CASE WHEN ?3 IS NOT NULL AND proposed_package = ?4
+                                             THEN ?3 ELSE proposed_package END
+                 WHERE id = ?5",
             )
             .bind(&probe.filename)
             .bind(probe.size.map(|s| s as i64))
+            .bind(set)
+            .bind(default_package)
             .bind(id)
             .execute(pool)
             .await?;
-            if let (Some(default), Some(set)) = (default_package, archive_set_name(&probe.filename))
-            {
-                sqlx::query(
-                    "UPDATE link_grabber SET proposed_package = ? WHERE id = ? AND proposed_package = ?",
-                )
-                .bind(set)
-                .bind(id)
-                .bind(default)
-                .execute(pool)
-                .await?;
-            }
         }
         Err(e) => {
             let availability = match &e {

@@ -26,6 +26,7 @@ use url::Url;
 
 use crate::db::Pool;
 use crate::http::filename;
+use crate::network::Network;
 use crate::{Error, Result, process};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -168,6 +169,8 @@ pub struct ToolsConfig {
     /// Run the new binary before switching to it. Tests serve fake binaries
     /// and turn this off; the version is then the release name.
     pub verify_runs: bool,
+    /// Proxies for update checks and downloads; `None` connects directly.
+    pub network: Option<Network>,
 }
 
 impl Default for ToolsConfig {
@@ -178,6 +181,7 @@ impl Default for ToolsConfig {
             check_interval: Duration::from_secs(24 * 60 * 60),
             auto_update: true,
             verify_runs: true,
+            network: None,
         }
     }
 }
@@ -277,7 +281,7 @@ impl std::fmt::Debug for Tools {
 
 struct Inner {
     pool: Pool,
-    client: reqwest::Client,
+    network: Network,
     dir: PathBuf,
     config: ToolsConfig,
     events: broadcast::Sender<ToolEvent>,
@@ -297,7 +301,10 @@ impl Tools {
         let (events, _) = broadcast::channel(64);
         let tools = Self {
             inner: Arc::new(Inner {
-                client: crate::http::api_client()?,
+                network: config
+                    .network
+                    .clone()
+                    .unwrap_or_else(|| Network::direct(None)),
                 pool,
                 dir,
                 config,
@@ -612,7 +619,8 @@ impl Tools {
             Forge::GitHub => &self.inner.config.api_base,
             Forge::Codeberg => &self.inner.config.codeberg_base,
         };
-        let latest = github::latest(&self.inner.client, api, &up).await?;
+        let client = self.inner.network.api_client(api)?;
+        let latest = github::latest(&client, api, &up).await?;
         sqlx::query(
             "UPDATE tools SET latest_release = ?, latest_sha256 = ?,
                  last_check = CAST(unixepoch('subsec') * 1000 AS INTEGER)
@@ -632,7 +640,8 @@ impl Tools {
         latest: &github::Latest,
         to: &Path,
     ) -> Result<()> {
-        let response = self.inner.client.get(latest.url.clone()).send().await?;
+        let client = self.inner.network.api_client(&latest.url)?;
+        let response = client.get(latest.url.clone()).send().await?;
         crate::http::check_status(response.status(), &latest.url)?;
         let total = response.content_length().or(latest.size);
         let mut file = tokio::fs::File::create(to).await?;

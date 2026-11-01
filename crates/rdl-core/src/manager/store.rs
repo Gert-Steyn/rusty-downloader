@@ -13,6 +13,7 @@ use crate::Result;
 use crate::checksum::{Checksum, ChecksumAlgo};
 use crate::db::Pool;
 use crate::http::Segment;
+use crate::proxy::ProxyChoice;
 use crate::request::RequestContext;
 
 /// A download row with the fields the job runner needs beyond [`Download`].
@@ -39,9 +40,14 @@ pub(crate) struct DownloadRow {
     pub checksum_algo: Option<String>,
     pub checksum_value: Option<String>,
     pub checksum_ok: Option<i64>,
+    pub proxy: Option<String>,
 }
 
 impl DownloadRow {
+    pub fn proxy(&self) -> ProxyChoice {
+        ProxyChoice::from_db(self.proxy.as_deref())
+    }
+
     /// The expected checksum, if one was set.
     pub fn checksum(&self) -> Option<Checksum> {
         Some(Checksum {
@@ -112,6 +118,7 @@ impl DownloadRow {
             title: self.title.clone(),
             speed_limit: self.speed_limit(),
             checksum: self.checksum(),
+            proxy: self.proxy(),
         }
     }
 }
@@ -199,8 +206,8 @@ pub(crate) async fn insert_package(pool: &Pool, new: &NewPackage) -> Result<Pack
         };
         sqlx::query(
             "INSERT INTO downloads (package_id, kind, source_url, filename, handler_opts_json, title,
-                 files_total, size, request_json, position)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 files_total, size, request_json, proxy, position)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id)
         .bind(download.kind.as_str())
@@ -211,6 +218,7 @@ pub(crate) async fn insert_package(pool: &Pool, new: &NewPackage) -> Result<Pack
         .bind(download.files_total.map(i64::from))
         .bind(download.size.map(|s| s as i64))
         .bind(download.request.clone().cleaned().to_json()?)
+        .bind(download.proxy.to_db())
         .bind(position as i64)
         .execute(&mut *tx)
         .await?;
@@ -595,6 +603,16 @@ pub(crate) async fn set_checksum_ok(
             .bind(value)
             .execute(pool)
             .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Returns whether the download exists.
+pub(crate) async fn set_proxy(pool: &Pool, id: DownloadId, proxy: ProxyChoice) -> Result<bool> {
+    let result = sqlx::query("UPDATE downloads SET proxy = ? WHERE id = ?")
+        .bind(proxy.to_db())
+        .bind(id)
+        .execute(pool)
+        .await?;
     Ok(result.rows_affected() > 0)
 }
 

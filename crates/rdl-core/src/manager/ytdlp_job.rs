@@ -55,6 +55,7 @@ pub(super) async fn execute(
         }
     };
 
+    let proxy = inner.network.tool_proxy(&url, row.proxy());
     let spec = RunSpec {
         exe,
         ffmpeg_dir,
@@ -65,6 +66,7 @@ pub(super) async fn execute(
         request: row.request(),
         cookie_file: None,
         limit_rate: inner.tool_rate(row.speed_limit()),
+        proxy,
     };
     let (tx, rx) = mpsc::unbounded_channel();
     let forwarder = tokio::spawn(forward(Arc::clone(inner), row.id, rx));

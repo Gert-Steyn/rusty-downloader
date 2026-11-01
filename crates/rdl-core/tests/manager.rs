@@ -36,6 +36,7 @@ fn config() -> ManagerConfig {
         user_agent: None,
         tools: None,
         archives_dir: None,
+        network: None,
     }
 }
 
@@ -929,7 +930,15 @@ async fn checksum_lists_in_the_package_are_used() {
         .await;
 
     // other.bin got its value before it started, and doesn't match it.
-    assert_eq!(finished(&mut fx, ids[2]).await, Status::Failed);
+    let status = finished(&mut fx, ids[2]).await;
+    if status != Status::Failed {
+        let mut states = Vec::new();
+        for id in &ids {
+            let d = fx.manager.get(*id).await.unwrap();
+            states.push((d.filename, d.status, d.error, d.checksum));
+        }
+        panic!("other.bin ended {status:?}; downloads: {states:#?}");
+    }
     assert!(!verified(&fx, ids[2]).await);
     // data.bin had finished before the list came: checked afterwards.
     assert!(verified(&fx, ids[0]).await);

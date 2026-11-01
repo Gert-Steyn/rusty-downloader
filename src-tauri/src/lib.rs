@@ -5,6 +5,7 @@ mod events;
 mod grabber_commands;
 mod keep_awake;
 mod native_host;
+mod network_commands;
 mod notify;
 mod on_complete;
 mod queue_commands;
@@ -74,6 +75,13 @@ fn specta_builder() -> Builder<tauri::Wry> {
             speed::set_speed_limit_on,
             commands::set_download_speed_limit,
             commands::set_checksum,
+            commands::set_download_proxy,
+            network_commands::proxy_overview,
+            network_commands::proxy_add,
+            network_commands::proxy_update,
+            network_commands::proxy_remove,
+            network_commands::proxy_set_settings,
+            network_commands::proxy_test,
             queue_commands::list_queues,
             queue_commands::add_queue,
             queue_commands::update_queue,

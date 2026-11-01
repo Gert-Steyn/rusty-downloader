@@ -124,11 +124,12 @@ async fn execute(
         .ok_or_else(|| Error::NotFound(format!("package {}", row.package_id)))?;
     let url = Url::parse(&row.source_url)
         .map_err(|e| Error::InvalidUrl(format!("{}: {e}", row.source_url)))?;
+    let client = inner.network.client(&url, row.proxy())?;
     let spec = DownloadSpec::with_request(url, row.request());
 
     let probe = tokio::select! {
         _ = cancel.cancelled() => return Ok(Outcome::Paused),
-        probe = http::probe(&inner.client, &spec) => probe?,
+        probe = http::probe(&client, &spec) => probe?,
     };
 
     let mut resume_from = store::load_segments(pool, row.id).await?;
@@ -183,7 +184,7 @@ async fn execute(
     let forwarder = tokio::spawn(forward_progress(Arc::clone(inner), row.id, rx));
 
     let outcome = http::download(
-        &inner.client,
+        &client,
         &spec,
         &probe,
         &part_path(&dest),

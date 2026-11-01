@@ -15,10 +15,11 @@ crc32fast = "1.5.3"
 dirs = "7.0.0"
 fastrand = "2.5.0"
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+keyring-core = "1.0.1"
 md-5 = { version = "0.11.0", default-features = false }
 percent-encoding = "2.3.2"
 regex = "1.13.1"
-reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "stream", "http2", "charset"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "stream", "http2", "charset", "socks"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha1 = { version = "0.11.0", default-features = false }
@@ -36,6 +37,7 @@ zip = { version = "9.1.0", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 win32job = { version = "2.0.3", default-features = false }
+windows-native-keyring-store = { version = "1.1.0", default-features = false }
 
 [dev-dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }

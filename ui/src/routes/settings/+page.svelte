@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { open as pickFolder } from '@tauri-apps/plugin-dialog';
 	import { commands, isTauri, unwrap, type AppInfo, type Settings, type SpeedRule } from '#lib/api.js';
+	import NetworkSettings from '#lib/components/NetworkSettings.svelte';
 	import { settings } from '#lib/settings.svelte.js';
 	import { speed } from '#lib/speed.svelte.js';
 
@@ -232,6 +233,8 @@
 				>
 			</div>
 		</section>
+
+		<NetworkSettings />
 
 		<section class="card" aria-labelledby="set-grabber">
 			<h2 id="set-grabber">LinkGrabber</h2>

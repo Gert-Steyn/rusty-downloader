@@ -1,6 +1,7 @@
 <script lang="ts">
 	import AddLinksDialog from '#lib/components/AddLinksDialog.svelte';
 	import ChecksumDialog from '#lib/components/ChecksumDialog.svelte';
+	import ConnectionDialog from '#lib/components/ConnectionDialog.svelte';
 	import ContextMenu, { type MenuItem } from '#lib/components/ContextMenu.svelte';
 	import DetailsPanel from '#lib/components/DetailsPanel.svelte';
 	import DownloadsTable, { type Selection } from '#lib/components/DownloadsTable.svelte';
@@ -10,6 +11,7 @@
 	import SpeedLimitDialog from '#lib/components/SpeedLimitDialog.svelte';
 	import { downloads } from '#lib/downloads.svelte.js';
 	import { CHECKSUM_LABELS, formatSpeed } from '#lib/format.js';
+	import { network } from '#lib/network.svelte.js';
 	import { queues } from '#lib/queues.svelte.js';
 
 	let selection = $state<Selection>(null);
@@ -28,6 +30,11 @@
 				? downloads.download(selection.id) !== undefined
 				: downloads.package(selection.id) !== undefined;
 		if (!exists) selection = null;
+	});
+
+	// Proxy names for the download menu and details.
+	$effect(() => {
+		void network.load();
 	});
 
 	function openAdd(text = '') {
@@ -66,6 +73,8 @@
 	let limiting = $state<number | null>(null);
 	let limitOpen = $state(false);
 	let checking = $state<number | null>(null);
+	let connecting = $state<number | null>(null);
+	let connectionOpen = $state(false);
 	let checksumOpen = $state(false);
 
 	function openMenu(target: NonNullable<Selection>, x: number, y: number) {
@@ -96,6 +105,14 @@
 				action: () => {
 					limiting = id;
 					limitOpen = true;
+				}
+			},
+			{
+				label: d.proxy.mode === 'auto' ? 'Connection…' : `Connection (${network.choiceLabel(d.proxy)})…`,
+				icon: 'network',
+				action: () => {
+					connecting = id;
+					connectionOpen = true;
 				}
 			},
 			// A gallery is many files; a checksum belongs to one.
@@ -241,6 +258,7 @@
 <RemoveDialog bind:open={removing} target={removeTarget} />
 <SpeedLimitDialog bind:open={limitOpen} id={limiting} />
 <ChecksumDialog bind:open={checksumOpen} id={checking} />
+<ConnectionDialog bind:open={connectionOpen} id={connecting} />
 <ContextMenu bind:at={menuAt} items={menuItems} />
 
 

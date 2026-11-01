@@ -377,6 +377,7 @@ mod tests {
             title: None,
             speed_limit: None,
             checksum: None,
+            proxy: Default::default(),
         }
     }
 

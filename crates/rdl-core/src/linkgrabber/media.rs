@@ -11,6 +11,7 @@ use url::Url;
 use super::{Availability, GrabberEvent, Inner, LinkId, LinkRow, LinkSource};
 use crate::http::{ProbeResult, filename};
 use crate::manager::DownloadKind;
+use crate::proxy::ProxyChoice;
 use crate::request::RequestContext;
 use crate::tools::ToolName;
 
@@ -100,7 +101,9 @@ pub(super) async fn lookup(inner: &Inner, url: &Url, request: &RequestContext) -
             return Ok(Lookup::NotMedia);
         }
     };
-    match ytdlp::resolve(&exe, url, request, &CancellationToken::new()).await {
+    let proxy = inner.network.tool_proxy(url, ProxyChoice::Auto);
+    let cancel = CancellationToken::new();
+    match ytdlp::resolve(&exe, url, request, proxy.as_deref(), &cancel).await {
         Ok(media) => Ok(Lookup::Found(media)),
         Err(Error::Tool(message)) if is_unsupported(&message) => Ok(Lookup::NotMedia),
         Err(Error::Tool(message)) => Ok(Lookup::Failed(message)),

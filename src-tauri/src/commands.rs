@@ -8,6 +8,7 @@ use rdl_core::linkgrabber::default_package_name;
 use rdl_core::manager::{
     DEFAULT_QUEUE, Download, DownloadId, NewDownload, NewPackage, Package, PackageId, Status,
 };
+use rdl_core::proxy::ProxyChoice;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, State};
@@ -147,6 +148,17 @@ pub async fn set_download_speed_limit(
     limit: Option<u64>,
 ) -> CommandResult<()> {
     Ok(state.downloads.set_download_speed_limit(id, limit).await?)
+}
+
+/// Which connection a download uses; it applies when the download next starts.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_download_proxy(
+    state: State<'_, AppState>,
+    id: DownloadId,
+    proxy: ProxyChoice,
+) -> CommandResult<()> {
+    Ok(state.downloads.set_download_proxy(id, proxy).await?)
 }
 
 /// A download's expected checksum from pasted text (`algo`: `None`

@@ -25,22 +25,25 @@ const MAX_REDIRECTS: usize = 10;
 /// byte ranges must refer to the bytes on the wire. Redirects are not
 /// followed by the client but by [`get`], so each hop gets its own cookies.
 pub fn client(user_agent: Option<&str>) -> Result<Client> {
-    Ok(Client::builder()
-        .user_agent(user_agent.unwrap_or(DEFAULT_USER_AGENT))
-        .redirect(redirect::Policy::none())
-        .connect_timeout(Duration::from_secs(15))
-        .read_timeout(Duration::from_secs(30))
-        .build()?)
+    Ok(builder(user_agent, false).build()?)
 }
 
 /// Client for API calls and tool downloads, which follows redirects itself.
 pub fn api_client() -> Result<Client> {
-    Ok(Client::builder()
-        .user_agent(DEFAULT_USER_AGENT)
-        .redirect(redirect::Policy::limited(MAX_REDIRECTS))
+    Ok(builder(None, true).build()?)
+}
+
+/// Settings shared by every client; [`crate::network`] adds the proxy.
+pub(crate) fn builder(user_agent: Option<&str>, follow_redirects: bool) -> reqwest::ClientBuilder {
+    Client::builder()
+        .user_agent(user_agent.unwrap_or(DEFAULT_USER_AGENT))
+        .redirect(if follow_redirects {
+            redirect::Policy::limited(MAX_REDIRECTS)
+        } else {
+            redirect::Policy::none()
+        })
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(Duration::from_secs(30))
-        .build()?)
 }
 
 /// `GET url` with `spec`'s referer, user agent and cookies plus `extra`

@@ -77,6 +77,7 @@ fn spec(exe: &Path, dir: &Path, url: &str) -> RunSpec {
         request: RequestContext::default(),
         cookie_file: None,
         limit_rate: None,
+        proxy: None,
     }
 }
 

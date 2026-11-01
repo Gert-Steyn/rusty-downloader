@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { downloads } from '#lib/downloads.svelte.js';
+	import { network } from '#lib/network.svelte.js';
 	import {
 		CHECKSUM_LABELS,
 		STATUS_LABELS,
@@ -85,6 +86,10 @@
 			</dd>
 			<dt>Package</dt>
 			<dd>{pkg.name}</dd>
+			{#if download.proxy.mode !== 'auto'}
+				<dt>Connection</dt>
+				<dd>{download.proxy.mode === 'direct' ? 'Direct' : `Through ${network.choiceLabel(download.proxy)}`}</dd>
+			{/if}
 			{#if download.ytdlp}
 				<dt>Format</dt>
 				<dd>{presetLabel(download.ytdlp)} · yt-dlp</dd>

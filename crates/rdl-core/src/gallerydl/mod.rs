@@ -44,6 +44,7 @@ pub async fn resolve(
     exe: &Path,
     url: &Url,
     request: &RequestContext,
+    proxy: Option<&str>,
     cancel: &CancellationToken,
 ) -> Result<Resolved> {
     let cookies = CookieFile::create(request)?;
@@ -54,6 +55,7 @@ pub async fn resolve(
             cookies.as_ref().map(CookieFile::path),
             &GalleryDlOptions::default(),
         ))
+        .args(proxy.map(|url| ["--proxy", url]).into_iter().flatten())
         .args(["-j", "--range"])
         .arg(format!("1-{RESOLVE_LIMIT}"))
         .arg("--")
@@ -167,6 +169,8 @@ pub struct RunSpec {
     pub cookie_file: Option<PathBuf>,
     /// Bytes per second (`--limit-rate`), unless the options set their own.
     pub limit_rate: Option<u64>,
+    /// Proxy URL with its login (`--proxy`), unless the options set their own.
+    pub proxy: Option<String>,
 }
 
 impl RunSpec {
@@ -194,6 +198,11 @@ impl RunSpec {
             && !self.options.is_set("limit-rate")
         {
             args.extend(["--limit-rate".into(), rate.to_string()]);
+        }
+        if let Some(proxy) = &self.proxy
+            && !self.options.is_set("proxy")
+        {
+            args.extend(["--proxy".into(), proxy.clone()]);
         }
         args.push("--".into());
         args.push(self.url.to_string());
@@ -365,6 +374,7 @@ mod tests {
             request: RequestContext::default(),
             cookie_file: None,
             limit_rate: None,
+            proxy: None,
         };
         let args = spec.args().unwrap();
         assert!(!args.iter().any(|a| a == "--cookies" || a == "--user-agent"));
@@ -387,6 +397,19 @@ mod tests {
         assert_eq!(args.iter().filter(|a| *a == "--limit-rate").count(), 1);
         assert_eq!(after(&args, "--limit-rate"), "2M");
         spec.options.flags.clear();
+
+        spec.proxy = Some("http://proxy.lan:3128".into());
+        let args = spec.args().unwrap();
+        assert_eq!(after(&args, "--proxy"), "http://proxy.lan:3128");
+        // So does a proxy of its own.
+        spec.options
+            .flags
+            .insert("proxy".into(), "socks5://other:1080".into());
+        let args = spec.args().unwrap();
+        assert_eq!(args.iter().filter(|a| *a == "--proxy").count(), 1);
+        assert_eq!(after(&args, "--proxy"), "socks5://other:1080");
+        spec.options.flags.clear();
+        spec.proxy = None;
 
         spec.options.archive = false;
         spec.options.user_config = true;

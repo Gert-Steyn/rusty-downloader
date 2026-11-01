@@ -6,6 +6,7 @@ use url::Url;
 use super::queues::OnComplete;
 use crate::checksum::Checksum;
 use crate::gallerydl::GalleryDlOptions;
+use crate::proxy::ProxyChoice;
 use crate::request::RequestContext;
 use crate::ytdlp::YtDlpOptions;
 
@@ -112,6 +113,8 @@ pub struct NewDownload {
     pub size: Option<u64>,
     /// Referer, user agent and cookies to send, from the browser.
     pub request: RequestContext,
+    /// Which connection to use.
+    pub proxy: ProxyChoice,
 }
 
 impl NewDownload {
@@ -126,6 +129,7 @@ impl NewDownload {
             files_total: None,
             size: None,
             request: RequestContext::default(),
+            proxy: ProxyChoice::Auto,
         }
     }
 }
@@ -163,6 +167,8 @@ pub struct Download {
     pub speed_limit: Option<u64>,
     /// The expected checksum, and whether the file matched it.
     pub checksum: Option<Checksum>,
+    /// Which connection it uses.
+    pub proxy: ProxyChoice,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -225,6 +231,11 @@ pub enum Event {
     ChecksumChanged {
         download_id: DownloadId,
         checksum: Option<Checksum>,
+    },
+    /// A download's connection choice changed.
+    ProxyChanged {
+        download_id: DownloadId,
+        proxy: ProxyChoice,
     },
     /// Name, size and destination are known after the first probe.
     Resolved {

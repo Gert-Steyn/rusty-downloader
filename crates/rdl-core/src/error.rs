@@ -70,6 +70,9 @@ pub enum Error {
         actual: String,
     },
 
+    #[error("Credential Manager: {0}")]
+    Secrets(String),
+
     #[error("canceled")]
     Canceled,
 }

@@ -5,6 +5,8 @@ use rdl_core::http::SegmentConfig;
 use rdl_core::linkgrabber::LinkGrabber;
 use rdl_core::logging::{self, WorkerGuard};
 use rdl_core::manager::{DEFAULT_QUEUE, Manager as DownloadManager, ManagerConfig};
+use rdl_core::network::Network;
+use rdl_core::secrets::{CredentialManager, MemorySecrets, Secrets};
 use rdl_core::settings::Settings;
 use rdl_core::tools::{Tools, ToolsConfig};
 use rdl_core::{db, paths::AppPaths};
@@ -18,6 +20,8 @@ pub struct AppState {
     pub downloads: DownloadManager,
     pub grabber: LinkGrabber,
     pub tools: Tools,
+    /// Proxies and the rules picking them, shared by everything that connects.
+    pub network: Network,
     /// Stops background work (tool update checks) on exit.
     pub shutdown: CancellationToken,
     /// The saved preferences, as last applied.
@@ -41,9 +45,17 @@ impl AppState {
         let db = db::open(&paths.db_file).await?;
         tracing::info!(schema = db::schema_version(&db).await?, "database ready");
         let settings = Settings::load(&db).await?;
+        let network = Network::load(db.clone(), secret_store(), None).await?;
 
-        let tools =
-            Tools::start(db.clone(), paths.tools_dir.clone(), ToolsConfig::default()).await?;
+        let tools = Tools::start(
+            db.clone(),
+            paths.tools_dir.clone(),
+            ToolsConfig {
+                network: Some(network.clone()),
+                ..ToolsConfig::default()
+            },
+        )
+        .await?;
         let shutdown = CancellationToken::new();
         tools.spawn_background_checks(shutdown.clone());
         let downloads = DownloadManager::start(
@@ -51,6 +63,7 @@ impl AppState {
             ManagerConfig {
                 tools: Some(tools.clone()),
                 archives_dir: Some(paths.archives_dir.clone()),
+                network: Some(network.clone()),
                 segment: SegmentConfig {
                     max_connections: settings.max_connections as usize,
                     ..SegmentConfig::default()
@@ -59,7 +72,8 @@ impl AppState {
             },
         )
         .await?;
-        let grabber = LinkGrabber::start(db.clone(), None, Some(tools.clone())).await?;
+        let grabber =
+            LinkGrabber::start(db.clone(), Some(network.clone()), Some(tools.clone())).await?;
 
         let state = Self {
             paths,
@@ -67,6 +81,7 @@ impl AppState {
             downloads,
             grabber,
             tools,
+            network,
             shutdown,
             settings: RwLock::new(settings.clone()),
             _log_guard: log_guard,
@@ -119,5 +134,17 @@ impl AppState {
             return Ok(dir.clone());
         }
         app.path().download_dir().map_err(|e| e.to_string())
+    }
+}
+
+/// Windows Credential Manager for proxy passwords; if it can't be opened,
+/// passwords last only until the app closes (and saved ones can't be read).
+fn secret_store() -> std::sync::Arc<dyn Secrets> {
+    match CredentialManager::new() {
+        Ok(store) => store,
+        Err(e) => {
+            tracing::error!(error = %e, "Credential Manager unavailable; passwords won't be kept");
+            MemorySecrets::new()
+        }
     }
 }
