@@ -1,9 +1,13 @@
 // Proxy profiles and the rules that pick them (Settings → Network, and the
-// download menu's "Connection…"). Read on demand; every change re-reads.
+// download menu's "Connection…"), read on demand; and the adapter all
+// connections are bound to, whose state the backend reports as it changes.
 import {
 	commands,
+	events,
 	isTauri,
 	unwrap,
+	type AdapterInfo,
+	type NetworkStatus,
 	type ProxyChoice,
 	type ProxyInput,
 	type ProxyProfile,
@@ -17,6 +21,28 @@ class NetworkStore {
 	settings = $state<ProxySettings>({ default: null, rules: [] });
 	error = $state<string | null>(null);
 	loaded = $state(false);
+	/** The bound adapter's state, for the status bar and Settings. */
+	status = $state<NetworkStatus>({ state: 'any' });
+	adapters = $state<AdapterInfo[]>([]);
+	#started = false;
+
+	/** Follow the bound adapter's state (once, from the layout). */
+	async start() {
+		if (this.#started || !isTauri()) return;
+		this.#started = true;
+		await events.networkStatusChanged.listen((e) => (this.status = e.payload.status));
+		this.status = await unwrap(commands.networkStatus());
+	}
+
+	/** The adapters on this machine, asked again each time. */
+	async loadAdapters() {
+		if (!isTauri()) return;
+		try {
+			this.adapters = await unwrap(commands.networkAdapters());
+		} catch (e) {
+			this.error = String(e);
+		}
+	}
 
 	async load() {
 		if (!isTauri()) {

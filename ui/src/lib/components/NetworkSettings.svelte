@@ -1,8 +1,23 @@
 <script lang="ts">
-	// Settings → Network: proxy profiles, the default, and per-site rules.
+	// Settings → Network: the adapter every connection goes through (and the
+	// kill-switch), proxy profiles, the default, and per-site rules.
 	import type { ProxySettings } from '#lib/api.js';
 	import { KIND_LABELS, network } from '#lib/network.svelte.js';
+	import { settings } from '#lib/settings.svelte.js';
 	import ProxyDialog from './ProxyDialog.svelte';
+
+	const bound = $derived(settings.value?.bindAdapter ?? null);
+	/** The chosen adapter even when it's gone from the list (unplugged, VPN removed). */
+	const adapterChoices = $derived(
+		bound && !network.adapters.some((a) => a.id === bound.id)
+			? [...network.adapters, { id: bound.id, name: bound.name, description: '', address: null, missing: true }]
+			: network.adapters
+	);
+
+	function bindTo(id: string) {
+		const adapter = adapterChoices.find((a) => a.id === id);
+		void settings.update({ bindAdapter: adapter ? { id: adapter.id, name: adapter.name } : null });
+	}
 
 	let editing = $state<number | null>(null);
 	let dialogOpen = $state(false);
@@ -11,6 +26,7 @@
 
 	$effect(() => {
 		void network.load();
+		void network.loadAdapters();
 	});
 
 	function edit(id: number | null) {
@@ -54,6 +70,51 @@
 <section class="card" aria-labelledby="set-network">
 	<h2 id="set-network">Network</h2>
 	{#if network.error}<p class="error-text">{network.error}</p>{/if}
+
+	<h3>Adapter</h3>
+	<div class="rule">
+		<select
+			class="select adapter"
+			aria-label="Send everything through"
+			value={bound?.id ?? ''}
+			onchange={(e) => bindTo(e.currentTarget.value)}
+		>
+			<option value="">Any connection (Windows decides)</option>
+			{#each adapterChoices as a (a.id)}
+				<option value={a.id}>
+					{a.name} · {'missing' in a ? 'not found' : (a.address ?? 'not connected')}
+				</option>
+			{/each}
+		</select>
+		<button type="button" class="btn" onclick={() => network.loadAdapters()}>Refresh</button>
+	</div>
+	{#if bound}
+		{@const s = network.status}
+		<p class="state" class:ok={s.state === 'up'} class:bad={s.state === 'down'}>
+			{#if s.state === 'up'}
+				Connected: everything goes out from {s.address}.
+			{:else if s.state === 'down'}
+				{s.adapter} is down: nothing connects{s.held ? ', and downloads wait for it' : ''}.
+			{:else}
+				Checking…
+			{/if}
+		</p>
+		<label class="check">
+			<input
+				type="checkbox"
+				checked={settings.value?.killSwitch ?? true}
+				onchange={(e) => settings.update({ killSwitch: e.currentTarget.checked })}
+			/>
+			<span>
+				Pause downloads while it's down
+				<small>They stop with their progress kept and carry on by themselves when it's back. Off, they fail instead.</small>
+			</span>
+		</label>
+	{/if}
+	<small>
+		With an adapter chosen, every connection (downloads, link checks, yt-dlp, gallery-dl, tool updates) goes out
+		through it, also to a proxy; while it's down, none go out at all.
+	</small>
 
 	<h3>Proxies</h3>
 	{#if network.profiles.length === 0}
@@ -233,5 +294,32 @@
 	}
 	.error-text {
 		margin: 0;
+	}
+	.adapter {
+		min-width: 320px;
+	}
+	.state {
+		margin: 0;
+		font-size: 13px;
+	}
+	.state.ok {
+		color: var(--success);
+	}
+	.state.bad {
+		color: var(--critical);
+	}
+	.check {
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+		font-size: 13px;
+	}
+	.check input {
+		margin-top: 2px;
+	}
+	.check span {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
 	}
 </style>

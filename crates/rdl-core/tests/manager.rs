@@ -37,6 +37,7 @@ fn config() -> ManagerConfig {
         tools: None,
         archives_dir: None,
         network: None,
+        hold: None,
     }
 }
 

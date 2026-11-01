@@ -101,9 +101,9 @@ pub(super) async fn lookup(inner: &Inner, url: &Url, request: &RequestContext) -
             return Ok(Lookup::NotMedia);
         }
     };
-    let proxy = inner.network.tool_proxy(url, ProxyChoice::Auto);
+    let connection = inner.network.tool_connection(url, ProxyChoice::Auto)?;
     let cancel = CancellationToken::new();
-    match ytdlp::resolve(&exe, url, request, proxy.as_deref(), &cancel).await {
+    match ytdlp::resolve(&exe, url, request, &connection, &cancel).await {
         Ok(media) => Ok(Lookup::Found(media)),
         Err(Error::Tool(message)) if is_unsupported(&message) => Ok(Lookup::NotMedia),
         Err(Error::Tool(message)) => Ok(Lookup::Failed(message)),

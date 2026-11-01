@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{RwLock, RwLockReadGuard};
 
+use rdl_core::adapters;
 use rdl_core::http::SegmentConfig;
 use rdl_core::linkgrabber::LinkGrabber;
 use rdl_core::logging::{self, WorkerGuard};
@@ -11,7 +12,10 @@ use rdl_core::settings::Settings;
 use rdl_core::tools::{Tools, ToolsConfig};
 use rdl_core::{db, paths::AppPaths};
 use tauri::{AppHandle, Manager};
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
+
+use crate::network_watch::{self, NetworkStatus};
 
 /// Long-lived services shared by all commands.
 pub struct AppState {
@@ -22,6 +26,10 @@ pub struct AppState {
     pub tools: Tools,
     /// Proxies and the rules picking them, shared by everything that connects.
     pub network: Network,
+    /// Wakes the adapter watcher, after the settings changed.
+    pub network_check: Notify,
+    /// What the adapter watcher found last.
+    network_status: RwLock<NetworkStatus>,
     /// Stops background work (tool update checks) on exit.
     pub shutdown: CancellationToken,
     /// The saved preferences, as last applied.
@@ -46,6 +54,9 @@ impl AppState {
         tracing::info!(schema = db::schema_version(&db).await?, "database ready");
         let settings = Settings::load(&db).await?;
         let network = Network::load(db.clone(), secret_store(), None).await?;
+        // Bound and held as the settings say before anything can connect.
+        let wanted = network_watch::wanted(&settings, &adapters::list());
+        network.set_binding(wanted.binding.clone());
 
         let tools = Tools::start(
             db.clone(),
@@ -64,6 +75,7 @@ impl AppState {
                 tools: Some(tools.clone()),
                 archives_dir: Some(paths.archives_dir.clone()),
                 network: Some(network.clone()),
+                hold: wanted.hold.clone(),
                 segment: SegmentConfig {
                     max_connections: settings.max_connections as usize,
                     ..SegmentConfig::default()
@@ -82,6 +94,8 @@ impl AppState {
             grabber,
             tools,
             network,
+            network_check: Notify::new(),
+            network_status: RwLock::new(wanted.status),
             shutdown,
             settings: RwLock::new(settings.clone()),
             _log_guard: log_guard,
@@ -100,6 +114,7 @@ impl AppState {
         new.save(&self.db).await?;
         self.apply(&new).await?;
         *self.settings.write().unwrap_or_else(|e| e.into_inner()) = new.clone();
+        self.network_check.notify_one();
         tracing::info!(?new, "settings saved");
         Ok(new)
     }
@@ -115,6 +130,24 @@ impl AppState {
         self.downloads
             .set_speed_limit(settings.active_speed_limit_now().limit);
         Ok(())
+    }
+
+    pub fn network_status(&self) -> NetworkStatus {
+        self.network_status
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Record what the adapter watcher found; returns what it was before.
+    pub fn set_network_status(&self, status: NetworkStatus) -> NetworkStatus {
+        std::mem::replace(
+            &mut *self
+                .network_status
+                .write()
+                .unwrap_or_else(|e| e.into_inner()),
+            status,
+        )
     }
 
     pub fn clipboard_watch(&self) -> bool {

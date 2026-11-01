@@ -6,6 +6,7 @@ mod grabber_commands;
 mod keep_awake;
 mod native_host;
 mod network_commands;
+mod network_watch;
 mod notify;
 mod on_complete;
 mod queue_commands;
@@ -82,6 +83,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             network_commands::proxy_remove,
             network_commands::proxy_set_settings,
             network_commands::proxy_test,
+            network_watch::network_adapters,
+            network_watch::network_status,
             queue_commands::list_queues,
             queue_commands::add_queue,
             queue_commands::update_queue,
@@ -96,7 +99,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::ToolEvents,
             clipboard::ClipboardOffer,
             speed::SpeedLimitStatus,
-            on_complete::OnCompleteCountdown
+            on_complete::OnCompleteCountdown,
+            network_watch::NetworkStatusChanged
         ])
         // Sizes and ids are far below 2^53, so plain numbers are safe in JS.
         .dangerously_cast_bigints_to_number()
@@ -178,6 +182,7 @@ pub fn run() {
             tauri::async_runtime::spawn(clipboard::watch(handle.clone()));
             bridge::start(handle);
             tauri::async_runtime::spawn(keep_awake::watch(handle.clone()));
+            tauri::async_runtime::spawn(network_watch::watch(handle.clone()));
             tauri::async_runtime::spawn(speed::follow_schedule(handle.clone()));
             tauri::async_runtime::spawn(on_complete::watch(handle.clone(), finished_events));
             Ok(())

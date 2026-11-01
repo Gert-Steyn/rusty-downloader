@@ -34,9 +34,9 @@ pub(super) async fn resolve_link(
             return Ok(Verdict::NotMedia);
         }
     };
-    let proxy = inner.network.tool_proxy(url, ProxyChoice::Auto);
+    let connection = inner.network.tool_connection(url, ProxyChoice::Auto)?;
     let cancel = CancellationToken::new();
-    let resolved = match gallerydl::resolve(&exe, url, request, proxy.as_deref(), &cancel).await {
+    let resolved = match gallerydl::resolve(&exe, url, request, &connection, &cancel).await {
         Ok(r) => r,
         Err(Error::Tool(message)) if gallerydl::is_unsupported(&message) => {
             return Ok(Verdict::NotMedia);

@@ -17,6 +17,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
+use crate::network::ToolConnection;
 use crate::process::{self, Line, Running};
 use crate::request::{CookieFile, RequestContext};
 use crate::{Error, Result};
@@ -53,7 +54,7 @@ pub async fn resolve(
     exe: &Path,
     url: &Url,
     request: &RequestContext,
-    proxy: Option<&str>,
+    connection: &ToolConnection,
     cancel: &CancellationToken,
 ) -> Result<Media> {
     let cookies = CookieFile::create(request)?;
@@ -63,7 +64,7 @@ pub async fn resolve(
             request,
             cookies.as_ref().map(CookieFile::path),
         ))
-        .args(proxy_args(proxy))
+        .args(connection.args())
         .args(["-J", "--flat-playlist", "--"])
         .arg(url.as_str());
     let out = process::output(cmd, RESOLVE_TIMEOUT, cancel).await?;
@@ -71,12 +72,6 @@ pub async fn resolve(
         return Err(Error::Tool(out.error_message()));
     }
     parse::media(&out.stdout)
-}
-
-fn proxy_args(proxy: Option<&str>) -> Vec<String> {
-    proxy
-        .map(|url| vec!["--proxy".into(), url.into()])
-        .unwrap_or_default()
 }
 
 /// Referer, user agent and cookies (a `cookies.txt` at `cookies`) as yt-dlp
@@ -112,8 +107,8 @@ pub struct RunSpec {
     pub cookie_file: Option<PathBuf>,
     /// Bytes per second (`--limit-rate`); fixed for the run.
     pub limit_rate: Option<u64>,
-    /// Proxy URL with its login (`--proxy`); `None` connects directly.
-    pub proxy: Option<String>,
+    /// Proxy and source address (`--proxy`, `--source-address`).
+    pub connection: ToolConnection,
 }
 
 impl RunSpec {
@@ -155,7 +150,7 @@ impl RunSpec {
         if let Some(rate) = self.limit_rate {
             args.extend(["--limit-rate".into(), rate.to_string()]);
         }
-        args.extend(proxy_args(self.proxy.as_deref()));
+        args.extend(self.connection.args());
         args.push("--".into());
         args.push(self.url.to_string());
         args
@@ -408,7 +403,7 @@ mod tests {
             request: RequestContext::default(),
             cookie_file: None,
             limit_rate: None,
-            proxy: None,
+            connection: ToolConnection::default(),
         };
         let args = spec.args();
         assert!(!args.iter().any(|a| a == "--cookies" || a == "--add-header"));
@@ -439,7 +434,10 @@ mod tests {
             },
             cookie_file: Some(r"C:\tmp\c.txt".into()),
             limit_rate: Some(1_048_576),
-            proxy: Some("socks5h://u:p@proxy.lan:1080".into()),
+            connection: ToolConnection {
+                proxy: Some("socks5h://u:p@proxy.lan:1080".into()),
+                source_address: Some("10.64.0.2".parse().unwrap()),
+            },
         };
         let args = spec.args();
         let joined = args.join(" ");
@@ -448,6 +446,7 @@ mod tests {
         assert!(joined.contains(r"--cookies C:\tmp\c.txt"));
         assert!(joined.contains("--limit-rate 1048576"));
         assert!(joined.contains("--proxy socks5h://u:p@proxy.lan:1080"));
+        assert!(joined.contains("--source-address 10.64.0.2"));
         assert_eq!(args[args.len() - 2], "--");
     }
 

@@ -40,7 +40,7 @@ async fn installs_real_tools_and_resolves() {
         &exe,
         &Url::parse(VIDEO).unwrap(),
         &RequestContext::default(),
-        None,
+        &Default::default(),
         &CancellationToken::new(),
     )
     .await
@@ -73,7 +73,7 @@ async fn downloads_real_video() {
         request: RequestContext::default(),
         cookie_file: None,
         limit_rate: None,
-        proxy: None,
+        connection: Default::default(),
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let printer = tokio::spawn(async move {
@@ -220,7 +220,7 @@ async fn gallery_dl_resolves_and_downloads_a_real_gallery() {
         &exe,
         &url,
         &RequestContext::default(),
-        None,
+        &Default::default(),
         &CancellationToken::new(),
     )
     .await
@@ -247,7 +247,7 @@ async fn gallery_dl_resolves_and_downloads_a_real_gallery() {
         request: RequestContext::default(),
         cookie_file: None,
         limit_rate: None,
-        proxy: None,
+        connection: Default::default(),
     };
     println!("args: {:?}", spec.args().unwrap());
     for run in 1..=2 {

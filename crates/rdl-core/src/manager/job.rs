@@ -292,9 +292,12 @@ async fn finalize(
                 store::save_segments(pool, id, &progress.segments).await?;
             }
             let status = match reason {
-                Some(StopReason::Shutdown | StopReason::Requeue | StopReason::ScheduleClosed) => {
-                    Status::Queued
-                }
+                Some(
+                    StopReason::Shutdown
+                    | StopReason::Requeue
+                    | StopReason::ScheduleClosed
+                    | StopReason::NetworkHeld,
+                ) => Status::Queued,
                 _ => Status::Paused,
             };
             store::set_status(pool, id, status, None).await?;

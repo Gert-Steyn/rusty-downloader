@@ -78,7 +78,7 @@ pub(super) async fn execute(
         size: row.size.map(|s| s as u64),
     });
 
-    let proxy = inner.network.tool_proxy(&url, row.proxy());
+    let connection = inner.network.tool_connection(&url, row.proxy())?;
     let spec = RunSpec {
         exe,
         ffmpeg_dir,
@@ -94,7 +94,7 @@ pub(super) async fn execute(
         request: row.request(),
         cookie_file: None,
         limit_rate: inner.tool_rate(row.speed_limit()),
-        proxy,
+        connection,
     };
     let (tx, rx) = mpsc::unbounded_channel();
     let total = row.files_total.map(|t| t as u32);

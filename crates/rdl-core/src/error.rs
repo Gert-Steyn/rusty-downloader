@@ -70,6 +70,9 @@ pub enum Error {
         actual: String,
     },
 
+    #[error("the network adapter for downloads ({0}) is down")]
+    NetworkDown(String),
+
     #[error("Credential Manager: {0}")]
     Secrets(String),
 

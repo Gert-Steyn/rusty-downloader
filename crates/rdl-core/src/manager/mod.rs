@@ -55,6 +55,9 @@ pub struct ManagerConfig {
     pub archives_dir: Option<PathBuf>,
     /// Proxies; `None` connects directly.
     pub network: Option<Network>,
+    /// Start held (see [`Manager::set_network_hold`]), so nothing slips out
+    /// before the app has checked the bound adapter.
+    pub hold: Option<String>,
 }
 
 impl Default for ManagerConfig {
@@ -67,6 +70,7 @@ impl Default for ManagerConfig {
             tools: None,
             archives_dir: None,
             network: None,
+            hold: None,
         }
     }
 }
@@ -94,6 +98,8 @@ struct Inner {
     global_limit: Arc<RateLimiter>,
     /// Queues where a download completed or failed since the queue last finished.
     ended_in: Mutex<HashSet<QueueId>>,
+    /// Why nothing may download now (the bound adapter is down); `None` when free.
+    hold: Mutex<Option<String>>,
 }
 
 struct RunningJob {
@@ -115,6 +121,9 @@ enum StopReason {
     Shutdown,
     /// Its queue's schedule window closed: queue it for the next window.
     ScheduleClosed,
+    /// The network is held (the VPN went down or changed): queue it to
+    /// start again once it's released.
+    NetworkHeld,
     Remove,
 }
 
@@ -195,6 +204,7 @@ impl Manager {
         // Tool runs that were killed with the app left their cookies behind.
         tokio::task::spawn_blocking(crate::request::sweep_cookie_files);
         let (events, _) = broadcast::channel(1024);
+        let hold = config.hold.clone();
         let inner = Arc::new(Inner {
             max_connections: AtomicUsize::new(config.segment.max_connections),
             network: config
@@ -210,6 +220,7 @@ impl Manager {
             shutdown: CancellationToken::new(),
             global_limit: Arc::new(RateLimiter::new(None)),
             ended_in: Mutex::new(HashSet::new()),
+            hold: Mutex::new(hold),
         });
         tokio::spawn(scheduler(Arc::clone(&inner)));
         Ok(Self { inner })
@@ -391,6 +402,42 @@ impl Manager {
             .emit(Event::PackagesReordered { queue_id: queue });
         self.inner.wake.notify_one();
         Ok(())
+    }
+
+    /// Hold all downloads (`Some(reason)`): running ones stop and wait in
+    /// their queues with their progress kept, and nothing starts until the
+    /// hold is released (`None`), when they carry on by themselves.
+    pub fn set_network_hold(&self, reason: Option<String>) {
+        let mut hold = self.inner.hold.lock().unwrap_or_else(|e| e.into_inner());
+        if *hold == reason {
+            return;
+        }
+        match &reason {
+            Some(why) => tracing::warn!(reason = %why, "holding all downloads"),
+            None => tracing::info!("downloads may run again"),
+        }
+        *hold = reason;
+        drop(hold);
+        self.inner.wake.notify_one();
+    }
+
+    /// Why downloads are held, if they are.
+    pub fn network_hold(&self) -> Option<String> {
+        self.inner
+            .hold
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Stop every running download and queue it again, so it reconnects
+    /// (after the bound adapter's address changed). Progress is kept.
+    pub fn restart_running(&self) {
+        let ids: Vec<DownloadId> = self.inner.running().keys().copied().collect();
+        for id in ids {
+            self.inner.stop_if_undisturbed(id, StopReason::NetworkHeld);
+        }
+        self.inner.wake.notify_one();
     }
 
     /// Downloads running right now (including ones that are stopping).
@@ -638,6 +685,21 @@ async fn scheduler(inner: Arc<Inner>) {
 /// One pass over the queues: stop what runs in a queue whose window has
 /// closed, fill free slots in open ones, and report queues that finished.
 async fn schedule_once(inner: &Arc<Inner>) -> Result<()> {
+    let held = inner
+        .hold
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some();
+    if held {
+        // Nothing starts, and nothing counts as finished, while held.
+        let ids: Vec<DownloadId> = inner.running().keys().copied().collect();
+        for id in ids {
+            if inner.stop_if_undisturbed(id, StopReason::NetworkHeld) {
+                tracing::info!(download = id, "network held; stopping");
+            }
+        }
+        return Ok(());
+    }
     let now = chrono::Local::now().naive_local();
     for queue in store::queues(&inner.pool).await? {
         if inner.shutdown.is_cancelled() {

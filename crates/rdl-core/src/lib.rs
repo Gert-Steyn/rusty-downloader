@@ -2,6 +2,7 @@
 //! native-messaging host and remote server) depend on this crate; it never
 //! depends on Tauri.
 
+pub mod adapters;
 pub mod checksum;
 pub mod db;
 pub mod error;

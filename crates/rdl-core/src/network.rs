@@ -1,10 +1,14 @@
 //! Which connection a request takes: directly, or through the proxy a
-//! download chose or the rules pick for its site (see [`crate::proxy`]).
-//! One HTTP client per proxy is kept and reused; changing the profiles or
-//! rules drops them, so new requests use the new settings while running
-//! ones finish on their old connection.
+//! download chose or the rules pick for its site (see [`crate::proxy`]),
+//! and from which local address when everything is bound to one adapter
+//! (a VPN's; see [`crate::adapters`]). One HTTP client per proxy is kept and
+//! reused; changing the profiles, rules or binding drops them, so new
+//! requests use the new settings while running ones finish on their old
+//! connection. While the bound adapter is down nothing connects at all,
+//! so nothing slips around the VPN.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
@@ -23,6 +27,40 @@ pub struct ProxyRoute {
     pub name: String,
     /// With the login, for reqwest and the tools' `--proxy`. Never log it.
     pub url: String,
+}
+
+/// Where connections are sent from.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Binding {
+    /// Wherever Windows routes them.
+    #[default]
+    Any,
+    /// From this address, so through the adapter that has it.
+    Bound(IpAddr),
+    /// The chosen adapter (named) is down: no connections at all.
+    Down(String),
+}
+
+/// How yt-dlp and gallery-dl connect: `--proxy` and `--source-address`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolConnection {
+    /// Proxy URL with its login. Never log it.
+    pub proxy: Option<String>,
+    pub source_address: Option<IpAddr>,
+}
+
+impl ToolConnection {
+    /// The options for both tools (they spell them the same).
+    pub fn args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        if let Some(proxy) = &self.proxy {
+            args.extend(["--proxy".into(), proxy.clone()]);
+        }
+        if let Some(ip) = self.source_address {
+            args.extend(["--source-address".into(), ip.to_string()]);
+        }
+        args
+    }
 }
 
 /// Cheap to clone; all clones share the same settings and clients.
@@ -48,6 +86,7 @@ struct Inner {
     secrets: Arc<dyn Secrets>,
     user_agent: Option<String>,
     state: RwLock<State>,
+    binding: RwLock<Binding>,
     /// By proxy URL (`None`: direct) and whether redirects are followed.
     clients: Mutex<HashMap<(Option<String>, bool), Client>>,
 }
@@ -85,6 +124,7 @@ impl Network {
                 secrets,
                 user_agent: user_agent.map(str::to_owned),
                 state: RwLock::new(State::default()),
+                binding: RwLock::new(Binding::Any),
                 clients: Mutex::new(HashMap::new()),
             }),
         }
@@ -155,9 +195,52 @@ impl Network {
         })
     }
 
-    /// The proxy URL for yt-dlp's and gallery-dl's `--proxy`.
-    pub fn tool_proxy(&self, url: &Url, choice: ProxyChoice) -> Option<String> {
-        self.route(url, choice).map(|r| r.url)
+    pub fn binding(&self) -> Binding {
+        self.inner
+            .binding
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Send connections from somewhere else from now on. Returns whether
+    /// that changed anything; if so, the cached clients are dropped.
+    pub fn set_binding(&self, binding: Binding) -> bool {
+        let mut current = self
+            .inner
+            .binding
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        if *current == binding {
+            return false;
+        }
+        tracing::info!(from = ?*current, to = ?binding, "network binding changed");
+        *current = binding;
+        drop(current);
+        self.inner
+            .clients
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        true
+    }
+
+    /// The address to send from; an error while the bound adapter is down.
+    fn local_address(&self) -> Result<Option<IpAddr>> {
+        match self.binding() {
+            Binding::Any => Ok(None),
+            Binding::Bound(ip) => Ok(Some(ip)),
+            Binding::Down(adapter) => Err(Error::NetworkDown(adapter)),
+        }
+    }
+
+    /// How yt-dlp or gallery-dl should connect for `url`; an error while
+    /// the bound adapter is down.
+    pub fn tool_connection(&self, url: &Url, choice: ProxyChoice) -> Result<ToolConnection> {
+        Ok(ToolConnection {
+            source_address: self.local_address()?,
+            proxy: self.route(url, choice).map(|r| r.url),
+        })
     }
 
     /// Client for downloads and link checks to `url`: redirects are left
@@ -172,12 +255,14 @@ impl Network {
     }
 
     fn client_via(&self, route: Option<ProxyRoute>, follow: bool) -> Result<Client> {
+        let local = self.local_address()?;
         let key = (route.map(|r| r.url), follow);
         let mut clients = self.inner.clients.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(client) = clients.get(&key) {
             return Ok(client.clone());
         }
-        let mut builder = http::builder(self.inner.user_agent.as_deref(), follow);
+        let mut builder =
+            http::builder(self.inner.user_agent.as_deref(), follow).local_address(local);
         if let Some(url) = &key.0 {
             builder = builder.proxy(reqwest::Proxy::all(url)?);
         }

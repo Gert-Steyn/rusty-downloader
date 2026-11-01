@@ -100,6 +100,9 @@ export const commands = {
 	 *  check); returns how long the answer took in milliseconds.
 	 */
 	proxyTest: (choice: ProxyChoice, url: string | null) => typedError<number, CommandError>(__TAURI_INVOKE("proxy_test", { choice, url })),
+	/**  Network adapters on this machine, for choosing one. */
+	networkAdapters: () => typedError<AdapterInfo_Serialize[], CommandError>(__TAURI_INVOKE("network_adapters")),
+	networkStatus: () => typedError<NetworkStatus, CommandError>(__TAURI_INVOKE("network_status")),
 	listQueues: () => typedError<Queue_Serialize[], CommandError>(__TAURI_INVOKE("list_queues")),
 	addQueue: (name: string) => typedError<number, CommandError>(__TAURI_INVOKE("add_queue", { name })),
 	/**
@@ -120,6 +123,7 @@ export const events = {
 	clipboardOffer: makeEvent<ClipboardOffer, ClipboardOffer>("clipboard-offer"),
 	downloadEvents: makeEvent<DownloadEvents_Serialize, DownloadEvents_Deserialize>("download-events"),
 	grabberEvents: makeEvent<GrabberEvents_Serialize, GrabberEvents_Deserialize>("grabber-events"),
+	networkStatusChanged: makeEvent<NetworkStatusChanged, NetworkStatusChanged>("network-status-changed"),
 	onCompleteCountdown: makeEvent<OnCompleteCountdown_Serialize, OnCompleteCountdown_Deserialize>("on-complete-countdown"),
 	speedLimitStatus: makeEvent<SpeedLimitStatus_Serialize, SpeedLimitStatus_Deserialize>("speed-limit-status"),
 	toolEvents: makeEvent<ToolEvents_Serialize, ToolEvents_Deserialize>("tool-events"),
@@ -145,6 +149,33 @@ export type ActiveLimit_Serialize = {
 	source: LimitSource,
 	/**  For a scheduled limit, when its window ends (`HH:MM`). */
 	until: string | null,
+};
+
+/**  An adapter as the UI lists it. */
+export type AdapterInfo = AdapterInfo_Serialize | AdapterInfo_Deserialize;
+
+/**  An adapter as the UI lists it. */
+export type AdapterInfo_Deserialize = {
+	/**  Windows' id for it (a GUID), stable across renames and reboots. */
+	id: string,
+	/**  The name shown in Windows' settings ("Wi-Fi", "Tailscale"). */
+	name: string,
+	/**  The driver's description ("WireGuard Tunnel"). */
+	description: string,
+	/**  The address connections would be sent from; `None` while it's down. */
+	address?: string | null,
+};
+
+/**  An adapter as the UI lists it. */
+export type AdapterInfo_Serialize = {
+	/**  Windows' id for it (a GUID), stable across renames and reboots. */
+	id: string,
+	/**  The name shown in Windows' settings ("Wi-Fi", "Tailscale"). */
+	name: string,
+	/**  The driver's description ("WireGuard Tunnel"). */
+	description: string,
+	/**  The address connections would be sent from; `None` while it's down. */
+	address: string | null,
 };
 
 export type AddLinks = AddLinks_Serialize | AddLinks_Deserialize;
@@ -186,6 +217,12 @@ export type Availability = "unknown" | "checking" | "online" |
 "offline" | 
 /**  The check itself failed (network, timeout, server error); may be temporary. */
 "error";
+
+/**  The adapter chosen in the settings: its id, and its name for when it's gone. */
+export type BoundAdapter = {
+	id: string,
+	name: string,
+};
 
 /**
  *  A download's expected checksum, and whether its file matched it
@@ -730,6 +767,17 @@ export type MediaSummary_Serialize = {
 	isLive: boolean,
 };
 
+/**  What Settings → Network and the status bar show. */
+export type NetworkStatus = 
+/**  No adapter chosen: Windows routes connections. */
+{ state: "any" } | { state: "up"; adapter: string; address: string } | 
+/**  `held`: downloads wait for it (kill-switch); otherwise they fail. */
+{ state: "down"; adapter: string; held: boolean };
+
+export type NetworkStatusChanged = {
+	status: NetworkStatus,
+};
+
 /**  What to do when a queue has finished. Stored as `queues.on_complete_action`. */
 export type OnComplete = "none" | "sleep" | "hibernate" | "shutdown" | 
 /**  Close the app. */
@@ -1005,6 +1053,13 @@ export type Settings_Deserialize = {
 	speedLimit?: number,
 	/**  Limits that apply by themselves at set times, while the switch is off. */
 	speedSchedule?: SpeedRule[],
+	/**  Send every connection through this adapter (a VPN's); `None`: any. */
+	bindAdapter?: BoundAdapter | null,
+	/**
+	 *  While that adapter is down, hold downloads (they carry on when it's
+	 *  back) instead of letting them fail.
+	 */
+	killSwitch?: boolean,
 };
 
 /**  The user's preferences. Missing fields (older saves) get their defaults. */
@@ -1043,6 +1098,13 @@ export type Settings_Serialize = {
 	speedLimit: number,
 	/**  Limits that apply by themselves at set times, while the switch is off. */
 	speedSchedule: SpeedRule[],
+	/**  Send every connection through this adapter (a VPN's); `None`: any. */
+	bindAdapter: BoundAdapter | null,
+	/**
+	 *  While that adapter is down, hold downloads (they carry on when it's
+	 *  back) instead of letting them fail.
+	 */
+	killSwitch: boolean,
 };
 
 /**  What limits the speed now changed. */

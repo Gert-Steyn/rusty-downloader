@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use crate::adapters::BoundAdapter;
 use crate::db::Pool;
 use crate::ratelimit::MIN_RATE;
 use crate::speed::{self, ActiveLimit, SpeedRule};
@@ -57,6 +58,11 @@ pub struct Settings {
     pub speed_limit: u64,
     /// Limits that apply by themselves at set times, while the switch is off.
     pub speed_schedule: Vec<SpeedRule>,
+    /// Send every connection through this adapter (a VPN's); `None`: any.
+    pub bind_adapter: Option<BoundAdapter>,
+    /// While that adapter is down, hold downloads (they carry on when it's
+    /// back) instead of letting them fail.
+    pub kill_switch: bool,
 }
 
 impl Default for Settings {
@@ -78,6 +84,8 @@ impl Default for Settings {
             speed_limit_on: false,
             speed_limit: 2 * 1024 * 1024,
             speed_schedule: Vec::new(),
+            bind_adapter: None,
+            kill_switch: true,
         }
     }
 }

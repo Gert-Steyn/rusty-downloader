@@ -9,6 +9,7 @@
 	import { isLinkDrag, textFromDrop } from '#lib/drop.js';
 	import { formatSpeed } from '#lib/format.js';
 	import { grabber } from '#lib/linkgrabber.svelte.js';
+	import { network } from '#lib/network.svelte.js';
 	import { speed } from '#lib/speed.svelte.js';
 	import { countdown, countdownText } from '#lib/countdown.svelte.js';
 	import { queues } from '#lib/queues.svelte.js';
@@ -30,6 +31,7 @@
 	downloads.start();
 	grabber.start();
 	speed.start();
+	void network.start();
 	queues.start();
 	countdown.start();
 
@@ -146,6 +148,17 @@
 		<span>{downloads.stats.active} active</span>
 		<span>{downloads.stats.queued} queued</span>
 		<span class="spacer"></span>
+		{#if network.status.state === 'down'}
+			<a class="net down" href="/settings" title="Settings → Network">
+				<Icon name="network" size={14} />
+				{network.status.adapter} is down{network.status.held ? ' · downloads paused' : ''}
+			</a>
+		{:else if network.status.state === 'up'}
+			<a class="net" href="/settings" title="All connections go through {network.status.adapter} ({network.status.address})">
+				<Icon name="network" size={14} />
+				Via {network.status.adapter}
+			</a>
+		{/if}
 		<button
 			type="button"
 			class="limit"
@@ -305,6 +318,16 @@
 	}
 	.statusbar .limit.on {
 		color: var(--accent-text-on-layer);
+	}
+	.statusbar .net {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		color: inherit;
+		text-decoration: none;
+	}
+	.statusbar .net.down {
+		color: var(--critical);
 	}
 
 	.badge {

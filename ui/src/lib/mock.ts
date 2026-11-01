@@ -335,7 +335,9 @@ export function settings(): Settings {
 		keepAwake: true,
 		speedLimitOn: false,
 		speedLimit: 2 * 1024 * 1024,
-		speedSchedule: [{ days: [0, 1, 2, 3, 4], from: '08:00', to: '18:00', limit: 1024 * 1024 }]
+		speedSchedule: [{ days: [0, 1, 2, 3, 4], from: '08:00', to: '18:00', limit: 1024 * 1024 }],
+		bindAdapter: null,
+		killSwitch: true
 	};
 }
 
