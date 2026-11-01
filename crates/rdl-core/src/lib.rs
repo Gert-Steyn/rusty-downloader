@@ -7,6 +7,7 @@ pub mod adapters;
 pub mod checksum;
 pub mod db;
 pub mod error;
+pub mod ftp;
 pub mod gallerydl;
 pub mod history;
 pub mod http;

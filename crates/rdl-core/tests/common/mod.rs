@@ -4,6 +4,7 @@
 // Each test binary uses a different subset of these helpers.
 #![allow(dead_code)]
 
+pub mod ftp;
 pub mod proxy;
 
 use std::collections::HashMap;

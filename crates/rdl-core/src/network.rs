@@ -254,7 +254,7 @@ impl Network {
     }
 
     /// The address to send from; an error while the bound adapter is down.
-    fn local_address(&self) -> Result<Option<IpAddr>> {
+    pub fn local_address(&self) -> Result<Option<IpAddr>> {
         match self.binding() {
             Binding::Any => Ok(None),
             Binding::Bound(ip) => Ok(Some(ip)),

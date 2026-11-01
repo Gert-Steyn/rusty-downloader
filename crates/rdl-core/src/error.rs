@@ -73,6 +73,15 @@ pub enum Error {
     #[error("the network adapter for downloads ({0}) is down")]
     NetworkDown(String),
 
+    #[error("FTP connection failed: {0}")]
+    FtpConnection(io::Error),
+
+    #[error("FTP server replied {code}: {message}")]
+    FtpReply { code: u32, message: String },
+
+    #[error("FTP: {0}")]
+    Ftp(String),
+
     #[error("Credential Manager: {0}")]
     Secrets(String),
 
@@ -86,7 +95,9 @@ impl Error {
         match self {
             Error::Http(e) => !e.is_builder() && !e.is_redirect(),
             Error::HttpStatus { status, .. } => matches!(status, 408 | 425 | 429 | 500..=599),
-            Error::Incomplete => true,
+            Error::Incomplete | Error::FtpConnection(_) => true,
+            // 4xx replies are transient ("too many users", "try again").
+            Error::FtpReply { code, .. } => (400..500).contains(code),
             _ => false,
         }
     }

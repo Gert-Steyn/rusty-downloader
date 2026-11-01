@@ -14,7 +14,7 @@ use super::store::{self, DownloadRow, Resolved};
 use super::{DownloadKind, Event, Inner, RunningJob, Status, StopReason, checksums};
 use crate::http::{self, DownloadSpec, Outcome, ProbeResult, Progress, filename, segments};
 use crate::ratelimit::RateLimiter;
-use crate::{Error, Result, history};
+use crate::{Error, Result, ftp, history};
 
 const PART_SUFFIX: &str = ".rdl.part";
 
@@ -65,7 +65,9 @@ pub(super) async fn start(inner: &Arc<Inner>, row: DownloadRow, queue_id: i64) -
             result = Err(e);
         }
         let list = match &result {
-            Ok(Outcome::Completed { path, .. }) if row.kind() == DownloadKind::Http => {
+            Ok(Outcome::Completed { path, .. })
+                if matches!(row.kind(), DownloadKind::Http | DownloadKind::Ftp) =>
+            {
                 Some(path.clone())
             }
             _ => None,
@@ -113,7 +115,7 @@ async fn execute(
         store::set_checksum_ok(&inner.pool, row.id, value, None).await?;
     }
     match row.kind.as_str() {
-        "http" => {}
+        "http" | "ftp" => {}
         "ytdlp" => return super::ytdlp_job::execute(inner, row, cancel).await,
         "gallerydl" => return super::gallerydl_job::execute(inner, row, cancel).await,
         other => return Err(Error::Unsupported(format!("{other} downloads"))),
@@ -124,13 +126,20 @@ async fn execute(
         .ok_or_else(|| Error::NotFound(format!("package {}", row.package_id)))?;
     let url = Url::parse(&row.source_url)
         .map_err(|e| Error::InvalidUrl(format!("{}: {e}", row.source_url)))?;
-    let client = inner.network.client(&url, row.proxy())?;
     let (request, login) = inner.network.with_account(&url, row.request());
-    let spec = DownloadSpec::with_request(url, request).with_login(login);
+    let source = if row.kind() == DownloadKind::Ftp {
+        let local = inner.network.local_address()?;
+        Source::Ftp(ftp::Location::new(&url, login, local)?)
+    } else {
+        Source::Http {
+            client: inner.network.client(&url, row.proxy())?,
+            spec: DownloadSpec::with_request(url, request).with_login(login),
+        }
+    };
 
     let probe = tokio::select! {
         _ = cancel.cancelled() => return Ok(Outcome::Paused),
-        probe = http::probe(&client, &spec) => probe?,
+        probe = source.probe() => probe?,
     };
 
     let mut resume_from = store::load_segments(pool, row.id).await?;
@@ -184,23 +193,60 @@ async fn execute(
     *last = Some(initial);
     let forwarder = tokio::spawn(forward_progress(Arc::clone(inner), row.id, rx));
 
-    let outcome = http::download(
-        &client,
-        &spec,
-        &probe,
-        &part_path(&dest),
-        &dest,
-        &resume_from,
-        &inner.segment_config(limit),
-        &tx,
-        cancel,
-    )
-    .await;
+    let config = inner.segment_config(limit);
+    let outcome = match &source {
+        Source::Http { client, spec } => {
+            http::download(
+                client,
+                spec,
+                &probe,
+                &part_path(&dest),
+                &dest,
+                &resume_from,
+                &config,
+                &tx,
+                cancel,
+            )
+            .await
+        }
+        Source::Ftp(location) => {
+            let resume = !resume_from.is_empty();
+            ftp::download(
+                location,
+                &probe,
+                &part_path(&dest),
+                &dest,
+                resume,
+                &config,
+                &tx,
+                cancel,
+            )
+            .await
+        }
+    };
 
     *last = Some(tx.borrow().clone());
     drop(tx);
     let _ = forwarder.await;
     outcome
+}
+
+/// Where a plain download comes from.
+enum Source {
+    Http {
+        client: reqwest::Client,
+        spec: DownloadSpec,
+    },
+    Ftp(ftp::Location),
+}
+
+impl Source {
+    async fn probe(&self) -> Result<ProbeResult> {
+        match self {
+            Source::Http { client, spec } => http::probe(client, spec).await,
+            Source::Ftp(location) => ftp::probe(location).await,
+        }
+    }
 }
 
 /// Saved segments only apply if the server still has the same file.

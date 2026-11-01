@@ -13,6 +13,7 @@ use reqwest::{Client, Response, StatusCode, Url, redirect};
 use crate::{Error, Result};
 
 pub use download::{Outcome, Progress, SegmentConfig, download};
+pub(crate) use download::{backoff, finish};
 pub use probe::{DownloadSpec, ProbeResult, probe};
 pub use segments::Segment;
 

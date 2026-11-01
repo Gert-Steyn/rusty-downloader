@@ -391,7 +391,7 @@ fn identity() -> HeaderMap {
     headers
 }
 
-fn backoff(base: Duration, attempt: u32) -> Duration {
+pub(crate) fn backoff(base: Duration, attempt: u32) -> Duration {
     let exp = base.saturating_mul(1 << attempt.saturating_sub(1).min(6));
     let capped = exp.min(Duration::from_secs(30));
     let jitter_ms = fastrand::u64(0..=base.as_millis().max(1) as u64);
@@ -483,7 +483,11 @@ async fn stream_once(job: &Job, progress: &watch::Sender<Progress>) -> Result<Ou
 }
 
 /// Make the part file durable, check its size, and move it into place.
-async fn finish(part_path: &Path, final_path: &Path, expected: Option<u64>) -> Result<u64> {
+pub(crate) async fn finish(
+    part_path: &Path,
+    final_path: &Path,
+    expected: Option<u64>,
+) -> Result<u64> {
     OpenOptions::new()
         .write(true)
         .open(part_path)

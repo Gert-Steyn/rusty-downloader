@@ -34,7 +34,7 @@ use crate::proxy::ProxyChoice;
 use crate::request::RequestContext;
 use crate::tools::Tools;
 use crate::ytdlp::{MediaInfo, YtDlpOptions};
-use crate::{Error, Result};
+use crate::{Error, Result, ftp};
 
 pub use links::{archive_set_name, default_package_name, extract_links};
 pub use media::MediaSummary;
@@ -339,9 +339,10 @@ impl LinkGrabber {
         for url in &fresh {
             let row: LinkRow = sqlx::query_as(
                 "INSERT INTO link_grabber (source_url, kind, proposed_package, request_json)
-                 VALUES (?, 'http', ?, ?) RETURNING *",
+                 VALUES (?, ?, ?, ?) RETURNING *",
             )
             .bind(url.as_str())
+            .bind(DownloadKind::for_url(url).as_str())
             .bind(&package)
             .bind(request_json.as_deref())
             .fetch_one(&mut *tx)
@@ -646,7 +647,7 @@ fn new_download(link: &GrabbedLink, request: RequestContext) -> Option<NewDownlo
                 ..url_only
             });
         }
-        DownloadKind::Http => {
+        DownloadKind::Http | DownloadKind::Ftp => {
             return Some(NewDownload {
                 filename: link.filename.clone(),
                 ..url_only
@@ -711,6 +712,18 @@ async fn probe_link(
 
     let parsed = Url::parse(url).map_err(|e| Error::InvalidUrl(e.to_string()));
     let result = match &parsed {
+        Ok(parsed) if ftp::is_ftp(parsed) => {
+            let (_, login) = inner
+                .network
+                .with_account(parsed, RequestContext::default());
+            match inner.network.local_address() {
+                Ok(local) => match ftp::Location::new(parsed, login, local) {
+                    Ok(location) => ftp::probe(&location).await,
+                    Err(e) => Err(e),
+                },
+                Err(e) => Err(e),
+            }
+        }
         Ok(parsed) => {
             let (request, login) = inner.network.with_account(parsed, request.clone());
             let spec = DownloadSpec::with_request(parsed.clone(), request).with_login(login);
@@ -722,6 +735,7 @@ async fn probe_link(
         Err(e) => Err(Error::InvalidUrl(e.to_string())),
     };
     if let Ok(parsed) = &parsed
+        && !ftp::is_ftp(parsed)
         && media::worth_asking(&result)
     {
         // yt-dlp first, then gallery-dl. A find by yt-dlp's catch-all
@@ -775,7 +789,7 @@ async fn probe_link(
             // seen online in the wrong package.
             let set = default_package.and(archive_set_name(&probe.filename));
             sqlx::query(
-                "UPDATE link_grabber SET kind = 'http', info_json = NULL, availability = 'online',
+                "UPDATE link_grabber SET kind = ?6, info_json = NULL, availability = 'online',
                      error = NULL, filename = COALESCE(filename, ?1), size = ?2,
                      proposed_package = CASE WHEN ?3 IS NOT NULL AND proposed_package = ?4
                                              THEN ?3 ELSE proposed_package END
@@ -786,6 +800,7 @@ async fn probe_link(
             .bind(set)
             .bind(default_package)
             .bind(id)
+            .bind(DownloadKind::for_url(&probe.final_url).as_str())
             .execute(pool)
             .await?;
         }
@@ -795,7 +810,8 @@ async fn probe_link(
                 | Error::HttpStatus {
                     status: 404 | 410 | 451,
                     ..
-                } => Availability::Offline,
+                }
+                | Error::FtpReply { code: 550, .. } => Availability::Offline,
                 _ => Availability::Error,
             };
             tracing::debug!(link = id, error = %e, "link check failed");

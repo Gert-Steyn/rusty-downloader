@@ -349,7 +349,7 @@ export type DownloadEvents_Serialize = {
 };
 
 /**  Which handler runs a download. Stored as the `downloads.kind` text. */
-export type DownloadKind = "http" | "ytdlp" | "gallerydl";
+export type DownloadKind = "http" | "ftp" | "ytdlp" | "gallerydl";
 
 export type Download_Deserialize = {
 	id: number,

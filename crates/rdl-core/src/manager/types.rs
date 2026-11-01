@@ -61,6 +61,7 @@ impl Status {
 pub enum DownloadKind {
     #[default]
     Http,
+    Ftp,
     Ytdlp,
     Gallerydl,
 }
@@ -69,13 +70,24 @@ impl DownloadKind {
     pub fn as_str(self) -> &'static str {
         match self {
             DownloadKind::Http => "http",
+            DownloadKind::Ftp => "ftp",
             DownloadKind::Ytdlp => "ytdlp",
             DownloadKind::Gallerydl => "gallerydl",
         }
     }
 
+    /// The handler for a plain link: FTP for `ftp://` and `ftps://`, else HTTP.
+    pub fn for_url(url: &Url) -> Self {
+        if crate::ftp::is_ftp(url) {
+            DownloadKind::Ftp
+        } else {
+            DownloadKind::Http
+        }
+    }
+
     pub fn parse(s: &str) -> Self {
         match s {
+            "ftp" => DownloadKind::Ftp,
             "ytdlp" => DownloadKind::Ytdlp,
             "gallerydl" => DownloadKind::Gallerydl,
             _ => DownloadKind::Http,
@@ -120,9 +132,9 @@ pub struct NewDownload {
 impl NewDownload {
     pub fn new(url: Url) -> Self {
         Self {
+            kind: DownloadKind::for_url(&url),
             url,
             filename: None,
-            kind: DownloadKind::Http,
             ytdlp: None,
             gallerydl: None,
             title: None,
