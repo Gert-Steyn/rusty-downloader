@@ -6,7 +6,10 @@ import {
 	events,
 	isTauri,
 	unwrap,
+	type Account,
+	type AccountInput,
 	type AdapterInfo,
+	type CookieImport,
 	type NetworkStatus,
 	type ProxyChoice,
 	type ProxyInput,
@@ -32,6 +35,41 @@ class NetworkStore {
 		this.#started = true;
 		await events.networkStatusChanged.listen((e) => (this.status = e.payload.status));
 		this.status = await unwrap(commands.networkStatus());
+	}
+
+	accounts = $state<Account[]>([]);
+
+	async loadAccounts() {
+		if (!isTauri()) return;
+		try {
+			this.accounts = await unwrap(commands.accountList());
+		} catch (e) {
+			this.error = String(e);
+		}
+	}
+
+	/** Add or change an account; throws so the dialog can show why. */
+	async saveAccount(id: number | null, input: AccountInput) {
+		if (id == null) await unwrap(commands.accountAdd(input));
+		else await unwrap(commands.accountUpdate(id, input));
+		await this.loadAccounts();
+	}
+
+	async removeAccount(id: number) {
+		await this.run(() => unwrap(commands.accountRemove(id)));
+		await this.loadAccounts();
+	}
+
+	/** Import a cookies.txt into an account; throws with the reason. */
+	async importCookies(id: number, path: string): Promise<CookieImport> {
+		const result = await unwrap(commands.accountImportCookies(id, path));
+		await this.loadAccounts();
+		return result;
+	}
+
+	async clearCookies(id: number) {
+		await this.run(() => unwrap(commands.accountClearCookies(id)));
+		await this.loadAccounts();
 	}
 
 	/** The adapters on this machine, asked again each time. */

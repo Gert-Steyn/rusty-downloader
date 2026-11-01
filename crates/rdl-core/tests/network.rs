@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::{SIZE, proxy, spawn_server};
+use rdl_core::accounts::AccountInput;
 use rdl_core::db::{self, Pool};
 use rdl_core::linkgrabber::{Availability, LinkGrabber, LinkSource};
 use rdl_core::manager::{
@@ -289,13 +290,21 @@ async fn downloads_go_through_socks5_by_default_rule_or_choice() {
         .await
         .unwrap();
     assert_eq!(manager.get(id).await.unwrap().proxy, ProxyChoice::Direct);
-    assert!(matches!(
-        events.recv().await.unwrap(),
-        Event::ProxyChanged {
-            proxy: ProxyChoice::Direct,
-            ..
+    // Other events (the queue finishing) may come first.
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            if let Ok(Event::ProxyChanged {
+                download_id,
+                proxy: ProxyChoice::Direct,
+            }) = events.recv().await
+                && download_id == id
+            {
+                break;
+            }
         }
-    ));
+    })
+    .await
+    .expect("no ProxyChanged event");
     manager.shutdown().await;
     assert_eq!(SIZE, server.data.len());
 }
@@ -538,5 +547,142 @@ async fn a_network_hold_requeues_and_resumes_downloads() {
     .await
     .expect("wasn't requeued");
     status_becomes(&manager, id, Status::Completed).await;
+    manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn accounts_give_their_site_cookies_and_a_login() {
+    let (base, server) = spawn_server().await;
+    let fx = Fixture::new().await;
+    let net = &fx.network;
+    let manager = fx.manager().await;
+    let members = base.join("members").unwrap();
+
+    // Without an account the members' file is refused.
+    let (_, status) = fx
+        .download(&manager, members.clone(), ProxyChoice::Auto)
+        .await;
+    assert_eq!(status, Status::Failed);
+
+    // An account for the server's host, with cookies from a cookies.txt
+    // that also holds another site's (left out).
+    let id = net
+        .add_account(AccountInput {
+            site: "127.0.0.1".into(),
+            username: Some("me".into()),
+            password: Some("s3cret".into()),
+            enabled: true,
+        })
+        .await
+        .unwrap();
+    let file = "# Netscape HTTP Cookie File\n\
+                127.0.0.1\tFALSE\t/\tFALSE\t0\tmember\tyes\n\
+                .other.example\tTRUE\t/\tFALSE\t0\tsid\tnope\n";
+    let import = net.import_cookies(id, file).await.unwrap();
+    assert_eq!((import.imported, import.other_sites), (1, 1));
+    let account = &net.accounts()[0];
+    assert_eq!((account.cookies, account.has_password), (1, true));
+    assert_eq!(
+        fx.secrets.get(&format!("account/{id}")).unwrap().as_deref(),
+        Some("s3cret")
+    );
+    assert!(
+        net.import_cookies(id, "not a cookie file").await.is_err(),
+        "nothing to import"
+    );
+
+    let (id_dl, status) = fx
+        .download(&manager, members.clone(), ProxyChoice::Auto)
+        .await;
+    assert_eq!(
+        status,
+        Status::Completed,
+        "{:?}",
+        manager.get(id_dl).await.unwrap().error
+    );
+    common::assert_matches_server(
+        manager
+            .get(id_dl)
+            .await
+            .unwrap()
+            .dest_path
+            .as_ref()
+            .unwrap(),
+        &server,
+    );
+
+    // The login answers the site's Basic challenge, once per host: later
+    // requests (the segments) send it straight away.
+    let (_, status) = fx
+        .download(&manager, base.join("basic").unwrap(), ProxyChoice::Auto)
+        .await;
+    assert_eq!(status, Status::Completed);
+    let requests = server
+        .basic_requests
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let logins = server
+        .basic_logins
+        .load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        requests - logins,
+        1,
+        "refused more than once ({requests} requests, {logins} with the login)"
+    );
+
+    // The tools get the login and the cookies too.
+    let connection = net.tool_connection(&members, ProxyChoice::Auto).unwrap();
+    assert_eq!(
+        connection.login.as_ref().map(|l| l.username.as_str()),
+        Some("me")
+    );
+    let (request, _) = net.with_account(&members, Default::default());
+    assert_eq!(
+        request.cookie_header(&members).as_deref(),
+        Some("member=yes")
+    );
+    // Not for other sites.
+    let elsewhere = Url::parse("https://example.org/").unwrap();
+    assert_eq!(
+        net.tool_connection(&elsewhere, ProxyChoice::Auto)
+            .unwrap()
+            .login,
+        None
+    );
+
+    // Disabled, it's left alone; the cookies survive a restart, sealed.
+    net.update_account(
+        id,
+        AccountInput {
+            site: "127.0.0.1".into(),
+            username: Some("me".into()),
+            password: None,
+            enabled: false,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        net.tool_connection(&members, ProxyChoice::Auto)
+            .unwrap()
+            .login,
+        None
+    );
+    let sealed: Vec<u8> = sqlx::query_scalar("SELECT cookies_sealed FROM accounts WHERE id = ?")
+        .bind(id)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert!(!sealed.is_empty());
+    let again = Network::load(fx.pool.clone(), fx.secrets.clone(), None)
+        .await
+        .unwrap();
+    assert_eq!(again.accounts(), net.accounts());
+
+    // Removing it takes the password along.
+    net.clear_cookies(id).await.unwrap();
+    assert_eq!(net.accounts()[0].cookies, 0);
+    net.remove_account(id).await.unwrap();
+    assert!(net.accounts().is_empty());
+    assert_eq!(fx.secrets.get(&format!("account/{id}")).unwrap(), None);
     manager.shutdown().await;
 }

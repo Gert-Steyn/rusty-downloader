@@ -125,7 +125,8 @@ async fn execute(
     let url = Url::parse(&row.source_url)
         .map_err(|e| Error::InvalidUrl(format!("{}: {e}", row.source_url)))?;
     let client = inner.network.client(&url, row.proxy())?;
-    let spec = DownloadSpec::with_request(url, row.request());
+    let (request, login) = inner.network.with_account(&url, row.request());
+    let spec = DownloadSpec::with_request(url, request).with_login(login);
 
     let probe = tokio::select! {
         _ = cancel.cancelled() => return Ok(Outcome::Paused),

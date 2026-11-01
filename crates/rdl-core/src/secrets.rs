@@ -15,6 +15,10 @@ pub trait Secrets: Send + Sync {
     fn set(&self, key: &str, secret: &str) -> Result<()>;
     /// Deleting what isn't there is fine.
     fn delete(&self, key: &str) -> Result<()>;
+    /// Encrypt data too big for the store (an account's cookies), so only
+    /// this Windows user can read it back with [`Secrets::open`].
+    fn seal(&self, data: &[u8]) -> Result<Vec<u8>>;
+    fn open(&self, sealed: &[u8]) -> Result<Vec<u8>>;
 }
 
 /// Secrets that live only as long as the process; for tests and for a
@@ -45,6 +49,15 @@ impl Secrets for MemorySecrets {
     fn delete(&self, key: &str) -> Result<()> {
         self.map().remove(key);
         Ok(())
+    }
+
+    /// Kept as is: nothing outlives the process.
+    fn seal(&self, data: &[u8]) -> Result<Vec<u8>> {
+        Ok(data.to_vec())
+    }
+
+    fn open(&self, sealed: &[u8]) -> Result<Vec<u8>> {
+        Ok(sealed.to_vec())
     }
 }
 
@@ -85,7 +98,23 @@ impl Secrets for CredentialManager {
             Err(e) => Err(secret_error(e)),
         }
     }
+
+    /// DPAPI for the current user (`CryptProtectData`).
+    fn seal(&self, data: &[u8]) -> Result<Vec<u8>> {
+        windows_dpapi::encrypt_data(data, windows_dpapi::Scope::User, Some(ENTROPY))
+            .map_err(|e| Error::Secrets(format!("could not encrypt: {e}")))
+    }
+
+    fn open(&self, sealed: &[u8]) -> Result<Vec<u8>> {
+        windows_dpapi::decrypt_data(sealed, windows_dpapi::Scope::User, Some(ENTROPY))
+            .map_err(|e| Error::Secrets(format!("could not decrypt: {e}")))
+    }
 }
+
+/// Mixed into DPAPI, so other programs of the same user can't decrypt
+/// the app's data with a plain `CryptUnprotectData`.
+#[cfg(windows)]
+const ENTROPY: &[u8] = b"rusty-downloader/sealed/v1";
 
 #[cfg(windows)]
 fn secret_error(e: keyring_core::Error) -> Error {
@@ -105,6 +134,19 @@ mod tests {
         secrets.delete(key).unwrap();
         secrets.delete(key).unwrap();
         assert_eq!(secrets.get(key).unwrap(), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sealed_data_opens_only_unchanged() {
+        let store = CredentialManager(());
+        let sealed = store.seal(b"sid=abc; token=xyz").unwrap();
+        assert!(!sealed.windows(3).any(|w| w == b"abc"), "not encrypted");
+        assert_eq!(store.open(&sealed).unwrap(), b"sid=abc; token=xyz");
+        let mut tampered = sealed.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 1;
+        assert!(store.open(&tampered).is_err());
     }
 
     #[test]

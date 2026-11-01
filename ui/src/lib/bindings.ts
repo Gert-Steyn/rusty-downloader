@@ -100,6 +100,16 @@ export const commands = {
 	 *  check); returns how long the answer took in milliseconds.
 	 */
 	proxyTest: (choice: ProxyChoice, url: string | null) => typedError<number, CommandError>(__TAURI_INVOKE("proxy_test", { choice, url })),
+	/**  Site accounts, without passwords or cookie values. */
+	accountList: () => typedError<Account_Serialize[], CommandError>(__TAURI_INVOKE("account_list")),
+	/**  A new account; returns its id. */
+	accountAdd: (input: AccountInput_Deserialize) => typedError<number, CommandError>(__TAURI_INVOKE("account_add", { input })),
+	/**  `input.password`: `null` keeps the stored one, `""` removes it. */
+	accountUpdate: (id: number, input: AccountInput_Deserialize) => typedError<null, CommandError>(__TAURI_INVOKE("account_update", { id, input })),
+	accountRemove: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("account_remove", { id })),
+	/**  Add the cookies for the account's site from a Netscape `cookies.txt`. */
+	accountImportCookies: (id: number, path: string) => typedError<CookieImport, CommandError>(__TAURI_INVOKE("account_import_cookies", { id, path })),
+	accountClearCookies: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("account_clear_cookies", { id })),
 	/**  Network adapters on this machine, for choosing one. */
 	networkAdapters: () => typedError<AdapterInfo_Serialize[], CommandError>(__TAURI_INVOKE("network_adapters")),
 	networkStatus: () => typedError<NetworkStatus, CommandError>(__TAURI_INVOKE("network_status")),
@@ -130,6 +140,54 @@ export const events = {
 };
 
 /* Types */
+/**  An account as the UI sees it: never the password or cookie values. */
+export type Account = Account_Serialize | Account_Deserialize;
+
+/**  A new or changed account. */
+export type AccountInput = AccountInput_Serialize | AccountInput_Deserialize;
+
+/**  A new or changed account. */
+export type AccountInput_Deserialize = {
+	site: string,
+	username?: string | null,
+	/**  `None` keeps the stored password; an empty one removes it. */
+	password?: string | null,
+	enabled: boolean,
+};
+
+/**  A new or changed account. */
+export type AccountInput_Serialize = {
+	site: string,
+	username: string | null,
+	/**  `None` keeps the stored password; an empty one removes it. */
+	password: string | null,
+	enabled: boolean,
+};
+
+/**  An account as the UI sees it: never the password or cookie values. */
+export type Account_Deserialize = {
+	id: number,
+	/**  `example.com` (with its subdomains) or a `*` pattern, as in proxy rules. */
+	site: string,
+	username?: string | null,
+	hasPassword: boolean,
+	/**  Cookies stored for it (expired ones aren't counted). */
+	cookies: number,
+	enabled: boolean,
+};
+
+/**  An account as the UI sees it: never the password or cookie values. */
+export type Account_Serialize = {
+	id: number,
+	/**  `example.com` (with its subdomains) or a `*` pattern, as in proxy rules. */
+	site: string,
+	username: string | null,
+	hasPassword: boolean,
+	/**  Cookies stored for it (expired ones aren't counted). */
+	cookies: number,
+	enabled: boolean,
+};
+
 /**  What limits the speed right now, for the status bar. */
 export type ActiveLimit = ActiveLimit_Serialize | ActiveLimit_Deserialize;
 
@@ -265,6 +323,14 @@ export type ClipboardOffer = {
 
 /**  Errors cross the IPC boundary as plain messages. */
 export type CommandError = string;
+
+/**  What a `cookies.txt` import did. */
+export type CookieImport = {
+	/**  Cookies for the account's site, now stored. */
+	imported: number,
+	/**  Cookies in the file for other sites, left out. */
+	otherSites: number,
+};
 
 export type Download = Download_Serialize | Download_Deserialize;
 

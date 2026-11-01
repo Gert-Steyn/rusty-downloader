@@ -263,38 +263,36 @@ async fn packages_can_be_reordered_and_connections_changed_at_runtime() {
 #[tokio::test]
 async fn queue_limit_caps_concurrent_downloads() {
     let (base, _server) = spawn_server().await;
-    let mut fx = Fixture::new().await;
+    let fx = Fixture::new().await;
     fx.manager.set_queue_limit(DEFAULT_QUEUE, 1).await.unwrap();
     let ids = fx
         .add(&[url(&base, "slow"), url(&base, "slow"), url(&base, "slow")])
         .await;
 
-    let mut active = HashSet::new();
-    let mut completed = HashSet::new();
+    // Polled from the stored statuses: the event stream can lag under the
+    // slow route's progress events and drop a `Completed`.
     let mut max_active = 0;
-    while completed.len() < ids.len() {
-        let event = fx
-            .wait_for(|e| matches!(e, Event::StatusChanged { .. }))
-            .await;
-        if let Event::StatusChanged {
-            download_id,
-            status,
-            ..
-        } = event
-        {
-            match status {
-                Status::Active => {
-                    active.insert(download_id);
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            let mut active = 0;
+            let mut completed = 0;
+            for id in &ids {
+                match fx.manager.get(*id).await.unwrap().status {
+                    Status::Active => active += 1,
+                    Status::Completed => completed += 1,
+                    Status::Queued => {}
+                    other => panic!("unexpected status {other:?}"),
                 }
-                Status::Completed => {
-                    active.remove(&download_id);
-                    completed.insert(download_id);
-                }
-                other => panic!("unexpected status {other:?}"),
             }
-            max_active = max_active.max(active.len());
+            max_active = max_active.max(active);
+            if completed == ids.len() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
         }
-    }
+    })
+    .await
+    .expect("downloads didn't finish");
     assert_eq!(max_active, 1);
     fx.manager.shutdown().await;
 }

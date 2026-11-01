@@ -79,6 +79,7 @@ pub(super) async fn execute(
     });
 
     let connection = inner.network.tool_connection(&url, row.proxy())?;
+    let request = inner.network.with_account(&url, row.request()).0;
     let spec = RunSpec {
         exe,
         ffmpeg_dir,
@@ -91,7 +92,7 @@ pub(super) async fn execute(
         dir: dir.clone(),
         options: row.gallerydl_options().unwrap_or_default(),
         available,
-        request: row.request(),
+        request,
         cookie_file: None,
         limit_rate: inner.tool_rate(row.speed_limit()),
         connection,

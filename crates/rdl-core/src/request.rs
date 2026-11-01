@@ -69,7 +69,7 @@ fn now_secs() -> i64 {
 
 impl Cookie {
     /// The domain without its leading dot, lowercased.
-    fn bare_domain(&self) -> String {
+    pub fn bare_domain(&self) -> String {
         self.domain
             .trim()
             .trim_start_matches('.')
@@ -137,6 +137,46 @@ impl Cookie {
     }
 }
 
+/// Cookies from a Netscape `cookies.txt` (what browsers' export add-ons,
+/// yt-dlp and gallery-dl write): tab-separated domain, include-subdomains,
+/// path, secure, expiry (0 or empty: a session cookie), name, value; a
+/// `#HttpOnly_` prefix marks HTTP-only ones. Comments, blank and broken
+/// lines are skipped; what's left is cleaned like any other cookies.
+pub fn parse_netscape(text: &str) -> Vec<Cookie> {
+    let cookies = text
+        .lines()
+        .map(|line| line.trim_start_matches('\u{feff}').trim_end_matches('\r'))
+        .filter_map(|line| {
+            let (line, http_only) = match line.strip_prefix("#HttpOnly_") {
+                Some(rest) => (rest, true),
+                None if line.starts_with('#') => return None,
+                None => (line, false),
+            };
+            let fields: Vec<&str> = line.split('\t').collect();
+            if fields.len() < 7 {
+                return None;
+            }
+            let expires = fields[4].trim().parse::<i64>().ok().filter(|&e| e > 0);
+            Some(Cookie {
+                name: fields[5].to_owned(),
+                value: fields[6].to_owned(),
+                domain: fields[0].to_owned(),
+                host_only: !fields[1].eq_ignore_ascii_case("TRUE"),
+                path: fields[2].to_owned(),
+                secure: fields[3].eq_ignore_ascii_case("TRUE"),
+                http_only,
+                expires,
+            })
+        })
+        .collect();
+    RequestContext {
+        cookies,
+        ..RequestContext::default()
+    }
+    .cleaned()
+    .cookies
+}
+
 /// RFC 6265 §5.1.4: `/docs` matches `/docs`, `/docs/` and `/docs/a`, not `/docsx`.
 fn path_matches(request: &str, cookie: &str) -> bool {
     let request = if request.is_empty() { "/" } else { request };
@@ -172,6 +212,19 @@ impl RequestContext {
             }
         }
         self
+    }
+
+    /// Add `extra` cookies, except where one with the same name, domain and
+    /// path is already there: those (from the browser, just now) are fresher.
+    pub fn merge_cookies(&mut self, extra: &[Cookie]) {
+        let key = |c: &Cookie| (c.name.clone(), c.bare_domain(), c.path.clone());
+        let have: std::collections::HashSet<_> = self.cookies.iter().map(key).collect();
+        let new: Vec<Cookie> = extra
+            .iter()
+            .filter(|c| !have.contains(&key(c)))
+            .cloned()
+            .collect();
+        self.cookies.extend(new);
     }
 
     /// For storing: `None` when there's nothing to store.
@@ -316,6 +369,59 @@ pub fn sweep_cookie_files() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn netscape_files_are_read() {
+        let text = "\u{feff}# Netscape HTTP Cookie File\r\n\
+                    \r\n\
+                    .example.com\tTRUE\t/\tTRUE\t4102444800\tsid\tabc\r\n\
+                    #HttpOnly_www.example.com\tFALSE\t/app\tFALSE\t0\ttoken\tx=y\r\n\
+                    gone.example.com\tFALSE\t/\tFALSE\t1000\told\tv\r\n\
+                    broken line\r\n";
+        let cookies = parse_netscape(text);
+        assert_eq!(cookies.len(), 2, "{cookies:?}");
+        let sid = &cookies[0];
+        assert_eq!((sid.name.as_str(), sid.value.as_str()), ("sid", "abc"));
+        assert!(!sid.host_only && sid.secure && !sid.http_only);
+        assert_eq!(sid.expires, Some(4102444800));
+        let token = &cookies[1];
+        assert_eq!(token.value, "x=y");
+        assert!(token.host_only && token.http_only);
+        assert_eq!((token.path.as_str(), token.expires), ("/app", None));
+        // What we write reads back the same.
+        let again = parse_netscape(
+            &RequestContext {
+                cookies: cookies.clone(),
+                ..RequestContext::default()
+            }
+            .netscape(),
+        );
+        assert_eq!(again, cookies);
+    }
+
+    #[test]
+    fn merging_keeps_the_cookies_already_there() {
+        let cookie = |name: &str, value: &str, domain: &str| Cookie {
+            name: name.into(),
+            value: value.into(),
+            domain: domain.into(),
+            host_only: false,
+            path: "/".into(),
+            secure: false,
+            http_only: false,
+            expires: None,
+        };
+        let mut request = RequestContext {
+            cookies: vec![cookie("sid", "fresh", "example.com")],
+            ..RequestContext::default()
+        };
+        request.merge_cookies(&[
+            cookie("sid", "stale", ".example.com"),
+            cookie("theme", "dark", "example.com"),
+        ]);
+        let values: Vec<&str> = request.cookies.iter().map(|c| c.value.as_str()).collect();
+        assert_eq!(values, ["fresh", "dark"]);
+    }
 
     fn cookie(name: &str, domain: &str) -> Cookie {
         Cookie {

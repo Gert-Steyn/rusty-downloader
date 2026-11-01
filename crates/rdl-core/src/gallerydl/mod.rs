@@ -406,6 +406,7 @@ mod tests {
         spec.connection = ToolConnection {
             proxy: Some("http://proxy.lan:3128".into()),
             source_address: Some("10.64.0.2".parse().unwrap()),
+            login: None,
         };
         let args = spec.args().unwrap();
         assert_eq!(after(&args, "--proxy"), "http://proxy.lan:3128");

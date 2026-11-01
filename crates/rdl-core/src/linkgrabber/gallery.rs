@@ -35,6 +35,8 @@ pub(super) async fn resolve_link(
         }
     };
     let connection = inner.network.tool_connection(url, ProxyChoice::Auto)?;
+    let (request, _) = inner.network.with_account(url, request.clone());
+    let request = &request;
     let cancel = CancellationToken::new();
     let resolved = match gallerydl::resolve(&exe, url, request, &connection, &cancel).await {
         Ok(r) => r,

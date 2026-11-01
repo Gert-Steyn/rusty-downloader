@@ -49,6 +49,8 @@ pub(crate) fn builder(user_agent: Option<&str>, follow_redirects: bool) -> reqwe
 /// `GET url` with `spec`'s referer, user agent and cookies plus `extra`
 /// headers, following redirects. Cookies are picked again for every hop,
 /// as a browser would, so another host never sees cookies not meant for it.
+/// A `401` asking for Basic auth from the login's own site is answered
+/// with the login once; that host then gets it with every request.
 pub(crate) async fn get(
     client: &Client,
     spec: &DownloadSpec,
@@ -57,12 +59,33 @@ pub(crate) async fn get(
 ) -> Result<Response> {
     let mut url = url.clone();
     for _ in 0..=MAX_REDIRECTS {
-        let response = client
-            .get(url.clone())
-            .headers(spec.request.headers_for(&url))
-            .headers(extra.clone())
-            .send()
-            .await?;
+        let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+        let login = spec.login.as_ref().filter(|l| l.is_for(&host));
+        let known = login.is_some()
+            && spec
+                .basic_hosts
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains(&host);
+        let send = |auth: bool| {
+            let mut request = client
+                .get(url.clone())
+                .headers(spec.request.headers_for(&url))
+                .headers(extra.clone());
+            if let (true, Some(login)) = (auth, login) {
+                request = request.basic_auth(&login.username, Some(&login.password));
+            }
+            request.send()
+        };
+        let mut response = send(known).await?;
+        if !known && login.is_some() && asks_for_basic(&response) {
+            tracing::debug!(%host, "site asked for a login; sending the account's");
+            spec.basic_hosts
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(host);
+            response = send(true).await?;
+        }
         let next = response
             .status()
             .is_redirection()
@@ -77,6 +100,17 @@ pub(crate) async fn get(
         }
     }
     Err(Error::TooManyRedirects(url.to_string()))
+}
+
+/// A `401` with a `WWW-Authenticate: Basic …` challenge.
+fn asks_for_basic(response: &Response) -> bool {
+    response.status() == StatusCode::UNAUTHORIZED
+        && response
+            .headers()
+            .get_all(reqwest::header::WWW_AUTHENTICATE)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .any(|v| v.trim_start().to_ascii_lowercase().starts_with("basic"))
 }
 
 /// Map a non-success status to the matching error.

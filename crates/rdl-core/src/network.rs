@@ -13,12 +13,26 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use reqwest::Client;
+use serde::Serialize;
 use url::Url;
 
+use crate::accounts::{self, Account, AccountInput, Login};
 use crate::db::Pool;
 use crate::proxy::{self, ProxyChoice, ProxyInput, ProxyProfile, ProxySettings};
+use crate::request::{self, Cookie, RequestContext};
 use crate::secrets::{MemorySecrets, Secrets};
 use crate::{Error, Result, http};
+
+/// What a `cookies.txt` import did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct CookieImport {
+    /// Cookies for the account's site, now stored.
+    pub imported: u32,
+    /// Cookies in the file for other sites, left out.
+    pub other_sites: u32,
+}
 
 /// A proxy picked for a request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,12 +55,15 @@ pub enum Binding {
     Down(String),
 }
 
-/// How yt-dlp and gallery-dl connect: `--proxy` and `--source-address`.
+/// How yt-dlp and gallery-dl connect and log in: `--proxy`,
+/// `--source-address`, `--username` / `--password`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolConnection {
     /// Proxy URL with its login. Never log it.
     pub proxy: Option<String>,
     pub source_address: Option<IpAddr>,
+    /// The site account's login, for the link being handled.
+    pub login: Option<Login>,
 }
 
 impl ToolConnection {
@@ -58,6 +75,14 @@ impl ToolConnection {
         }
         if let Some(ip) = self.source_address {
             args.extend(["--source-address".into(), ip.to_string()]);
+        }
+        if let Some(login) = &self.login {
+            args.extend([
+                "--username".into(),
+                login.username.clone(),
+                "--password".into(),
+                login.password.clone(),
+            ]);
         }
         args
     }
@@ -97,6 +122,7 @@ struct State {
     /// Proxy URL per profile id, login included.
     urls: HashMap<i64, String>,
     settings: ProxySettings,
+    accounts: Vec<accounts::Loaded>,
 }
 
 impl Network {
@@ -163,10 +189,12 @@ impl Network {
             };
             urls.insert(p.id, proxy::proxy_url(p, password.as_deref()));
         }
+        let accounts = accounts::load(pool, &*self.inner.secrets).await?;
         *self.inner.state.write().unwrap_or_else(|e| e.into_inner()) = State {
             profiles,
             urls,
             settings,
+            accounts,
         };
         self.inner
             .clients
@@ -240,7 +268,142 @@ impl Network {
         Ok(ToolConnection {
             source_address: self.local_address()?,
             proxy: self.route(url, choice).map(|r| r.url),
+            login: self.with_account(url, RequestContext::default()).1,
         })
+    }
+
+    /// `request` with the cookies of `url`'s account added (the browser's
+    /// own win), and that account's login, if it has one.
+    pub fn with_account(
+        &self,
+        url: &Url,
+        mut request: RequestContext,
+    ) -> (RequestContext, Option<Login>) {
+        let state = self.state();
+        let Some(account) = url
+            .host_str()
+            .and_then(|host| accounts::for_host(&state.accounts, host))
+        else {
+            return (request, None);
+        };
+        request.merge_cookies(&account.cookies);
+        (request.cleaned(), account.login.clone())
+    }
+
+    pub fn accounts(&self) -> Vec<Account> {
+        self.state()
+            .accounts
+            .iter()
+            .map(|a| a.account.clone())
+            .collect()
+    }
+
+    pub async fn add_account(&self, input: AccountInput) -> Result<i64> {
+        let input = input.validated()?;
+        let id = accounts::insert(self.pool()?, &input).await?;
+        self.store_account_password(id, input.password.as_deref())
+            .await?;
+        tracing::info!(account = id, site = %input.site, "account added");
+        self.reload().await?;
+        Ok(id)
+    }
+
+    pub async fn update_account(&self, id: i64, input: AccountInput) -> Result<()> {
+        let input = input.validated()?;
+        if !accounts::update(self.pool()?, id, &input).await? {
+            return Err(Error::NotFound(format!("account {id}")));
+        }
+        // No user name, no password.
+        let password = if input.username.is_none() {
+            Some("")
+        } else {
+            input.password.as_deref()
+        };
+        self.store_account_password(id, password).await?;
+        tracing::info!(account = id, site = %input.site, "account changed");
+        self.reload().await
+    }
+
+    /// `None` keeps the stored password, an empty one deletes it.
+    async fn store_account_password(&self, id: i64, password: Option<&str>) -> Result<()> {
+        let Some(password) = password else {
+            return Ok(());
+        };
+        let key = accounts::secret_key(id);
+        if password.is_empty() {
+            self.inner.secrets.delete(&key)?;
+        } else {
+            self.inner.secrets.set(&key, password)?;
+        }
+        accounts::set_has_password(self.pool()?, id, !password.is_empty()).await
+    }
+
+    pub async fn remove_account(&self, id: i64) -> Result<()> {
+        if !accounts::delete(self.pool()?, id).await? {
+            return Err(Error::NotFound(format!("account {id}")));
+        }
+        if let Err(e) = self.inner.secrets.delete(&accounts::secret_key(id)) {
+            tracing::warn!(account = id, error = %e, "could not delete account password");
+        }
+        tracing::info!(account = id, "account removed");
+        self.reload().await
+    }
+
+    /// Add the cookies in a `cookies.txt` that belong to the account's site
+    /// (replacing ones with the same name, domain and path). Returns how
+    /// many were kept and how many were for other sites.
+    pub async fn import_cookies(&self, id: i64, text: &str) -> Result<CookieImport> {
+        let (site, existing) = {
+            let state = self.state();
+            let account = state
+                .accounts
+                .iter()
+                .find(|a| a.account.id == id)
+                .ok_or_else(|| Error::NotFound(format!("account {id}")))?;
+            (account.account.site.clone(), account.cookies.clone())
+        };
+        let parsed = request::parse_netscape(text);
+        if parsed.is_empty() {
+            return Err(Error::InvalidInput(
+                "No cookies found: is it a Netscape cookies.txt?".into(),
+            ));
+        }
+        let total = parsed.len();
+        let kept = accounts::cookies_for_site(&site, parsed);
+        let imported = kept.len();
+        // New ones first, so they win over the old ones they replace.
+        let mut merged = RequestContext {
+            cookies: kept,
+            ..RequestContext::default()
+        };
+        merged.merge_cookies(&existing);
+        self.store_cookies(id, merged.cleaned().cookies).await?;
+        tracing::info!(
+            account = id,
+            imported,
+            skipped = total - imported,
+            "cookies imported"
+        );
+        Ok(CookieImport {
+            imported: imported as u32,
+            other_sites: (total - imported) as u32,
+        })
+    }
+
+    pub async fn clear_cookies(&self, id: i64) -> Result<()> {
+        self.store_cookies(id, Vec::new()).await
+    }
+
+    async fn store_cookies(&self, id: i64, cookies: Vec<Cookie>) -> Result<()> {
+        let sealed = if cookies.is_empty() {
+            None
+        } else {
+            Some(self.inner.secrets.seal(&serde_json::to_vec(&cookies)?)?)
+        };
+        if !accounts::set_cookies(self.pool()?, id, sealed).await? {
+            return Err(Error::NotFound(format!("account {id}")));
+        }
+        self.reload().await
     }
 
     /// Client for downloads and link checks to `url`: redirects are left

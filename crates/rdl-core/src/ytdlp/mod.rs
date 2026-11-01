@@ -437,6 +437,11 @@ mod tests {
             connection: ToolConnection {
                 proxy: Some("socks5h://u:p@proxy.lan:1080".into()),
                 source_address: Some("10.64.0.2".parse().unwrap()),
+                login: Some(crate::accounts::Login {
+                    site: "example.com".into(),
+                    username: "me".into(),
+                    password: "s3cret".into(),
+                }),
             },
         };
         let args = spec.args();
@@ -447,6 +452,7 @@ mod tests {
         assert!(joined.contains("--limit-rate 1048576"));
         assert!(joined.contains("--proxy socks5h://u:p@proxy.lan:1080"));
         assert!(joined.contains("--source-address 10.64.0.2"));
+        assert!(joined.contains("--username me --password s3cret"));
         assert_eq!(args[args.len() - 2], "--");
     }
 

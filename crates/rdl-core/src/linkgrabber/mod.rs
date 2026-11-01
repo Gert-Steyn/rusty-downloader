@@ -712,7 +712,8 @@ async fn probe_link(
     let parsed = Url::parse(url).map_err(|e| Error::InvalidUrl(e.to_string()));
     let result = match &parsed {
         Ok(parsed) => {
-            let spec = DownloadSpec::with_request(parsed.clone(), request.clone());
+            let (request, login) = inner.network.with_account(parsed, request.clone());
+            let spec = DownloadSpec::with_request(parsed.clone(), request).with_login(login);
             match inner.network.client(parsed, ProxyChoice::Auto) {
                 Ok(client) => http::probe(&client, &spec).await,
                 Err(e) => Err(e),

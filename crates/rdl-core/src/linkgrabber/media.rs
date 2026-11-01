@@ -102,6 +102,8 @@ pub(super) async fn lookup(inner: &Inner, url: &Url, request: &RequestContext) -
         }
     };
     let connection = inner.network.tool_connection(url, ProxyChoice::Auto)?;
+    let (request, _) = inner.network.with_account(url, request.clone());
+    let request = &request;
     let cancel = CancellationToken::new();
     match ytdlp::resolve(&exe, url, request, &connection, &cancel).await {
         Ok(media) => Ok(Lookup::Found(media)),

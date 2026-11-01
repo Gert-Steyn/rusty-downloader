@@ -6,30 +6,46 @@ use reqwest::header::{
     ACCEPT_ENCODING, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG,
     HeaderMap, HeaderValue, LAST_MODIFIED, RANGE,
 };
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+
 use reqwest::{Client, StatusCode, Url};
 
 use super::{check_status, filename, parse_content_range};
 use crate::Result;
+use crate::accounts::Login;
 use crate::request::RequestContext;
 
 /// What to fetch, and what the browser would send with it (referer, user
-/// agent, cookies).
+/// agent, cookies), plus a site login to answer HTTP Basic challenges.
 #[derive(Debug, Clone)]
 pub struct DownloadSpec {
     pub url: Url,
     pub request: RequestContext,
+    /// Given only to its own site, and only once that site asked for it.
+    pub login: Option<Login>,
+    /// Hosts that asked for Basic auth; later requests to them send the
+    /// login straight away rather than being refused first.
+    pub(super) basic_hosts: Arc<Mutex<HashSet<String>>>,
 }
 
 impl DownloadSpec {
     pub fn new(url: Url) -> Self {
-        Self {
-            url,
-            request: RequestContext::default(),
-        }
+        Self::with_request(url, RequestContext::default())
     }
 
     pub fn with_request(url: Url, request: RequestContext) -> Self {
-        Self { url, request }
+        Self {
+            url,
+            request,
+            login: None,
+            basic_hosts: Arc::default(),
+        }
+    }
+
+    pub fn with_login(mut self, login: Option<Login>) -> Self {
+        self.login = login;
+        self
     }
 }
 

@@ -36,6 +36,10 @@ pub struct Server {
     pub private_cookies: Mutex<Vec<Option<String>>>,
     /// Bodies served at `/text/{name}`.
     pub texts: Mutex<HashMap<String, String>>,
+    /// Requests to `/members` and `/basic`, and how many carried a login.
+    pub member_requests: AtomicUsize,
+    pub basic_requests: AtomicUsize,
+    pub basic_logins: AtomicUsize,
 }
 
 impl Server {
@@ -67,7 +71,9 @@ enum Mode {
 /// Routes: `/file` `/slow` `/flaky` `/named/{name}` (ranged, same bytes and ETag), `/plain`
 /// (ignores Range), `/chunked` (no length), `/redirect` → `/file`, `/gone` (410),
 /// `/private` (like `/file`, but 403 without cookie `sid=ok` and a referer),
-/// `/text/{name}` (what [`Server::set_text`] put there),
+/// `/text/{name}` (what [`Server::set_text`] put there), `/members` (like
+/// `/file`, but 403 without cookie `member=yes`), `/basic` (like `/file`, but
+/// 401 with a Basic challenge unless the login is `me` / `s3cret`),
 /// `/to-localhost` → `/private` on `localhost` instead of 127.0.0.1.
 pub async fn spawn_server() -> (Url, Arc<Server>) {
     let mut data = vec![0u8; SIZE];
@@ -80,6 +86,9 @@ pub async fn spawn_server() -> (Url, Arc<Server>) {
         port: AtomicU16::new(0),
         private_cookies: Mutex::new(Vec::new()),
         texts: Mutex::new(HashMap::new()),
+        member_requests: AtomicUsize::new(0),
+        basic_requests: AtomicUsize::new(0),
+        basic_logins: AtomicUsize::new(0),
     });
 
     let app = Router::new()
@@ -92,6 +101,8 @@ pub async fn spawn_server() -> (Url, Arc<Server>) {
         .route("/redirect", get(|| async { Redirect::temporary("/file") }))
         .route("/gone", get(|| async { StatusCode::GONE }))
         .route("/private", get(private))
+        .route("/members", get(members))
+        .route("/basic", get(basic))
         .route(
             "/text/{name}",
             get(
@@ -221,6 +232,37 @@ async fn private(State(server): State<Arc<Server>>, headers: HeaderMap) -> Respo
     let signed_in = cookie.is_some_and(|c| c.split("; ").any(|c| c == "sid=ok"));
     if !signed_in || !headers.contains_key(header::REFERER) {
         return StatusCode::FORBIDDEN.into_response();
+    }
+    ranged(State(server), headers, Mode::Normal).await
+}
+
+async fn members(State(server): State<Arc<Server>>, headers: HeaderMap) -> Response {
+    server.member_requests.fetch_add(1, Ordering::SeqCst);
+    let member = headers
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|c| c.split("; ").any(|c| c == "member=yes"));
+    if !member {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    ranged(State(server), headers, Mode::Normal).await
+}
+
+async fn basic(State(server): State<Arc<Server>>, headers: HeaderMap) -> Response {
+    server.basic_requests.fetch_add(1, Ordering::SeqCst);
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok());
+    if auth.is_some() {
+        server.basic_logins.fetch_add(1, Ordering::SeqCst);
+    }
+    // me:s3cret
+    if auth != Some("Basic bWU6czNjcmV0") {
+        return (
+            StatusCode::UNAUTHORIZED,
+            [(header::WWW_AUTHENTICATE, "Basic realm=\"test\"")],
+        )
+            .into_response();
     }
     ranged(State(server), headers, Mode::Normal).await
 }

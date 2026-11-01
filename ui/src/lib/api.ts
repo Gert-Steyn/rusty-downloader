@@ -2,6 +2,8 @@
 import { isTauri } from '@tauri-apps/api/core';
 import type {
 	ActiveLimit_Serialize,
+	Account_Serialize,
+	AccountInput_Deserialize,
 	AdapterInfo_Serialize,
 	Checksum_Serialize,
 	ProxyInput_Deserialize,
@@ -35,6 +37,7 @@ import type {
 export { commands, events } from './bindings.js';
 export type {
 	AppInfo,
+	CookieImport,
 	Availability,
 	ChecksumAlgo,
 	NetworkStatus,
@@ -55,6 +58,8 @@ export { isTauri };
 export type Package = Package_Serialize;
 export type Download = Download_Serialize;
 export type Checksum = Checksum_Serialize;
+export type Account = Account_Serialize;
+export type AccountInput = AccountInput_Deserialize;
 export type AdapterInfo = AdapterInfo_Serialize;
 export type ProxyOverview = ProxyOverview_Serialize;
 export type ProxyProfile = ProxyProfile_Serialize;
