@@ -219,10 +219,10 @@ pub fn parse_list(algo: ChecksumAlgo, text: &str) -> Vec<ListEntry> {
         .filter(|line| !line.is_empty() && !line.starts_with(';') && !line.starts_with('#'))
         .filter_map(|line| {
             // BSD: `ALGO (name) = value`.
-            if let (Some(open), Some(eq)) = (line.find(" ("), line.rfind(") = ")) {
-                if open < eq {
-                    return entry(&line[open + 2..eq], line[eq + 4..].trim());
-                }
+            if let (Some(open), Some(eq)) = (line.find(" ("), line.rfind(") = "))
+                && open < eq
+            {
+                return entry(&line[open + 2..eq], line[eq + 4..].trim());
             }
             let (first, rest) = line.split_once(char::is_whitespace)?;
             if ok(first) {

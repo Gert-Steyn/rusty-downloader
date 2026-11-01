@@ -58,12 +58,11 @@ pub(super) async fn start(inner: &Arc<Inner>, row: DownloadRow, queue_id: i64) -
         let mut last = None;
         let mut result = execute(&inner, &row, &cancel, &limit, &mut last).await;
         // A gallery is many files; a checksum belongs to one.
-        if let (Ok(Outcome::Completed { path, .. }), false) =
-            (&result, row.kind() == DownloadKind::Gallerydl)
+        if let Ok(Outcome::Completed { path, .. }) = &result
+            && row.kind() != DownloadKind::Gallerydl
+            && let Err(e) = checksums::check_finished(&inner, row.id, path, &cancel).await
         {
-            if let Err(e) = checksums::check_finished(&inner, row.id, path, &cancel).await {
-                result = Err(e);
-            }
+            result = Err(e);
         }
         let list = match &result {
             Ok(Outcome::Completed { path, .. }) if row.kind() == DownloadKind::Http => {
@@ -78,10 +77,10 @@ pub(super) async fn start(inner: &Arc<Inner>, row: DownloadRow, queue_id: i64) -
         if let Err(e) = finalize(&inner, &row, result, reason, last).await {
             tracing::error!(download = row.id, error = %e, "could not record download outcome");
         }
-        if let Some(path) = list {
-            if let Err(e) = checksums::apply_list(&inner, row.package_id, row.id, &path).await {
-                tracing::warn!(download = row.id, error = %e, "could not read checksum list");
-            }
+        if let Some(path) = list
+            && let Err(e) = checksums::apply_list(&inner, row.package_id, row.id, &path).await
+        {
+            tracing::warn!(download = row.id, error = %e, "could not read checksum list");
         }
         // The queue it ended in: its package may have moved meanwhile.
         let queue = inner.running().remove(&row.id).map(|job| job.queue_id);
@@ -106,11 +105,12 @@ async fn execute(
     last: &mut Option<Progress>,
 ) -> Result<Outcome> {
     // The file that failed its checksum last time goes; this is the retry.
-    if row.checksum_ok == Some(0) && row.kind() != DownloadKind::Gallerydl {
-        if let (Some(dest), Some(value)) = (&row.dest_path, &row.checksum_value) {
-            super::remove_file_if_exists(Path::new(dest)).await?;
-            store::set_checksum_ok(&inner.pool, row.id, value, None).await?;
-        }
+    if row.checksum_ok == Some(0)
+        && row.kind() != DownloadKind::Gallerydl
+        && let (Some(dest), Some(value)) = (&row.dest_path, &row.checksum_value)
+    {
+        super::remove_file_if_exists(Path::new(dest)).await?;
+        store::set_checksum_ok(&inner.pool, row.id, value, None).await?;
     }
     match row.kind.as_str() {
         "http" => {}

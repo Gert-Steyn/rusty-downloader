@@ -589,7 +589,14 @@ async fn a_downloads_own_limit_changes_while_it_runs() {
         fx.manager.get(id).await.unwrap().speed_limit,
         Some(256 * 1024)
     );
-    fx.wait_status(id, Status::Active).await;
+    // Its `Active` event may have gone by while waiting for the one above.
+    tokio::time::timeout(TIMEOUT, async {
+        while fx.manager.get(id).await.unwrap().status != Status::Active {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("never started");
     tokio::time::sleep(Duration::from_millis(800)).await;
     let partway = fx.manager.get(id).await.unwrap();
     assert_ne!(partway.status, Status::Completed, "the limit didn't hold");
