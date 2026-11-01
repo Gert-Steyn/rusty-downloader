@@ -64,25 +64,20 @@ pub(super) async fn start(inner: &Arc<Inner>, row: DownloadRow, queue_id: i64) -
         {
             result = Err(e);
         }
-        let list = match &result {
-            Ok(Outcome::Completed { path, .. })
-                if matches!(row.kind(), DownloadKind::Http | DownloadKind::Ftp) =>
-            {
-                Some(path.clone())
-            }
-            _ => None,
-        };
+        // A checksum list is read while it still holds its queue slot, so
+        // the files it names can't start before they have their values.
+        if let Ok(Outcome::Completed { path, .. }) = &result
+            && matches!(row.kind(), DownloadKind::Http | DownloadKind::Ftp)
+            && let Err(e) = checksums::apply_list(&inner, row.package_id, row.id, path).await
+        {
+            tracing::warn!(download = row.id, error = %e, "could not read checksum list");
+        }
         let reason = *stop.lock().unwrap_or_else(|e| e.into_inner());
         // Completed or failed: either way it's done, as far as its queue goes.
         let ended = matches!(result, Ok(Outcome::Completed { .. }) | Err(_))
             && reason != Some(StopReason::Remove);
         if let Err(e) = finalize(&inner, &row, result, reason, last).await {
             tracing::error!(download = row.id, error = %e, "could not record download outcome");
-        }
-        if let Some(path) = list
-            && let Err(e) = checksums::apply_list(&inner, row.package_id, row.id, &path).await
-        {
-            tracing::warn!(download = row.id, error = %e, "could not read checksum list");
         }
         // The queue it ended in: its package may have moved meanwhile.
         let queue = inner.running().remove(&row.id).map(|job| job.queue_id);
