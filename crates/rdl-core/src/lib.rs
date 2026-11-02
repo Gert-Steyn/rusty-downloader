@@ -22,6 +22,8 @@ pub mod ratelimit;
 pub mod request;
 pub mod secrets;
 pub mod settings;
+pub mod sftp;
+mod single;
 pub mod speed;
 pub mod timewindow;
 pub mod tools;

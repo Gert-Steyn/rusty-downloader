@@ -34,7 +34,7 @@ use crate::proxy::ProxyChoice;
 use crate::request::RequestContext;
 use crate::tools::Tools;
 use crate::ytdlp::{MediaInfo, YtDlpOptions};
-use crate::{Error, Result, ftp};
+use crate::{Error, Result, ftp, sftp};
 
 pub use links::{archive_set_name, default_package_name, extract_links};
 pub use media::MediaSummary;
@@ -647,7 +647,7 @@ fn new_download(link: &GrabbedLink, request: RequestContext) -> Option<NewDownlo
                 ..url_only
             });
         }
-        DownloadKind::Http | DownloadKind::Ftp => {
+        DownloadKind::Http | DownloadKind::Ftp | DownloadKind::Sftp => {
             return Some(NewDownload {
                 filename: link.filename.clone(),
                 ..url_only
@@ -724,6 +724,19 @@ async fn probe_link(
                 Err(e) => Err(e),
             }
         }
+        Ok(parsed) if sftp::is_sftp(parsed) => {
+            let (_, login) = inner
+                .network
+                .with_account(parsed, RequestContext::default());
+            let known = inner.network.known_hosts();
+            match inner.network.local_address() {
+                Ok(local) => match sftp::Location::new(parsed, login, local, known) {
+                    Ok(location) => sftp::probe(&location).await,
+                    Err(e) => Err(e),
+                },
+                Err(e) => Err(e),
+            }
+        }
         Ok(parsed) => {
             let (request, login) = inner.network.with_account(parsed, request.clone());
             let spec = DownloadSpec::with_request(parsed.clone(), request).with_login(login);
@@ -736,6 +749,7 @@ async fn probe_link(
     };
     if let Ok(parsed) = &parsed
         && !ftp::is_ftp(parsed)
+        && !sftp::is_sftp(parsed)
         && media::worth_asking(&result)
     {
         // yt-dlp first, then gallery-dl. A find by yt-dlp's catch-all
@@ -811,7 +825,8 @@ async fn probe_link(
                     status: 404 | 410 | 451,
                     ..
                 }
-                | Error::FtpReply { code: 550, .. } => Availability::Offline,
+                | Error::FtpReply { code: 550, .. }
+                | Error::SftpStatus { code: 2, .. } => Availability::Offline,
                 _ => Availability::Error,
             };
             tracing::debug!(link = id, error = %e, "link check failed");

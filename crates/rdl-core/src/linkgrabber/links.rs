@@ -9,7 +9,7 @@ use url::Url;
 use crate::http::filename;
 
 static LINK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)(?:https?|ftps?)://[^\s"'<>]+"#).expect("valid regex"));
+    LazyLock::new(|| Regex::new(r#"(?i)(?:https?|s?ftps?)://[^\s"'<>]+"#).expect("valid regex"));
 
 /// Multipart archive names, each capturing the shared base name.
 static ARCHIVE_PART: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -24,7 +24,7 @@ static ARCHIVE_PART: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     .collect()
 });
 
-/// Distinct http(s) and ftp(s) URLs in `text`, in order, without trailing punctuation
+/// Distinct http(s), ftp(s) and sftp URLs in `text`, in order, without trailing punctuation
 /// picked up from prose (`see https://x.com/a.zip.`).
 pub fn extract_links(text: &str) -> Vec<Url> {
     let mut seen = HashSet::new();
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn extracts_links_from_prose() {
         let text = "Grab https://example.com/a.zip, then (https://cdn.example.org/b.iso).\n\
-                    Again: https://example.com/a.zip and ftp://nope.example/c plus HTTP://Example.com/D";
+                    Again: https://example.com/a.zip and ftp://nope.example/c, sftp://me@nope.example/d plus HTTP://Example.com/D";
         let links: Vec<String> = extract_links(text).iter().map(|u| u.to_string()).collect();
         assert_eq!(
             links,
@@ -79,6 +79,7 @@ mod tests {
                 "https://example.com/a.zip",
                 "https://cdn.example.org/b.iso",
                 "ftp://nope.example/c",
+                "sftp://me@nope.example/d",
                 "http://example.com/D"
             ]
         );

@@ -89,6 +89,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             network_commands::account_remove,
             network_commands::account_import_cookies,
             network_commands::account_clear_cookies,
+            network_commands::known_hosts_list,
+            network_commands::known_host_forget,
             network_watch::network_adapters,
             network_watch::network_status,
             queue_commands::list_queues,

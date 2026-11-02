@@ -4,6 +4,7 @@
 use rdl_core::accounts::{Account, AccountInput};
 use rdl_core::network::CookieImport;
 use rdl_core::proxy::{ProxyChoice, ProxyInput, ProxyProfile, ProxySettings};
+use rdl_core::sftp::KnownHost;
 use serde::Serialize;
 use specta::Type;
 use tauri::State;
@@ -141,4 +142,22 @@ pub async fn account_import_cookies(
 #[specta::specta]
 pub async fn account_clear_cookies(state: State<'_, AppState>, id: i64) -> CommandResult<()> {
     Ok(state.network.clear_cookies(id).await?)
+}
+
+/// The host keys trusted for SFTP servers.
+#[tauri::command]
+#[specta::specta]
+pub async fn known_hosts_list(state: State<'_, AppState>) -> CommandResult<Vec<KnownHost>> {
+    Ok(state.network.known_hosts().list().await?)
+}
+
+/// Stop trusting a server's host key; the next connection trusts the one it shows.
+#[tauri::command]
+#[specta::specta]
+pub async fn known_host_forget(
+    state: State<'_, AppState>,
+    host: String,
+    port: u16,
+) -> CommandResult<()> {
+    Ok(state.network.known_hosts().forget(&host, port).await?)
 }

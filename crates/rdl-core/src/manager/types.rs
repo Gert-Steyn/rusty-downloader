@@ -62,6 +62,7 @@ pub enum DownloadKind {
     #[default]
     Http,
     Ftp,
+    Sftp,
     Ytdlp,
     Gallerydl,
 }
@@ -71,23 +72,36 @@ impl DownloadKind {
         match self {
             DownloadKind::Http => "http",
             DownloadKind::Ftp => "ftp",
+            DownloadKind::Sftp => "sftp",
             DownloadKind::Ytdlp => "ytdlp",
             DownloadKind::Gallerydl => "gallerydl",
         }
     }
 
-    /// The handler for a plain link: FTP for `ftp://` and `ftps://`, else HTTP.
+    /// The handler for a plain link: FTP for `ftp://` and `ftps://`, SFTP
+    /// for `sftp://`, else HTTP.
     pub fn for_url(url: &Url) -> Self {
         if crate::ftp::is_ftp(url) {
             DownloadKind::Ftp
+        } else if crate::sftp::is_sftp(url) {
+            DownloadKind::Sftp
         } else {
             DownloadKind::Http
         }
     }
 
+    /// A single file fetched by the app itself (not by a tool).
+    pub fn is_plain(self) -> bool {
+        matches!(
+            self,
+            DownloadKind::Http | DownloadKind::Ftp | DownloadKind::Sftp
+        )
+    }
+
     pub fn parse(s: &str) -> Self {
         match s {
             "ftp" => DownloadKind::Ftp,
+            "sftp" => DownloadKind::Sftp,
             "ytdlp" => DownloadKind::Ytdlp,
             "gallerydl" => DownloadKind::Gallerydl,
             _ => DownloadKind::Http,

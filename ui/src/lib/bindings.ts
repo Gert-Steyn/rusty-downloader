@@ -110,6 +110,10 @@ export const commands = {
 	/**  Add the cookies for the account's site from a Netscape `cookies.txt`. */
 	accountImportCookies: (id: number, path: string) => typedError<CookieImport, CommandError>(__TAURI_INVOKE("account_import_cookies", { id, path })),
 	accountClearCookies: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("account_clear_cookies", { id })),
+	/**  The host keys trusted for SFTP servers. */
+	knownHostsList: () => typedError<KnownHost[], CommandError>(__TAURI_INVOKE("known_hosts_list")),
+	/**  Stop trusting a server's host key; the next connection trusts the one it shows. */
+	knownHostForget: (host: string, port: number) => typedError<null, CommandError>(__TAURI_INVOKE("known_host_forget", { host, port })),
 	/**  Network adapters on this machine, for choosing one. */
 	networkAdapters: () => typedError<AdapterInfo_Serialize[], CommandError>(__TAURI_INVOKE("network_adapters")),
 	networkStatus: () => typedError<NetworkStatus, CommandError>(__TAURI_INVOKE("network_status")),
@@ -349,7 +353,7 @@ export type DownloadEvents_Serialize = {
 };
 
 /**  Which handler runs a download. Stored as the `downloads.kind` text. */
-export type DownloadKind = "http" | "ftp" | "ytdlp" | "gallerydl";
+export type DownloadKind = "http" | "ftp" | "sftp" | "ytdlp" | "gallerydl";
 
 export type Download_Deserialize = {
 	id: number,
@@ -785,6 +789,17 @@ export type HistoryEntry_Serialize = {
 	finishedAt: number,
 	/**  The file or folder is still there. */
 	exists: boolean,
+};
+
+/**  A host key trusted for a server. */
+export type KnownHost = {
+	host: string,
+	port: number,
+	algorithm: string,
+	/**  OpenSSH's form: `SHA256:…`. */
+	fingerprint: string,
+	/**  Unix time in milliseconds. */
+	addedAt: number,
 };
 
 export type LimitSource = "none" | 

@@ -82,6 +82,28 @@ pub enum Error {
     #[error("FTP: {0}")]
     Ftp(String),
 
+    #[error("SSH connection failed: {0}")]
+    SshConnection(String),
+
+    #[error("the SFTP server refused the login for {user}@{host} (password and SSH keys)")]
+    SshLogin { user: String, host: String },
+
+    #[error(
+        "the SFTP server {host} shows a different host key ({offered}) than before ({known}); \
+         if that's expected, forget the old one in Settings → Known SFTP hosts"
+    )]
+    HostKeyChanged {
+        host: String,
+        known: String,
+        offered: String,
+    },
+
+    #[error("SFTP server: {message} (status {code})")]
+    SftpStatus { code: u32, message: String },
+
+    #[error("SFTP: {0}")]
+    Sftp(String),
+
     #[error("Credential Manager: {0}")]
     Secrets(String),
 
@@ -95,7 +117,7 @@ impl Error {
         match self {
             Error::Http(e) => !e.is_builder() && !e.is_redirect(),
             Error::HttpStatus { status, .. } => matches!(status, 408 | 425 | 429 | 500..=599),
-            Error::Incomplete | Error::FtpConnection(_) => true,
+            Error::Incomplete | Error::FtpConnection(_) | Error::SshConnection(_) => true,
             // 4xx replies are transient ("too many users", "try again").
             Error::FtpReply { code, .. } => (400..500).contains(code),
             _ => false,

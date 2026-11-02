@@ -14,7 +14,7 @@ use super::store::{self, DownloadRow, Resolved};
 use super::{DownloadKind, Event, Inner, RunningJob, Status, StopReason, checksums};
 use crate::http::{self, DownloadSpec, Outcome, ProbeResult, Progress, filename, segments};
 use crate::ratelimit::RateLimiter;
-use crate::{Error, Result, ftp, history};
+use crate::{Error, Result, ftp, history, sftp};
 
 const PART_SUFFIX: &str = ".rdl.part";
 
@@ -67,7 +67,7 @@ pub(super) async fn start(inner: &Arc<Inner>, row: DownloadRow, queue_id: i64) -
         // A checksum list is read while it still holds its queue slot, so
         // the files it names can't start before they have their values.
         if let Ok(Outcome::Completed { path, .. }) = &result
-            && matches!(row.kind(), DownloadKind::Http | DownloadKind::Ftp)
+            && row.kind().is_plain()
             && let Err(e) = checksums::apply_list(&inner, row.package_id, row.id, path).await
         {
             tracing::warn!(download = row.id, error = %e, "could not read checksum list");
@@ -110,7 +110,7 @@ async fn execute(
         store::set_checksum_ok(&inner.pool, row.id, value, None).await?;
     }
     match row.kind.as_str() {
-        "http" | "ftp" => {}
+        "http" | "ftp" | "sftp" => {}
         "ytdlp" => return super::ytdlp_job::execute(inner, row, cancel).await,
         "gallerydl" => return super::gallerydl_job::execute(inner, row, cancel).await,
         other => return Err(Error::Unsupported(format!("{other} downloads"))),
@@ -125,6 +125,10 @@ async fn execute(
     let source = if row.kind() == DownloadKind::Ftp {
         let local = inner.network.local_address()?;
         Source::Ftp(ftp::Location::new(&url, login, local)?)
+    } else if row.kind() == DownloadKind::Sftp {
+        let local = inner.network.local_address()?;
+        let known = inner.network.known_hosts();
+        Source::Sftp(sftp::Location::new(&url, login, local, known)?)
     } else {
         Source::Http {
             client: inner.network.client(&url, row.proxy())?,
@@ -204,6 +208,20 @@ async fn execute(
             )
             .await
         }
+        Source::Sftp(location) => {
+            let resume = !resume_from.is_empty();
+            sftp::download(
+                location,
+                &probe,
+                &part_path(&dest),
+                &dest,
+                resume,
+                &config,
+                &tx,
+                cancel,
+            )
+            .await
+        }
         Source::Ftp(location) => {
             let resume = !resume_from.is_empty();
             ftp::download(
@@ -233,6 +251,7 @@ enum Source {
         spec: DownloadSpec,
     },
     Ftp(ftp::Location),
+    Sftp(sftp::Location),
 }
 
 impl Source {
@@ -240,6 +259,7 @@ impl Source {
         match self {
             Source::Http { client, spec } => http::probe(client, spec).await,
             Source::Ftp(location) => ftp::probe(location).await,
+            Source::Sftp(location) => sftp::probe(location).await,
         }
     }
 }

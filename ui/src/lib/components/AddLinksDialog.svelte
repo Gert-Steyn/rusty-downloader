@@ -1,7 +1,7 @@
 <script lang="ts" module>
-	/** Pull distinct http(s) and ftp(s) URLs out of pasted text, dropping trailing punctuation. */
+	/** Pull distinct http(s), ftp(s) and sftp URLs out of pasted text, dropping trailing punctuation. */
 	export function extractLinks(text: string): string[] {
-		const found = text.match(/(?:https?|ftps?):\/\/[^\s"'<>]+/gi) ?? [];
+		const found = text.match(/(?:https?|s?ftps?):\/\/[^\s"'<>]+/gi) ?? [];
 		return [...new Set(found.map((u) => u.replace(/[),.;:!?\]]+$/, '')))];
 	}
 </script>

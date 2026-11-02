@@ -2,6 +2,7 @@
 	import { open as pickFolder } from '@tauri-apps/plugin-dialog';
 	import { commands, isTauri, unwrap, type AppInfo, type Settings, type SpeedRule } from '#lib/api.js';
 	import AccountsSettings from '#lib/components/AccountsSettings.svelte';
+	import KnownHostsSettings from '#lib/components/KnownHostsSettings.svelte';
 	import NetworkSettings from '#lib/components/NetworkSettings.svelte';
 	import { settings } from '#lib/settings.svelte.js';
 	import { speed } from '#lib/speed.svelte.js';
@@ -238,6 +239,8 @@
 		<NetworkSettings />
 
 		<AccountsSettings />
+
+		<KnownHostsSettings />
 
 		<section class="card" aria-labelledby="set-grabber">
 			<h2 id="set-grabber">LinkGrabber</h2>

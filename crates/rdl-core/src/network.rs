@@ -21,6 +21,7 @@ use crate::db::Pool;
 use crate::proxy::{self, ProxyChoice, ProxyInput, ProxyProfile, ProxySettings};
 use crate::request::{self, Cookie, RequestContext};
 use crate::secrets::{MemorySecrets, Secrets};
+use crate::sftp::KnownHosts;
 use crate::{Error, Result, http};
 
 /// What a `cookies.txt` import did.
@@ -112,6 +113,7 @@ struct Inner {
     user_agent: Option<String>,
     state: RwLock<State>,
     binding: RwLock<Binding>,
+    known_hosts: KnownHosts,
     /// By proxy URL (`None`: direct) and whether redirects are followed.
     clients: Mutex<HashMap<(Option<String>, bool), Client>>,
 }
@@ -146,6 +148,7 @@ impl Network {
     fn new(pool: Option<Pool>, secrets: Arc<dyn Secrets>, user_agent: Option<&str>) -> Self {
         Self {
             inner: Arc::new(Inner {
+                known_hosts: KnownHosts::new(pool.clone()),
                 pool,
                 secrets,
                 user_agent: user_agent.map(str::to_owned),
@@ -251,6 +254,11 @@ impl Network {
             .unwrap_or_else(|e| e.into_inner())
             .clear();
         true
+    }
+
+    /// The host keys of SFTP servers.
+    pub fn known_hosts(&self) -> KnownHosts {
+        self.inner.known_hosts.clone()
     }
 
     /// The address to send from; an error while the bound adapter is down.

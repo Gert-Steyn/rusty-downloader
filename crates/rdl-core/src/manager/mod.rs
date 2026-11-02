@@ -583,7 +583,7 @@ impl Manager {
         let completed = row.status() == Status::Completed;
         if let Some(dest) = row.dest_path.as_deref().map(std::path::Path::new) {
             match row.kind() {
-                DownloadKind::Http | DownloadKind::Ftp => {
+                DownloadKind::Http | DownloadKind::Ftp | DownloadKind::Sftp => {
                     remove_file_if_exists(&job::part_path(dest)).await?
                 }
                 DownloadKind::Ytdlp if !completed => {

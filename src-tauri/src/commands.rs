@@ -276,13 +276,15 @@ fn open_path(path: &Path) -> CommandResult<()> {
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| CommandError(e.to_string()))
 }
 
-/// Split input into valid http(s) and ftp(s) URLs and everything else (trimmed, blanks dropped).
+/// Split input into valid http(s), ftp(s) and sftp URLs and everything else (trimmed, blanks dropped).
 pub(crate) fn parse_links(inputs: &[String]) -> (Vec<Url>, Vec<String>) {
     let mut urls = Vec::new();
     let mut rejected = Vec::new();
     for input in inputs.iter().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         match Url::parse(input) {
-            Ok(url) if matches!(url.scheme(), "http" | "https" | "ftp" | "ftps") => urls.push(url),
+            Ok(url) if matches!(url.scheme(), "http" | "https" | "ftp" | "ftps" | "sftp") => {
+                urls.push(url)
+            }
             _ => rejected.push(input.to_owned()),
         }
     }
@@ -299,12 +301,13 @@ mod tests {
             " https://example.com/a.zip ".to_owned(),
             "".to_owned(),
             "ftp://example.com/b".to_owned(),
+            "sftp://me@example.com/c".to_owned(),
             "not a url".to_owned(),
             "file:///C:/x".to_owned(),
             "http://example.com/c".to_owned(),
         ];
         let (urls, rejected) = parse_links(&inputs);
-        assert_eq!(urls.len(), 3);
+        assert_eq!(urls.len(), 4);
         assert_eq!(rejected, ["not a url", "file:///C:/x"]);
     }
 }

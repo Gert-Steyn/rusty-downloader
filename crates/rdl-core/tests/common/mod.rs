@@ -6,6 +6,7 @@
 
 pub mod ftp;
 pub mod proxy;
+pub mod sftp;
 
 use std::collections::HashMap;
 use std::convert::Infallible;

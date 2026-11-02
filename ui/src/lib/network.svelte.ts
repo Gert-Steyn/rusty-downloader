@@ -10,6 +10,7 @@ import {
 	type AccountInput,
 	type AdapterInfo,
 	type CookieImport,
+	type KnownHost,
 	type NetworkStatus,
 	type ProxyChoice,
 	type ProxyInput,
@@ -70,6 +71,23 @@ class NetworkStore {
 	async clearCookies(id: number) {
 		await this.run(() => unwrap(commands.accountClearCookies(id)));
 		await this.loadAccounts();
+	}
+
+	/** Host keys trusted for SFTP servers. */
+	knownHosts = $state<KnownHost[]>([]);
+
+	async loadKnownHosts() {
+		if (!isTauri()) return;
+		try {
+			this.knownHosts = await unwrap(commands.knownHostsList());
+		} catch (e) {
+			this.error = String(e);
+		}
+	}
+
+	async forgetHost(host: string, port: number) {
+		await this.run(() => unwrap(commands.knownHostForget(host, port)));
+		await this.loadKnownHosts();
 	}
 
 	/** The adapters on this machine, asked again each time. */

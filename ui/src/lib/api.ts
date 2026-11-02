@@ -39,6 +39,7 @@ export type {
 	AppInfo,
 	CookieImport,
 	Availability,
+	KnownHost,
 	ChecksumAlgo,
 	NetworkStatus,
 	ProxyChoice,

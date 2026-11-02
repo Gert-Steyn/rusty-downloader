@@ -11,11 +11,10 @@
 //! relative to the login's home folder, as RFC 1738 has it (`%2F` at the
 //! start makes one absolute).
 
-use std::io::{self, SeekFrom};
-use std::net::{IpAddr, SocketAddr};
-use std::path::{Path, PathBuf};
+use std::io;
+use std::net::IpAddr;
+use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use percent_encoding::percent_decode_str;
 use rustls::ClientConfig;
@@ -23,21 +22,14 @@ use rustls_platform_verifier::BuilderVerifierExt;
 use suppaftp::tokio::{AsyncRustlsConnector, AsyncRustlsFtpStream};
 use suppaftp::types::FileType;
 use suppaftp::{FtpError, Mode};
-use tokio::fs::{self, File, OpenOptions};
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use url::{Host, Url};
 
 use crate::accounts::Login;
-use crate::http::{self, Outcome, ProbeResult, Progress, Segment, SegmentConfig, filename};
+use crate::http::{Outcome, ProbeResult, Progress, SegmentConfig, filename};
+use crate::single::{self, READ_TIMEOUT, Single};
 use crate::{Error, Result};
-
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-/// For a command's reply and for each read of a transfer.
-const READ_TIMEOUT: Duration = Duration::from_secs(30);
-const BUFFER: usize = 64 * 1024;
 
 /// Whether `url` is an FTP or FTPS link.
 pub fn is_ftp(url: &Url) -> bool {
@@ -177,49 +169,19 @@ pub async fn download(
     progress: &watch::Sender<Progress>,
     cancel: &CancellationToken,
 ) -> Result<Outcome> {
-    if fs::try_exists(final_path).await? {
-        return Err(Error::DestinationExists(final_path.to_owned()));
-    }
-    if let Some(parent) = part_path.parent() {
-        fs::create_dir_all(parent).await?;
-    }
-    let total = probe.size;
-    let mut written = match fs::metadata(part_path).await {
-        Ok(meta) if resume => meta.len(),
-        _ => 0,
-    };
-    if total.is_some_and(|t| written > t) {
-        written = 0;
-    }
-    if written == 0 {
-        File::create(part_path).await?;
-    } else {
-        tracing::debug!(done = written, ?total, "resuming");
-    }
-
-    let mut failures = 0;
-    let outcome = loop {
-        let before = written;
-        let error = match transfer(
-            location,
-            total,
-            part_path,
-            &mut written,
-            config,
-            progress,
-            cancel,
-        )
-        .await
-        {
-            Ok(outcome) => break outcome,
+    let mut file = Single::start(
+        part_path, final_path, probe.size, resume, config, progress, cancel,
+    )
+    .await?;
+    let completed = loop {
+        let before = file.written;
+        let error = match transfer(location, &mut file).await {
+            Ok(completed) => break completed,
             Err(e) => e,
         };
-        if written > before {
-            failures = 0;
-        }
         // A server that can't resume refuses `REST` as an unknown command.
         if before > 0
-            && written == before
+            && file.written == before
             && matches!(
                 error,
                 Error::FtpReply {
@@ -229,142 +191,59 @@ pub async fn download(
             )
         {
             tracing::warn!(error = %error, "server can't resume; starting over");
-            written = 0;
-            File::create(part_path).await?;
+            file.restart().await?;
             continue;
         }
-        failures += 1;
-        if !error.is_retryable() || failures > config.max_retries {
-            progress.send_replace(report(written, total, 0));
-            return Err(error);
-        }
-        let delay = http::backoff(config.retry_base_delay, failures);
-        tracing::debug!(error = %error, attempt = failures, ?delay, "retrying FTP transfer");
-        tokio::select! {
-            _ = cancel.cancelled() => break Outcome::Paused,
-            _ = tokio::time::sleep(delay) => {}
+        if !file.retry(error, before).await? {
+            break false;
         }
     };
-    progress.send_replace(report(written, total, 0));
-    if outcome == Outcome::Paused {
-        return Ok(outcome);
-    }
-    let size = http::finish(part_path, final_path, total).await?;
-    tracing::info!(path = %final_path.display(), size, "download complete");
-    Ok(Outcome::Completed {
-        path: final_path.to_owned(),
-        size,
-    })
+    file.end(completed, final_path).await
 }
 
 /// One connection's worth: `REST` to where the part file ends, `RETR`, and
-/// append until the server is done or the download is cancelled.
-async fn transfer(
-    location: &Location,
-    total: Option<u64>,
-    part_path: &Path,
-    written: &mut u64,
-    config: &SegmentConfig,
-    progress: &watch::Sender<Progress>,
-    cancel: &CancellationToken,
-) -> Result<Outcome> {
+/// append until the server is done (`true`) or the download is cancelled.
+async fn transfer(location: &Location, file: &mut Single<'_>) -> Result<bool> {
     let mut ftp = tokio::select! {
-        _ = cancel.cancelled() => return Ok(Outcome::Paused),
+        _ = file.cancel.cancelled() => return Ok(false),
         ftp = connect(location) => ftp?,
     };
-    if total == Some(*written) && *written > 0 {
+    if file.is_whole() {
         let _ = within(ftp.quit()).await;
-        return Ok(Outcome::Completed {
-            path: PathBuf::new(),
-            size: *written,
-        });
+        return Ok(true);
     }
-    if *written > 0 {
-        ftp.resume_transfer(*written as usize)
+    if file.written > 0 {
+        ftp.resume_transfer(file.written as usize)
             .await
             .map_err(Error::from)?;
     }
     let mut stream = tokio::select! {
-        _ = cancel.cancelled() => return Ok(Outcome::Paused),
+        _ = file.cancel.cancelled() => return Ok(false),
         stream = within(ftp.retr_as_stream(&location.path)) => stream?,
     };
-    progress.send_replace(report(*written, total, 1));
-
-    let mut file = OpenOptions::new().write(true).open(part_path).await?;
-    // Anything past what was counted is a half-written leftover.
-    file.set_len(*written).await?;
-    file.seek(SeekFrom::Start(*written)).await?;
-    let mut buffer = vec![0; BUFFER];
-    let mut last_publish = Instant::now();
-    let result = loop {
-        let read = tokio::select! {
-            _ = cancel.cancelled() => break Ok(false),
-            read = tokio::time::timeout(READ_TIMEOUT, stream.read(&mut buffer)) => read,
-        };
-        let n = match read {
-            Ok(Ok(0)) => break Ok(true),
-            Ok(Ok(n)) => n,
-            Ok(Err(e)) => break Err(Error::FtpConnection(e)),
-            Err(_) => break Err(Error::FtpConnection(io::ErrorKind::TimedOut.into())),
-        };
-        if let Err(e) = file.write_all(&buffer[..n]).await {
-            break Err(e.into());
-        }
-        *written += n as u64;
-        if last_publish.elapsed() >= config.progress_interval {
-            progress.send_replace(report(*written, total, 1));
-            last_publish = Instant::now();
-        }
-        tokio::select! {
-            _ = cancel.cancelled() => break Ok(false),
-            _ = config.throttle.take(n as u64) => {}
-        }
-    };
-    file.flush().await?;
-    if !result? {
-        return Ok(Outcome::Paused); // dropping the connection ends the transfer
+    if !file.copy(&mut stream, Error::FtpConnection).await? {
+        return Ok(false); // dropping the connection ends the transfer
     }
     within(stream.finish()).await?;
     let _ = within(ftp.quit()).await;
-    if total.is_some_and(|t| *written < t) {
-        return Err(Error::Incomplete);
-    }
-    Ok(Outcome::Completed {
-        path: PathBuf::new(),
-        size: *written,
-    })
-}
-
-/// The file as one segment, so resuming and progress work as for HTTP.
-fn report(written: u64, total: Option<u64>, connections: usize) -> Progress {
-    let end = match total {
-        Some(total) if total > 0 => Some(total - 1),
-        _ => written.checked_sub(1),
-    };
-    Progress {
-        downloaded: written,
-        total,
-        connections,
-        segments: end
-            .map(|end| Segment {
-                start: 0,
-                end,
-                written,
-            })
-            .into_iter()
-            .collect(),
-    }
+    Ok(true)
 }
 
 /// Connect, switch to TLS for `ftps://`, log in, and set binary mode.
 async fn connect(location: &Location) -> Result<AsyncRustlsFtpStream> {
     let local = location.local;
-    let control = tcp_to(&location.host, location.port, local).await?;
+    let control = single::tcp_to(&location.host, location.port, local)
+        .await
+        .map_err(Error::FtpConnection)?;
     let ipv6 = control.peer_addr().map_err(Error::FtpConnection)?.is_ipv6();
     let mut ftp = within(AsyncRustlsFtpStream::connect_with_stream(control))
         .await?
         .passive_stream_builder(move |addr| {
-            Box::pin(async move { tcp(addr, local).await.map_err(FtpError::ConnectionError) })
+            Box::pin(async move {
+                single::tcp(addr, local)
+                    .await
+                    .map_err(FtpError::ConnectionError)
+            })
         });
     // Data connections go where the control connection went: a server
     // behind NAT often names its private address in `PASV`.
@@ -378,38 +257,6 @@ async fn connect(location: &Location) -> Result<AsyncRustlsFtpStream> {
     within(ftp.login(&location.username, &location.password)).await?;
     within(ftp.transfer_type(FileType::Binary)).await?;
     Ok(ftp)
-}
-
-/// The first of `host`'s addresses that answers (only those of the bound
-/// adapter's family, when bound).
-async fn tcp_to(host: &str, port: u16, local: Option<IpAddr>) -> Result<TcpStream> {
-    let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
-        .await
-        .map_err(Error::FtpConnection)?
-        .filter(|a| local.is_none_or(|l| l.is_ipv4() == a.is_ipv4()))
-        .collect();
-    let mut last = io::Error::new(io::ErrorKind::NotFound, format!("no address for {host}"));
-    for addr in addrs {
-        match tcp(addr, local).await {
-            Ok(stream) => return Ok(stream),
-            Err(e) => last = e,
-        }
-    }
-    Err(Error::FtpConnection(last))
-}
-
-async fn tcp(addr: SocketAddr, local: Option<IpAddr>) -> io::Result<TcpStream> {
-    let socket = if addr.is_ipv4() {
-        TcpSocket::new_v4()?
-    } else {
-        TcpSocket::new_v6()?
-    };
-    if let Some(ip) = local {
-        socket.bind(SocketAddr::new(ip, 0))?;
-    }
-    tokio::time::timeout(CONNECT_TIMEOUT, socket.connect(addr))
-        .await
-        .map_err(|_| io::Error::from(io::ErrorKind::TimedOut))?
 }
 
 /// TLS with the Windows certificate store. The data connections reuse the
@@ -504,28 +351,6 @@ mod tests {
         assert_eq!((l.username.as_str(), l.password.as_str()), ("acct", "pw"));
         let l = location("ftp://other.org/f", Some(login("example.com"))).unwrap();
         assert_eq!(l.username, "anonymous");
-    }
-
-    #[test]
-    fn progress_is_one_segment() {
-        let p = report(10, Some(100), 1);
-        assert_eq!(
-            p.segments,
-            [Segment {
-                start: 0,
-                end: 99,
-                written: 10
-            }]
-        );
-        assert_eq!(report(0, None, 1).segments, []);
-        assert_eq!(
-            report(5, None, 0).segments,
-            [Segment {
-                start: 0,
-                end: 4,
-                written: 5
-            }]
-        );
     }
 
     #[test]
