@@ -8,6 +8,7 @@
 		"dev": "tauri dev",
 		"build": "tauri build --config src-tauri/tauri.bundle.json",
 		"host:build": "cargo build --release -p rdl-native-host",
+		"portable": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/portable.ps1",
 		"ext:build": "node extension/build.mjs",
 		"ext:test": "node --test extension/test/*.test.mjs",
 		"ui:dev": "pnpm --filter ui dev",

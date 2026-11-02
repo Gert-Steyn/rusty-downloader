@@ -15,10 +15,13 @@ mod speed;
 mod state;
 mod tool_commands;
 mod tray;
+mod uninstall;
 
 /// Passed by the Start with Windows entry: open in the tray, not on screen.
 const MINIMIZED_ARG: &str = "--minimized";
 
+use rdl_core::paths::AppPaths;
+#[cfg(any(debug_assertions, test))]
 use specta_typescript::Typescript;
 use tauri::Manager;
 use tauri_specta::{Builder, collect_commands, collect_events};
@@ -26,6 +29,8 @@ use tauri_specta::{Builder, collect_commands, collect_events};
 use crate::state::AppState;
 
 /// Generated TypeScript bindings for every command and event.
+// Debug builds write the bindings on start; tests check them.
+#[cfg(any(debug_assertions, test))]
 const BINDINGS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../ui/src/lib/bindings.ts");
 
 fn specta_builder() -> Builder<tauri::Wry> {
@@ -114,11 +119,36 @@ fn specta_builder() -> Builder<tauri::Wry> {
         .dangerously_cast_bigints_to_number()
 }
 
+/// The main window, from tauri.conf.json (where `create` is off so it's made
+/// here). A portable copy keeps the web view's data (storage, cache) in its
+/// own folder too, rather than in `%LOCALAPPDATA%`.
+fn create_main_window(app: &tauri::App, paths: &AppPaths) -> tauri::Result<()> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == "main")
+        .expect("tauri.conf.json defines the main window")
+        .clone();
+    let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?;
+    if paths.portable {
+        builder = builder.data_directory(paths.data_dir.join("webview"));
+    }
+    builder.build()?;
+    Ok(())
+}
+
+#[cfg(any(debug_assertions, test))]
 fn typescript() -> Typescript {
     Typescript::default()
 }
 
 pub fn run() {
+    // The uninstaller's cleanup run; nothing else starts.
+    if uninstall::run_if_asked() {
+        return;
+    }
     let specta = specta_builder();
     #[cfg(debug_assertions)]
     if let Err(e) = specta.export(typescript(), BINDINGS_PATH) {
@@ -161,8 +191,10 @@ pub fn run() {
             let finished_events = state.downloads.subscribe();
             let hidden =
                 state.settings().start_minimized && std::env::args().any(|a| a == MINIMIZED_ARG);
+            let paths = state.paths.clone();
             app.manage(state);
             app.manage(on_complete::Countdown::default());
+            create_main_window(app, &paths)?;
             let handle = app.handle();
             tray::create(handle)?;
             notify::register(handle);

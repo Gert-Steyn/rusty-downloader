@@ -127,6 +127,27 @@ struct State {
     accounts: Vec<accounts::Loaded>,
 }
 
+/// Delete every password the app stored (proxies and accounts), for an
+/// uninstall that removes the app's data. Returns how many entries were
+/// asked to go; ones already gone count too.
+pub async fn forget_secrets(pool: &Pool, secrets: &dyn Secrets) -> Result<usize> {
+    let proxies: Vec<i64> = sqlx::query_scalar("SELECT id FROM proxy_profiles")
+        .fetch_all(pool)
+        .await?;
+    let accounts: Vec<i64> = sqlx::query_scalar("SELECT id FROM accounts")
+        .fetch_all(pool)
+        .await?;
+    let keys: Vec<String> = proxies
+        .into_iter()
+        .map(proxy::secret_key)
+        .chain(accounts.into_iter().map(accounts::secret_key))
+        .collect();
+    for key in &keys {
+        secrets.delete(key)?;
+    }
+    Ok(keys.len())
+}
+
 impl Network {
     /// No proxies: every request goes directly. For tests and tools that run
     /// without the app's database.

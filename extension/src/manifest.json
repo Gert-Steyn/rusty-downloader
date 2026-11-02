@@ -2,7 +2,7 @@
 	"manifest_version": 3,
 	"name": "Rusty Downloader",
 	"short_name": "Rusty DL",
-	"version": "0.1.0",
+	"version": "1.0.0",
 	"description": "Send links, pages and downloads to Rusty Downloader, with the cookies they need.",
 	"key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApGQ+SDBrJZAecmsQYJuo+ITIDbe9VKtH32HJtjO05XmZMZSCGb5yrMAM6S61C7/Opn1eVtxpiqWbz0gwedsDdu1qonssM0VDyk0RKuKWbTBMbp/fkTKo7veMjIrf44jWOYgqHRdpqBNcF8BlV6BjJrXEBAJ2P9RjohkXnifSr7dsrMwW/w2QXihpl6qBH6/YbE8Mk7Q1JU2DvvoJ7/5AB8HXtcM87scaSL7iaPoZyco09VjQvjTBTXOD4Fke2R0EBxJsZ+NT5xabx6KljLido3M56XBTawKyvUn0ERzoN+SCe63CtWjvPK/uw3rPpKb8Ta+jP/I2LIbYOc+j01jEKQIDAQAB",
 	"minimum_chrome_version": "116",

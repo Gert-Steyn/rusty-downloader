@@ -13,7 +13,7 @@ use rdl_core::linkgrabber::{Availability, LinkGrabber, LinkSource};
 use rdl_core::manager::{
     DEFAULT_QUEUE, DownloadId, Event, Manager, ManagerConfig, NewDownload, NewPackage, Status,
 };
-use rdl_core::network::{Binding, Network, ToolConnection};
+use rdl_core::network::{self, Binding, Network, ToolConnection};
 use rdl_core::proxy::{ProxyChoice, ProxyInput, ProxyKind, ProxyRule, ProxySettings};
 use rdl_core::secrets::{MemorySecrets, Secrets};
 use reqwest::Url;
@@ -685,4 +685,43 @@ async fn accounts_give_their_site_cookies_and_a_login() {
     assert!(net.accounts().is_empty());
     assert_eq!(fx.secrets.get(&format!("account/{id}")).unwrap(), None);
     manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn forgetting_secrets_deletes_every_stored_password() {
+    let fx = Fixture::new().await;
+    let net = &fx.network;
+    let proxy = net
+        .add_profile(input(
+            "Home",
+            ProxyKind::Socks5,
+            1080,
+            Some(("me", "s3cret")),
+        ))
+        .await
+        .unwrap();
+    let account = net
+        .add_account(AccountInput {
+            site: "example.com".into(),
+            username: Some("me".into()),
+            password: Some("pw".into()),
+            enabled: true,
+        })
+        .await
+        .unwrap();
+    let keys = [
+        rdl_core::proxy::secret_key(proxy),
+        rdl_core::accounts::secret_key(account),
+    ];
+    for key in &keys {
+        assert!(fx.secrets.get(key).unwrap().is_some(), "{key} not stored");
+    }
+
+    let asked = network::forget_secrets(&fx.pool, fx.secrets.as_ref())
+        .await
+        .unwrap();
+    assert_eq!(asked, 2);
+    for key in &keys {
+        assert_eq!(fx.secrets.get(key).unwrap(), None, "{key} still there");
+    }
 }

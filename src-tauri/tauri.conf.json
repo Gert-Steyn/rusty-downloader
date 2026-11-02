@@ -22,7 +22,8 @@
         "transparent": true,
         "windowEffects": { "effects": ["mica"] },
         "dragDropEnabled": false,
-        "visible": false
+        "visible": false,
+        "create": false
       }
     ],
     "security": {
@@ -32,6 +33,10 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "publisher": "Gert Steyn",
+    "copyright": "Copyright (c) 2026 Gert Steyn",
+    "shortDescription": "Download manager for Windows",
+    "licenseFile": "../LICENSE",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,7 +44,13 @@
       "icons/icon.ico"
     ],
     "windows": {
-      "nsis": { "installMode": "currentUser" }
+      "nsis": {
+        "installMode": "both",
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "windows/header.bmp",
+        "sidebarImage": "windows/sidebar.bmp",
+        "installerHooks": "windows/hooks.nsh"
+      }
     }
   }
 }

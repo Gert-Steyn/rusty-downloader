@@ -89,6 +89,10 @@ struct Inner {
     running: Mutex<HashMap<DownloadId, RunningJob>>,
     /// Serialises "pick a free destination name, then claim it in the DB".
     dest_lock: tokio::sync::Mutex<()>,
+    /// Held for a whole scheduler pass, and while a queue's limit or
+    /// schedule changes, so a pass never starts downloads by a limit that
+    /// changed after it read it.
+    scheduling: tokio::sync::Mutex<()>,
     wake: Notify,
     shutdown: CancellationToken,
     /// Connections per plain download, changeable while running; starts at
@@ -216,6 +220,7 @@ impl Manager {
             events,
             running: Mutex::new(HashMap::new()),
             dest_lock: tokio::sync::Mutex::new(()),
+            scheduling: tokio::sync::Mutex::new(()),
             wake: Notify::new(),
             shutdown: CancellationToken::new(),
             global_limit: Arc::new(RateLimiter::new(None)),
@@ -345,6 +350,7 @@ impl Manager {
 
     pub async fn update_queue(&self, id: QueueId, changes: QueueChanges) -> Result<()> {
         let changes = changes.validated()?;
+        let _pass = self.inner.scheduling.lock().await;
         if !store::update_queue(&self.inner.pool, id, &changes).await? {
             return Err(Error::NotFound(format!("queue {id}")));
         }
@@ -476,6 +482,7 @@ impl Manager {
     }
 
     pub async fn set_queue_limit(&self, queue: QueueId, max_active: u32) -> Result<()> {
+        let _pass = self.inner.scheduling.lock().await;
         if !store::set_queue_limit(&self.inner.pool, queue, max_active).await? {
             return Err(Error::NotFound(format!("queue {queue}")));
         }
@@ -687,6 +694,7 @@ async fn scheduler(inner: Arc<Inner>) {
 /// One pass over the queues: stop what runs in a queue whose window has
 /// closed, fill free slots in open ones, and report queues that finished.
 async fn schedule_once(inner: &Arc<Inner>) -> Result<()> {
+    let _pass = inner.scheduling.lock().await;
     let held = inner
         .hold
         .lock()

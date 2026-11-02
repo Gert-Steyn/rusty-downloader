@@ -270,14 +270,18 @@ async fn queue_limit_caps_concurrent_downloads() {
         .await;
 
     // Polled from the stored statuses: the event stream can lag under the
-    // slow route's progress events and drop a `Completed`.
+    // slow route's progress events and drop a `Completed`. All three come
+    // from one query, as reading them one by one could see the first still
+    // active and, a moment later, the next already started.
     let mut max_active = 0;
     tokio::time::timeout(TIMEOUT, async {
         loop {
             let mut active = 0;
             let mut completed = 0;
-            for id in &ids {
-                match fx.manager.get(*id).await.unwrap().status {
+            let packages = fx.manager.list().await.unwrap();
+            let downloads = packages.iter().flat_map(|p| &p.downloads);
+            for download in downloads.filter(|d| ids.contains(&d.id)) {
+                match download.status {
                     Status::Active => active += 1,
                     Status::Completed => completed += 1,
                     Status::Queued => {}
@@ -575,7 +579,8 @@ async fn the_global_speed_limit_slows_downloads() {
 async fn a_downloads_own_limit_changes_while_it_runs() {
     let (base, server) = spawn_server().await;
     let mut fx = Fixture::new().await;
-    let id = fx.add(&[url(&base, "file")]).await[0];
+    // The slow route, so it can't finish before the limit below lands.
+    let id = fx.add(&[url(&base, "slow")]).await[0];
     // Slowed right away: 4 MiB at 256 KiB/s would take 16 s.
     fx.manager
         .set_download_speed_limit(id, Some(256 * 1024))

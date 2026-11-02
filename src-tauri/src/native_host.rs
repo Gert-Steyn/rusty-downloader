@@ -69,6 +69,28 @@ pub fn register(app: &AppHandle) {
     }
 }
 
+/// Undo [`register`] for the copy whose data is in `data_dir`: each
+/// browser's key goes only if it points at that copy's manifests, so a
+/// portable copy registered later keeps working.
+pub fn unregister(data_dir: &Path) {
+    let ours = data_dir.join("native-host");
+    let user = windows_registry::CURRENT_USER;
+    for parent in CHROMIUM_BROWSERS
+        .iter()
+        .map(|(key, _)| *key)
+        .chain([FIREFOX_KEY])
+    {
+        let path = format!(r"{parent}\{HOST_NAME}");
+        let points_here = user
+            .open(&path)
+            .and_then(|key| key.get_string(""))
+            .is_ok_and(|manifest| Path::new(&manifest).starts_with(&ours));
+        if points_here {
+            let _ = user.remove_tree(&path);
+        }
+    }
+}
+
 /// Write both manifests and point each browser at its one. Returns the
 /// registry keys written.
 fn write_registration(dir: &Path, host: &Path) -> Result<Vec<String>, String> {
