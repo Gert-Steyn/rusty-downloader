@@ -162,10 +162,11 @@
 							onchange={(e) => grabber.setChecked(group.links.map((l) => l.id), e.currentTarget.checked)}
 						/>
 						<span class="name">
-							<Icon name="folder" />
+							<Icon name="package" />
 							<EditableText
 								value={group.name}
 								label="Package name"
+								hint="Package name: groups downloads in the list; it isn't a folder."
 								onsave={(name) => grabber.setPackage(group.links.map((l) => l.id), name)}
 							/>
 							<span class="count">{group.links.length}</span>
@@ -217,10 +218,17 @@
 										<EditableText
 											value={link.filename}
 											label={link.kind === 'gallerydl' ? 'Folder name' : 'File name'}
+											hint={link.kind === 'gallerydl' ? "Folder name: the gallery's files go into this folder." : undefined}
 											onsave={(n) => grabber.rename(link.id, n)}
 										/>
 									{:else}
 										<span class="pending">{link.url}</span>
+									{/if}
+									{#if link.kind === 'gallerydl' && link.filename}
+										{@const path = `${group.destDir ?? 'Default folder'}\\${link.filename}`}
+										<span class="meta dest" title="Saves to {path}">
+											<Icon name="folder" size={12} /> Saves into a folder with this name
+										</span>
 									{/if}
 									{#if mediaLine(link)}<span class="meta">{mediaLine(link)}</span>{/if}
 									{#if link.previous}
@@ -399,6 +407,17 @@
 		font-size: 12px;
 		font-weight: 400;
 		color: var(--text-secondary);
+	}
+	.meta.dest {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.meta.dest :global(svg) {
+		flex-shrink: 0;
 	}
 	.meta.before {
 		color: var(--caution);

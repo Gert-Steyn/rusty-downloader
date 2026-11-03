@@ -1,11 +1,12 @@
 <script lang="ts">
 	// Text that turns into an input on double-click (or F2 when focused).
-	// Enter or leaving the field saves, Esc cancels.
+	// Enter or leaving the field saves, Esc cancels. `hint` goes in the tooltip.
 	let {
 		value,
 		label,
+		hint,
 		onsave
-	}: { value: string; label: string; onsave: (next: string) => void } = $props();
+	}: { value: string; label: string; hint?: string; onsave: (next: string) => void } = $props();
 
 	let editing = $state(false);
 	let draft = $state('');
@@ -44,7 +45,7 @@
 	<button
 		type="button"
 		class="text"
-		title="Double-click to rename"
+		title={hint ? `${hint}\nDouble-click to rename.` : 'Double-click to rename'}
 		aria-label="{label}: {value}. Press F2 to rename."
 		ondblclick={begin}
 		onkeydown={(e) => e.key === 'F2' && begin()}
