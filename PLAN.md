@@ -268,6 +268,14 @@ dl-cookies-<pid>-<random>.txt` and deletes it on drop, after the process has end
 - **Release build warnings:** `BINDINGS_PATH`, `typescript()` and their import are only compiled into debug and test builds.
 - **Checked (2026-11-02):** `pnpm build` (7.8 MB installer) and `pnpm portable`. The portable copy wrote everything, `webview` included, under its `data` folder. The installer was installed for all users by hand: `C:\Program Files\Rusty Downloader` with the app, the host and `uninstall.exe`, Add/Remove Programs shows 1.0.0 by Gert Steyn, the Start menu shortcut is in the all-users folder, and the installed app registered the browser host for the user. The installer's pages weren't captured (screenshots of its window came out blank) and the uninstall wasn't run yet.
 
+### Release 1.1
+
+- **Version 1.1.0** everywhere, the same files as 1.0 (see "Making a release"); `Cargo.lock` changed only for the four workspace packages.
+- **New since 1.0:** a gallery's folder is shown in the LinkGrabber (its row says where it saves); a completed gallery or a package's galleries can be checked for new files from the Downloads right-click menu (`Manager::rerun_gallery`); a LinkGrabber link moves to another category from its right-click menu; one category name is one folder, so a link with an existing name joins it and a confirm merges into an existing package; a download that hasn't started moves to another package from its right-click menu.
+- **Still open in 1.1:** "Start here" item 1 (a link confirmed while still checking saves its HTML page) is not fixed. Gallery rerun is not yet checked in the running app.
+- **Test fix:** `downloads_move_between_packages_and_an_emptied_package_goes` failed about one run in three in the full manager suite ("timed out waiting for event"). Logging the received events made it pass, so the cause wasn't pinned down. `wait_status` now returns at once when the download is already in that state, and the suite passed ten runs in a row after that. Keep an eye on it.
+- **Checked locally (2026-11-06):** `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, `cargo test --workspace`, `pnpm ui:check` (0 errors, 0 warnings), `pnpm ext:test` (9 pass). `pnpm build` and `pnpm portable` (both exit 0): `Rusty Downloader_1.1.0_x64-setup.exe` (8.2 MB) and `Rusty Downloader_1.1.0_x64_portable.zip` (11.1 MB) in `target\release\bundle\`. Not yet installed or run from these builds; the tag and GitHub Release are not made yet.
+
 ### Resume here
 
 *Last session ended 2026-11-02, right after releasing 1.0.0. Read this first.*

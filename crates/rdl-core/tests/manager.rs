@@ -110,6 +110,10 @@ impl Fixture {
     }
 
     async fn wait_status(&mut self, id: DownloadId, want: Status) {
+        // The state may already be there; then no event is needed (or can be missed).
+        if self.manager.get(id).await.unwrap().status == want {
+            return;
+        }
         self.wait_for(|e| {
             matches!(e, Event::StatusChanged { download_id, status, .. } if *download_id == id && *status == want)
         })

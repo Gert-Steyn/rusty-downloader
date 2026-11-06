@@ -4104,7 +4104,7 @@ checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
 
 [[package]]
 name = "rdl-bridge"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4115,7 +4115,7 @@ dependencies = [
 
 [[package]]
 name = "rdl-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "axum",
  "chrono",
@@ -4157,7 +4157,7 @@ dependencies = [
 
 [[package]]
 name = "rdl-native-host"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "rdl-bridge",
  "serde_json",
@@ -4571,7 +4571,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "rusty-downloader"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "clipboard-win",
  "rdl-bridge",
