@@ -7,6 +7,7 @@
 	import EmptyState from '#lib/components/EmptyState.svelte';
 	import FormatPicker from '#lib/components/FormatPicker.svelte';
 	import GalleryOptionsDialog from '#lib/components/GalleryOptionsDialog.svelte';
+	import ContextMenu, { type MenuItem } from '#lib/components/ContextMenu.svelte';
 	import Icon from '#lib/components/Icon.svelte';
 	import { isTauri, type GalleryDlOptions, type GrabbedLink, type YtDlpOptions } from '#lib/api.js';
 	import { formatAgo, formatBytes, formatDuration, iconFor } from '#lib/format.js';
@@ -77,6 +78,44 @@
 		const m = link.media;
 		if (!m) return '';
 		return [formatDuration(m.duration), m.uploader, m.isLive ? 'Live' : null].filter(Boolean).join(' · ');
+	}
+
+	// Moving one link between categories. A category is a package name plus a
+	// folder; a link that moves takes its new category's folder too.
+	let menuAt = $state<{ x: number; y: number } | null>(null);
+	let menuItems = $state<MenuItem[]>([]);
+	let newCategoryFor = $state<number | null>(null);
+	let newCategory = $state('');
+
+	function moveLink(id: number, group: LinkGroup) {
+		return grabber.setPackage([id], group.name).then(() => grabber.setFolder([id], group.destDir ?? null));
+	}
+
+	function linkMenu(link: GrabbedLink, group: LinkGroup): MenuItem[] {
+		const others = grabber.groups.filter((g) => g.key !== group.key);
+		return [
+			...others.map((g) => ({
+				label: `Move to ${g.name} (${g.destDir ?? 'Default folder'})`,
+				icon: 'package' as const,
+				action: () => moveLink(link.id, g)
+			})),
+			...(others.length ? (['separator'] as const) : []),
+			{
+				label: 'Move to new category…',
+				icon: 'plus' as const,
+				action: () => {
+					newCategoryFor = link.id;
+					newCategory = '';
+				}
+			}
+		];
+	}
+
+	async function submitNewCategory() {
+		if (newCategoryFor == null || !newCategory.trim()) return;
+		// The link keeps its folder: a new category is just a new name.
+		await grabber.setPackage([newCategoryFor], newCategory.trim());
+		newCategoryFor = null;
 	}
 
 	async function changeFolder(group: LinkGroup) {
@@ -204,7 +243,24 @@
 						</span>
 					</div>
 					{#each group.links as link (link.id)}
-						<div class="row link" class:off={!grabber.isChecked(link.id)}>
+						<div
+							class="row link"
+							role="row"
+							tabindex="0"
+							class:off={!grabber.isChecked(link.id)}
+							oncontextmenu={(e) => {
+								e.preventDefault();
+								menuItems = linkMenu(link, group);
+								menuAt = { x: e.clientX, y: e.clientY };
+							}}
+							onkeydown={(e) => {
+								if (e.key !== 'ContextMenu' && !(e.shiftKey && e.key === 'F10')) return;
+								e.preventDefault();
+								const r = e.currentTarget.getBoundingClientRect();
+								menuItems = linkMenu(link, group);
+								menuAt = { x: r.left + 40, y: r.bottom };
+							}}
+						>
 							<input
 								type="checkbox"
 								aria-label="Download {link.filename ?? link.url}"
@@ -293,6 +349,24 @@
 		onsave={(o) => grabber.setGalleryOptions(edit.ids, o)}
 	/>
 {/if}
+
+<ContextMenu bind:at={menuAt} items={menuItems} />
+
+<Dialog
+	open={newCategoryFor != null}
+	title="Move to a new category"
+	width={420}
+	onsubmit={submitNewCategory}
+>
+	<label class="field">
+		<span>Category name</span>
+		<input class="textbox" bind:value={newCategory} placeholder="Several links with one name form one category" />
+	</label>
+	{#snippet footer()}
+		<button type="submit" class="btn accent" disabled={!newCategory.trim()}>Move</button>
+		<button type="button" class="btn" onclick={() => (newCategoryFor = null)}>Cancel</button>
+	{/snippet}
+</Dialog>
 
 <Dialog bind:open={adding} title="Add links to the LinkGrabber" width={560} onsubmit={submitAdd}>
 	<label class="field">
