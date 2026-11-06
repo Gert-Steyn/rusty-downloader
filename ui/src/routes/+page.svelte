@@ -95,6 +95,9 @@
 						disabled: d.status === 'completed',
 						action: () => downloads.resume(id)
 					},
+			...(d.kind === 'gallerydl' && d.status === 'completed'
+				? [{ label: 'Check for new files', icon: 'refresh' as const, action: () => downloads.rerunGallery(id) }]
+				: []),
 			{ label: 'Open', icon: 'open', disabled: d.status !== 'completed', action: () => downloads.open(id) },
 			{ label: 'Show in folder', icon: 'folder', action: () => downloads.reveal(id) },
 			{ label: 'Copy link', icon: 'copy', action: () => copy(d.sourceUrl) },
@@ -149,6 +152,16 @@
 						disabled: !resumable,
 						action: () => p.downloads.forEach((d) => d.status !== 'completed' && downloads.resume(d.id))
 					},
+			...(p.downloads.some((d) => d.kind === 'gallerydl' && d.status === 'completed')
+				? [
+						{
+							label: 'Check galleries for new files',
+							icon: 'refresh' as const,
+							action: () =>
+								p.downloads.forEach((d) => d.kind === 'gallerydl' && d.status === 'completed' && downloads.rerunGallery(d.id))
+						}
+					]
+				: []),
 			{ label: 'Open folder', icon: 'folder', action: () => downloads.openFolder(id) },
 			{ label: 'Copy links', icon: 'copy', action: () => copy(p.downloads.map((d) => d.sourceUrl).join('\n')) },
 			'separator',

@@ -101,6 +101,7 @@ class DownloadsStore {
 
 	pause = (id: number) => this.run(() => unwrap(commands.pauseDownload(id)));
 	resume = (id: number) => this.run(() => unwrap(commands.resumeDownload(id)));
+	rerunGallery = (id: number) => this.run(() => unwrap(commands.rerunGallery(id)));
 	pauseAll = () => this.run(() => unwrap(commands.pauseAll()));
 	resumeAll = () => this.run(() => unwrap(commands.resumeAll()));
 	remove = (id: number, deleteFiles: boolean) =>

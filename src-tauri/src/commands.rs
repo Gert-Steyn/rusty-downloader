@@ -189,6 +189,12 @@ pub async fn resume_download(state: State<'_, AppState>, id: DownloadId) -> Comm
 
 #[tauri::command]
 #[specta::specta]
+pub async fn rerun_gallery(state: State<'_, AppState>, id: DownloadId) -> CommandResult<()> {
+    Ok(state.downloads.rerun_gallery(id).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn pause_all(state: State<'_, AppState>) -> CommandResult<()> {
     Ok(state.downloads.pause_all().await?)
 }

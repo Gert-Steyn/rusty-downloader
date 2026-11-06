@@ -522,6 +522,21 @@ pub(crate) async fn transition(
     Ok(result.rows_affected() > 0)
 }
 
+/// Queue a completed gallery download again. Its folder and files stay; the
+/// counts start over and the total is unknown until the run finishes.
+/// Returns whether the row was a completed gallery.
+pub(crate) async fn restart_gallery(pool: &Pool, id: DownloadId) -> Result<bool> {
+    let result = sqlx::query(
+        "UPDATE downloads SET status = 'queued', error = NULL, files_done = 0,
+             files_total = NULL, downloaded = 0, size = NULL, finished_at = NULL
+         WHERE id = ? AND status = 'completed' AND kind = 'gallerydl'",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 pub(crate) async fn set_resolved(pool: &Pool, id: DownloadId, r: &Resolved<'_>) -> Result<()> {
     sqlx::query(
         "UPDATE downloads SET resolved_url = ?, filename = ?, dest_path = ?, size = ?, etag = ?, last_modified = ?

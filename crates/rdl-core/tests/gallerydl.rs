@@ -320,6 +320,41 @@ async fn manager_pauses_and_resumes_a_gallery() {
 }
 
 #[tokio::test]
+async fn rerunning_a_completed_gallery_fetches_into_the_same_folder() {
+    let fx = Fixture::new().await;
+    let folder = fx.root.path().join("out").join("Mountain trip");
+    let id = fx.add("https://gallery.test/album", Some(2)).await;
+    let first = fx.wait(id, Status::Completed).await;
+    assert_eq!(first.dest_path.as_deref(), Some(folder.as_path()));
+
+    fx.manager.rerun_gallery(id).await.unwrap();
+    let again = fx.wait(id, Status::Completed).await;
+    // The same folder, and gallery-dl reports both files as already there.
+    assert_eq!(again.dest_path.as_deref(), Some(folder.as_path()));
+    assert_eq!(
+        again.files,
+        Some(FileCount {
+            done: 2,
+            total: Some(2)
+        })
+    );
+    assert!(folder.join("001.jpg").is_file());
+    fx.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn rerun_leaves_a_download_that_is_not_completed_alone() {
+    let fx = Fixture::new().await;
+    let id = fx.add("https://gallery.test/slow", None).await;
+    fx.manager.pause(id).await.unwrap();
+    fx.wait(id, Status::Paused).await;
+
+    fx.manager.rerun_gallery(id).await.unwrap();
+    assert_eq!(fx.manager.get(id).await.unwrap().status, Status::Paused);
+    fx.manager.shutdown().await;
+}
+
+#[tokio::test]
 async fn manager_records_gallery_failures_and_can_delete_what_finished() {
     let fx = Fixture::new().await;
     let id = fx.add("https://gallery.test/fail", None).await;

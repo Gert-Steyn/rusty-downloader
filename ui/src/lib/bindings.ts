@@ -15,6 +15,7 @@ export const commands = {
 	addLinks: (request: AddLinks_Deserialize) => typedError<AddLinksResult, CommandError>(__TAURI_INVOKE("add_links", { request })),
 	pauseDownload: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("pause_download", { id })),
 	resumeDownload: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("resume_download", { id })),
+	rerunGallery: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("rerun_gallery", { id })),
 	pauseAll: () => typedError<null, CommandError>(__TAURI_INVOKE("pause_all")),
 	resumeAll: () => typedError<null, CommandError>(__TAURI_INVOKE("resume_all")),
 	removeDownload: (id: number, deleteFiles: boolean) => typedError<null, CommandError>(__TAURI_INVOKE("remove_download", { id, deleteFiles })),

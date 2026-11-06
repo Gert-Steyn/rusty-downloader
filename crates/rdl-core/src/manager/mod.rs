@@ -555,6 +555,17 @@ impl Manager {
         Ok(())
     }
 
+    /// Run a completed gallery again into its own folder, to fetch what's new
+    /// there. gallery-dl skips the files already on disk (and in the site's
+    /// archive), so only new ones come down; the count starts again.
+    pub async fn rerun_gallery(&self, id: DownloadId) -> Result<()> {
+        if store::restart_gallery(&self.inner.pool, id).await? {
+            self.status_changed(id, Status::Queued, None);
+            self.inner.wake.notify_one();
+        }
+        Ok(())
+    }
+
     pub async fn pause_all(&self) -> Result<()> {
         for id in
             store::ids_with_status(&self.inner.pool, &[Status::Queued, Status::Active]).await?
