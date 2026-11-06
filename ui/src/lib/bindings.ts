@@ -16,6 +16,8 @@ export const commands = {
 	pauseDownload: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("pause_download", { id })),
 	resumeDownload: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("resume_download", { id })),
 	rerunGallery: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("rerun_gallery", { id })),
+	moveDownload: (id: number, packageId: number) => typedError<null, CommandError>(__TAURI_INVOKE("move_download", { id, packageId })),
+	moveDownloadToNewPackage: (id: number, name: string) => typedError<null, CommandError>(__TAURI_INVOKE("move_download_to_new_package", { id, name })),
 	pauseAll: () => typedError<null, CommandError>(__TAURI_INVOKE("pause_all")),
 	resumeAll: () => typedError<null, CommandError>(__TAURI_INVOKE("resume_all")),
 	removeDownload: (id: number, deleteFiles: boolean) => typedError<null, CommandError>(__TAURI_INVOKE("remove_download", { id, deleteFiles })),
@@ -421,6 +423,8 @@ export type Event = Event_Serialize | Event_Deserialize;
  *  re-read the full list.
  */
 export type Event_Deserialize = { type: "packageAdded"; packageId: number } | { type: "packageRemoved"; packageId: number } | 
+/**  Downloads were added to or moved out of a package; re-read the list. */
+{ type: "packageChanged"; packageId: number } | 
 /**  Packages in the queue changed order; re-read the list. */
 { type: "packagesReordered"; queueId: number } | 
 /**
@@ -447,6 +451,8 @@ files?: FileCount_Deserialize | null };
  *  re-read the full list.
  */
 export type Event_Serialize = { type: "packageAdded"; packageId: number } | { type: "packageRemoved"; packageId: number } | 
+/**  Downloads were added to or moved out of a package; re-read the list. */
+{ type: "packageChanged"; packageId: number } | 
 /**  Packages in the queue changed order; re-read the list. */
 { type: "packagesReordered"; queueId: number } | 
 /**

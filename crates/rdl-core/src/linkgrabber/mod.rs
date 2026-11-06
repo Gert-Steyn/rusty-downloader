@@ -334,16 +334,19 @@ impl LinkGrabber {
         let duplicates = requested - fresh.len();
 
         let package = default_package_name(&fresh);
+        // Joins an existing category of that name, folder and all.
+        let folder = category_folder(pool, &package, 0).await?.flatten();
         let mut added = Vec::with_capacity(fresh.len());
         let mut tx = pool.begin().await?;
         for url in &fresh {
             let row: LinkRow = sqlx::query_as(
-                "INSERT INTO link_grabber (source_url, kind, proposed_package, request_json)
-                 VALUES (?, ?, ?, ?) RETURNING *",
+                "INSERT INTO link_grabber (source_url, kind, proposed_package, dest_dir, request_json)
+                 VALUES (?, ?, ?, ?, ?) RETURNING *",
             )
             .bind(url.as_str())
             .bind(DownloadKind::for_url(url).as_str())
             .bind(&package)
+            .bind(folder.as_deref())
             .bind(request_json.as_deref())
             .fetch_one(&mut *tx)
             .await?;
@@ -411,12 +414,31 @@ impl LinkGrabber {
         if name.is_empty() {
             return Err(Error::InvalidInput("Package name cannot be empty.".into()));
         }
-        self.update_each(
-            ids,
-            "UPDATE link_grabber SET proposed_package = ? WHERE id = ?",
-            name,
-        )
-        .await
+        let pool = &self.inner.pool;
+        for id in ids {
+            // A category that already has this name brings its folder along.
+            match category_folder(pool, name, *id).await? {
+                Some(dest) => {
+                    sqlx::query(
+                        "UPDATE link_grabber SET proposed_package = ?, dest_dir = ? WHERE id = ?",
+                    )
+                    .bind(name)
+                    .bind(dest.as_deref())
+                    .bind(id)
+                    .execute(pool)
+                    .await?;
+                }
+                None => {
+                    sqlx::query("UPDATE link_grabber SET proposed_package = ? WHERE id = ?")
+                        .bind(name)
+                        .bind(id)
+                        .execute(pool)
+                        .await?;
+                }
+            }
+            self.updated(*id).await?;
+        }
+        Ok(())
     }
 
     /// Choose the folder for links; `None` restores the default folder.
@@ -431,12 +453,32 @@ impl LinkGrabber {
         let dir = dir.map(|d| d.to_string_lossy().into_owned());
         let pool = &self.inner.pool;
         for id in ids {
-            sqlx::query("UPDATE link_grabber SET dest_dir = ? WHERE id = ?")
-                .bind(dir.as_deref())
-                .bind(id)
-                .execute(pool)
-                .await?;
-            self.updated(*id).await?;
+            // A category has one folder: every link with the same name moves too.
+            let name: Option<Option<String>> =
+                sqlx::query_scalar("SELECT proposed_package FROM link_grabber WHERE id = ?")
+                    .bind(id)
+                    .fetch_optional(pool)
+                    .await?;
+            let Some(name) = name else { continue };
+            let members: Vec<LinkId> = match name {
+                Some(name) => {
+                    sqlx::query_scalar(
+                        "SELECT id FROM link_grabber WHERE proposed_package = ? COLLATE NOCASE",
+                    )
+                    .bind(name)
+                    .fetch_all(pool)
+                    .await?
+                }
+                None => vec![*id],
+            };
+            for member in members {
+                sqlx::query("UPDATE link_grabber SET dest_dir = ? WHERE id = ?")
+                    .bind(dir.as_deref())
+                    .bind(member)
+                    .execute(pool)
+                    .await?;
+                self.updated(member).await?;
+            }
         }
         Ok(())
     }
@@ -520,11 +562,12 @@ impl LinkGrabber {
             .collect();
         let requests = self.requests(ids).await?;
 
-        // Group by (package, folder), keeping the order packages first appear.
+        // Group by category: a name (ignoring case) and its folder. Names are
+        // matched across the LinkGrabber, so one name is one category.
         let mut groups: Vec<((String, PathBuf), Vec<GrabbedLink>)> = Vec::new();
         for link in links {
             let key = (
-                link.package.clone(),
+                link.package.to_lowercase(),
                 link.dest_dir
                     .clone()
                     .unwrap_or_else(|| default_dest.to_owned()),
@@ -536,22 +579,39 @@ impl LinkGrabber {
         }
 
         let mut packages = Vec::with_capacity(groups.len());
-        for ((name, dest_dir), members) in groups {
-            let downloads = members
+        for ((_, dest_dir), members) in groups {
+            let name = members[0].package.clone();
+            let downloads: Vec<NewDownload> = members
                 .iter()
                 .filter_map(|link| {
                     let request = requests.get(&link.id).cloned().unwrap_or_default();
                     new_download(link, request)
                 })
                 .collect();
-            let package = manager
-                .add_package(NewPackage {
-                    name,
-                    dest_dir,
-                    queue_id: DEFAULT_QUEUE,
-                    downloads,
-                })
-                .await?;
+            // A package with this name and folder is already in the queue list:
+            // the links join it instead of starting a second one.
+            let existing = manager.list().await?.into_iter().find(|p| {
+                p.name.to_lowercase() == name.to_lowercase()
+                    && p.dest_dir
+                        .to_string_lossy()
+                        .eq_ignore_ascii_case(&dest_dir.to_string_lossy())
+            });
+            let package = match existing {
+                Some(existing) => {
+                    manager.add_downloads(existing.id, downloads).await?;
+                    existing.id
+                }
+                None => {
+                    manager
+                        .add_package(NewPackage {
+                            name,
+                            dest_dir,
+                            queue_id: DEFAULT_QUEUE,
+                            downloads,
+                        })
+                        .await?
+                }
+            };
             packages.push(package);
             let member_ids: Vec<LinkId> = members.iter().map(|l| l.id).collect();
             self.remove(&member_ids).await?;
@@ -582,18 +642,6 @@ impl LinkGrabber {
             .await?)
     }
 
-    async fn update_each(&self, ids: &[LinkId], sql: &'static str, value: &str) -> Result<()> {
-        for id in ids {
-            sqlx::query(sql)
-                .bind(value)
-                .bind(id)
-                .execute(&self.inner.pool)
-                .await?;
-            self.updated(*id).await?;
-        }
-        Ok(())
-    }
-
     async fn updated(&self, id: LinkId) -> Result<()> {
         updated(&self.inner, id).await
     }
@@ -622,6 +670,35 @@ impl LinkGrabber {
             }
         });
     }
+}
+
+/// The folder a category already has, if one with this name exists: in the
+/// LinkGrabber (other than `except`), or already confirmed into a package on
+/// the Downloads page. Names match ignoring case. The inner `None` is a
+/// category in the default folder. A category has one folder, so a link that
+/// joins it takes that folder.
+pub(super) async fn category_folder(
+    pool: &Pool,
+    name: &str,
+    except: LinkId,
+) -> Result<Option<Option<String>>> {
+    let waiting: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT dest_dir FROM link_grabber WHERE proposed_package = ? COLLATE NOCASE AND id != ? LIMIT 1",
+    )
+    .bind(name)
+    .bind(except)
+    .fetch_optional(pool)
+    .await?;
+    if waiting.is_some() {
+        return Ok(waiting);
+    }
+    // Confirmed categories leave the LinkGrabber but stay as packages.
+    let confirmed: Option<String> =
+        sqlx::query_scalar("SELECT dest_dir FROM packages WHERE name = ? COLLATE NOCASE LIMIT 1")
+            .bind(name)
+            .fetch_optional(pool)
+            .await?;
+    Ok(confirmed.map(Some))
 }
 
 fn new_download(link: &GrabbedLink, request: RequestContext) -> Option<NewDownload> {

@@ -4,6 +4,7 @@
 	import ConnectionDialog from '#lib/components/ConnectionDialog.svelte';
 	import ContextMenu, { type MenuItem } from '#lib/components/ContextMenu.svelte';
 	import DetailsPanel from '#lib/components/DetailsPanel.svelte';
+	import Dialog from '#lib/components/Dialog.svelte';
 	import DownloadsTable, { type Selection } from '#lib/components/DownloadsTable.svelte';
 	import EmptyState from '#lib/components/EmptyState.svelte';
 	import Icon from '#lib/components/Icon.svelte';
@@ -76,6 +77,8 @@
 	let connecting = $state<number | null>(null);
 	let connectionOpen = $state(false);
 	let checksumOpen = $state(false);
+	let newPackageFor = $state<number | null>(null);
+	let newPackageName = $state('');
 
 	function openMenu(target: NonNullable<Selection>, x: number, y: number) {
 		menuItems = target.kind === 'download' ? downloadMenu(target.id) : packageMenu(target.id);
@@ -131,9 +134,36 @@
 							}
 						} satisfies MenuItem
 					]),
+			...(d.status === 'active' ? [] : moveItems(id, d.packageId)),
 			'separator',
 			{ label: 'Remove…', icon: 'trash', danger: true, action: askRemove }
 		];
+	}
+
+	// Moving a download between packages. A running one stays where it is.
+	function moveItems(id: number, from: number): MenuItem[] {
+		const others = downloads.packages.filter((p) => p.id !== from);
+		return [
+			...others.map((p) => ({
+				label: `Move to ${p.name}`,
+				icon: 'package' as const,
+				action: () => downloads.moveDownload(id, p.id)
+			})),
+			{
+				label: 'Move to new package…',
+				icon: 'plus' as const,
+				action: () => {
+					newPackageFor = id;
+					newPackageName = '';
+				}
+			}
+		];
+	}
+
+	function submitNewPackage() {
+		if (newPackageFor == null || !newPackageName.trim()) return;
+		void downloads.moveDownloadToNewPackage(newPackageFor, newPackageName.trim());
+		newPackageFor = null;
 	}
 
 	function packageMenu(id: number): MenuItem[] {
@@ -271,6 +301,22 @@
 <RemoveDialog bind:open={removing} target={removeTarget} />
 <SpeedLimitDialog bind:open={limitOpen} id={limiting} />
 <ChecksumDialog bind:open={checksumOpen} id={checking} />
+
+<Dialog
+	open={newPackageFor != null}
+	title="Move to a new package"
+	width={420}
+	onsubmit={submitNewPackage}
+>
+	<label class="field">
+		<span>Package name</span>
+		<input class="textbox" bind:value={newPackageName} />
+	</label>
+	{#snippet footer()}
+		<button type="submit" class="btn accent" disabled={!newPackageName.trim()}>Move</button>
+		<button type="button" class="btn" onclick={() => (newPackageFor = null)}>Cancel</button>
+	{/snippet}
+</Dialog>
 <ConnectionDialog bind:open={connectionOpen} id={connecting} />
 <ContextMenu bind:at={menuAt} items={menuItems} />
 

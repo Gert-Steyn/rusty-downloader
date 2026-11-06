@@ -319,6 +319,14 @@ pub(super) async fn rename_default_package(
     .bind(default)
     .execute(&inner.pool)
     .await?;
+    // A title that names an existing category brings that category's folder.
+    if let Some(Some(dir)) = super::category_folder(&inner.pool, to, id).await? {
+        sqlx::query("UPDATE link_grabber SET dest_dir = ? WHERE id = ? AND dest_dir IS NULL")
+            .bind(dir)
+            .bind(id)
+            .execute(&inner.pool)
+            .await?;
+    }
     Ok(())
 }
 

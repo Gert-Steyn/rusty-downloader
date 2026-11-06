@@ -43,6 +43,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::pause_download,
             commands::resume_download,
             commands::rerun_gallery,
+            commands::move_download,
+            commands::move_download_to_new_package,
             commands::pause_all,
             commands::resume_all,
             commands::remove_download,

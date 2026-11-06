@@ -953,3 +953,49 @@ async fn checksum_lists_in_the_package_are_used() {
     assert_eq!(fx.manager.get(ids[1]).await.unwrap().checksum, None);
     fx.manager.shutdown().await;
 }
+
+#[tokio::test]
+async fn downloads_move_between_packages_and_an_emptied_package_goes() {
+    let (base, _server) = spawn_server().await;
+    let mut fx = Fixture::new().await;
+    let a = fx.add(&[url(&base, "named/a.bin")]).await[0];
+    let b = fx.add(&[url(&base, "named/b.bin")]).await[0];
+    fx.wait_status(a, Status::Completed).await;
+    fx.wait_status(b, Status::Completed).await;
+    let p_a = fx.manager.get(a).await.unwrap().package_id;
+    let p_b = fx.manager.get(b).await.unwrap().package_id;
+    assert_ne!(p_a, p_b);
+
+    // a's package had only a, so it goes once a has moved into b's.
+    fx.manager.move_download(a, p_b).await.unwrap();
+    let packages = fx.manager.list().await.unwrap();
+    assert!(
+        packages.iter().all(|p| p.id != p_a),
+        "emptied package is gone"
+    );
+    let into_b = packages.iter().find(|p| p.id == p_b).unwrap();
+    assert_eq!(into_b.downloads.len(), 2);
+
+    // A running download stays where it is.
+    let slow = fx.add(&[url(&base, "slow")]).await[0];
+    fx.wait_status(slow, Status::Active).await;
+    assert!(fx.manager.move_download(slow, p_b).await.is_err());
+
+    // Into a new package: b leaves b's package, which keeps a.
+    fx.manager
+        .move_download_to_new_package(b, "Later")
+        .await
+        .unwrap();
+    let packages = fx.manager.list().await.unwrap();
+    let later = packages.iter().find(|p| p.name == "Later").unwrap();
+    assert_eq!(
+        later.downloads.iter().map(|d| d.id).collect::<Vec<_>>(),
+        [b]
+    );
+    let still_b = packages.iter().find(|p| p.id == p_b).unwrap();
+    assert_eq!(
+        still_b.downloads.iter().map(|d| d.id).collect::<Vec<_>>(),
+        [a]
+    );
+    fx.manager.shutdown().await;
+}

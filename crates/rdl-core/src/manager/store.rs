@@ -7,7 +7,8 @@ use sqlx::AssertSqlSafe;
 
 use super::queues::{OnComplete, QueueChanges, QueueSchedule};
 use super::types::{
-    Download, DownloadId, DownloadKind, FileCount, NewPackage, Package, PackageId, QueueId, Status,
+    Download, DownloadId, DownloadKind, FileCount, NewDownload, NewPackage, Package, PackageId,
+    QueueId, Status,
 };
 use crate::Result;
 use crate::checksum::{Checksum, ChecksumAlgo};
@@ -198,7 +199,19 @@ pub(crate) async fn insert_package(pool: &Pool, new: &NewPackage) -> Result<Pack
     .fetch_one(&mut *tx)
     .await?;
 
-    for (position, download) in new.downloads.iter().enumerate() {
+    insert_downloads(&mut tx, id, &new.downloads, 0).await?;
+    tx.commit().await?;
+    Ok(id)
+}
+
+/// Insert `downloads` into package `package`, numbered from `first`.
+async fn insert_downloads(
+    conn: &mut sqlx::SqliteConnection,
+    package: i64,
+    downloads: &[NewDownload],
+    first: i64,
+) -> Result<()> {
+    for (offset, download) in downloads.iter().enumerate() {
         let opts = match (&download.ytdlp, &download.gallerydl) {
             (Some(o), _) => Some(serde_json::to_string(o)?),
             (None, Some(o)) => Some(serde_json::to_string(o)?),
@@ -209,7 +222,7 @@ pub(crate) async fn insert_package(pool: &Pool, new: &NewPackage) -> Result<Pack
                  files_total, size, request_json, proxy, position)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .bind(id)
+        .bind(package)
         .bind(download.kind.as_str())
         .bind(download.url.as_str())
         .bind(download.filename.as_deref())
@@ -219,12 +232,44 @@ pub(crate) async fn insert_package(pool: &Pool, new: &NewPackage) -> Result<Pack
         .bind(download.size.map(|s| s as i64))
         .bind(download.request.clone().cleaned().to_json()?)
         .bind(download.proxy.to_db())
-        .bind(position as i64)
-        .execute(&mut *tx)
+        .bind(first + offset as i64)
+        .execute(&mut *conn)
         .await?;
     }
+    Ok(())
+}
+
+/// Add `downloads` to the end of an existing package.
+pub(crate) async fn add_downloads(
+    pool: &Pool,
+    package: PackageId,
+    downloads: &[NewDownload],
+) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    let first: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(position) + 1, 0) FROM downloads WHERE package_id = ?",
+    )
+    .bind(package)
+    .fetch_one(&mut *tx)
+    .await?;
+    insert_downloads(&mut tx, package, downloads, first).await?;
     tx.commit().await?;
-    Ok(id)
+    Ok(())
+}
+
+/// Move a download that hasn't started into `package`, at its end. A running
+/// one is left alone (returns false), so its files never move under it.
+pub(crate) async fn move_download(pool: &Pool, id: DownloadId, package: PackageId) -> Result<bool> {
+    let result = sqlx::query(
+        "UPDATE downloads SET package_id = ?1,
+             position = (SELECT COALESCE(MAX(position) + 1, 0) FROM downloads WHERE package_id = ?1)
+         WHERE id = ?2 AND status != 'active'",
+    )
+    .bind(package)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 pub(crate) async fn get_download(pool: &Pool, id: DownloadId) -> Result<Option<DownloadRow>> {

@@ -102,6 +102,9 @@ class DownloadsStore {
 	pause = (id: number) => this.run(() => unwrap(commands.pauseDownload(id)));
 	resume = (id: number) => this.run(() => unwrap(commands.resumeDownload(id)));
 	rerunGallery = (id: number) => this.run(() => unwrap(commands.rerunGallery(id)));
+	moveDownload = (id: number, packageId: number) => this.run(() => unwrap(commands.moveDownload(id, packageId)));
+	moveDownloadToNewPackage = (id: number, name: string) =>
+		this.run(() => unwrap(commands.moveDownloadToNewPackage(id, name)));
 	pauseAll = () => this.run(() => unwrap(commands.pauseAll()));
 	resumeAll = () => this.run(() => unwrap(commands.resumeAll()));
 	remove = (id: number, deleteFiles: boolean) =>
@@ -198,6 +201,7 @@ class DownloadsStore {
 					break;
 				}
 				case 'packageAdded':
+				case 'packageChanged':
 				case 'packagesReordered':
 					refresh = true;
 					break;

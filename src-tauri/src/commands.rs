@@ -195,6 +195,29 @@ pub async fn rerun_gallery(state: State<'_, AppState>, id: DownloadId) -> Comman
 
 #[tauri::command]
 #[specta::specta]
+pub async fn move_download(
+    state: State<'_, AppState>,
+    id: DownloadId,
+    package_id: PackageId,
+) -> CommandResult<()> {
+    Ok(state.downloads.move_download(id, package_id).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn move_download_to_new_package(
+    state: State<'_, AppState>,
+    id: DownloadId,
+    name: String,
+) -> CommandResult<()> {
+    Ok(state
+        .downloads
+        .move_download_to_new_package(id, &name)
+        .await?)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn pause_all(state: State<'_, AppState>) -> CommandResult<()> {
     Ok(state.downloads.pause_all().await?)
 }

@@ -279,3 +279,48 @@ async fn links_downloaded_before_are_flagged() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn a_link_joins_a_category_of_the_same_name_and_its_folder() {
+    let (base, _server) = spawn_server().await;
+    let fx = Fixture::new().await;
+    let manager = Manager::start(fx.pool.clone(), ManagerConfig::default())
+        .await
+        .unwrap();
+    let default_dest: PathBuf = fx.dir.path().join("downloads");
+    let elsewhere = fx.dir.path().join("elsewhere");
+
+    // The first link's category gets its own folder, then is confirmed.
+    let first = fx.add(&base, &["first/report.txt"]).await;
+    fx.settled().await;
+    fx.grabber
+        .set_dest_dir(&[first[0].id], Some(&elsewhere))
+        .await
+        .unwrap();
+    let created = fx
+        .grabber
+        .confirm(&[first[0].id], &default_dest, &manager)
+        .await
+        .unwrap();
+
+    // A second link with the same category name, added later, takes that
+    // folder rather than starting a category in the default folder.
+    let second = fx.add(&base, &["second/report.txt"]).await;
+    let listed = fx.grabber.list().await.unwrap();
+    let joined = listed.iter().find(|l| l.id == second[0].id).unwrap();
+    assert_eq!(joined.dest_dir.as_deref(), Some(elsewhere.as_path()));
+    fx.settled().await;
+
+    // Confirming it joins the package already in the list, not a new one.
+    let again = fx
+        .grabber
+        .confirm(&[second[0].id], &default_dest, &manager)
+        .await
+        .unwrap();
+    assert_eq!(again, created, "the same package");
+    let packages = manager.list().await.unwrap();
+    let same_name: Vec<_> = packages.iter().filter(|p| p.name == "report").collect();
+    assert_eq!(same_name.len(), 1);
+    assert_eq!(same_name[0].downloads.len(), 2);
+    manager.shutdown().await;
+}

@@ -50,7 +50,8 @@ class GrabberStore {
 	groups = $derived.by(() => {
 		const map = new Map<string, LinkGroup>();
 		for (const link of this.links) {
-			const key = `${link.package}\u0000${link.destDir ?? ''}`;
+			// One category per name (ignoring case): its links share one folder.
+			const key = link.package.toLowerCase();
 			let group = map.get(key);
 			if (!group) {
 				group = { key, name: link.package, destDir: link.destDir, links: [] };

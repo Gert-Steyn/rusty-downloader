@@ -555,6 +555,78 @@ impl Manager {
         Ok(())
     }
 
+    /// Add downloads to a package that already exists, at its end. Used when a
+    /// link joins a category that's already in the list.
+    pub async fn add_downloads(
+        &self,
+        package: PackageId,
+        mut downloads: Vec<NewDownload>,
+    ) -> Result<()> {
+        if downloads.is_empty() {
+            return Ok(());
+        }
+        for download in &mut downloads {
+            download.filename = download.filename.as_deref().map(filename::sanitize);
+        }
+        store::add_downloads(&self.inner.pool, package, &downloads).await?;
+        self.inner.emit(Event::PackageChanged {
+            package_id: package,
+        });
+        self.inner.wake.notify_one();
+        Ok(())
+    }
+
+    /// Move a download that hasn't started yet into `package`. Its folder is
+    /// the package's only if it hasn't planned one already: a paused or failed
+    /// download keeps the folder its file is in.
+    pub async fn move_download(&self, id: DownloadId, package: PackageId) -> Result<()> {
+        let pool = &self.inner.pool;
+        let row = store::get_download(pool, id)
+            .await?
+            .ok_or_else(|| Error::NotFound(format!("download {id}")))?;
+        if row.package_id == package {
+            return Ok(());
+        }
+        if !store::move_download(pool, id, package).await? {
+            return Err(Error::InvalidInput(
+                "A running download can't be moved; pause it first.".into(),
+            ));
+        }
+        self.inner.emit(Event::PackageChanged {
+            package_id: package,
+        });
+        self.inner.emit(Event::PackageChanged {
+            package_id: row.package_id,
+        });
+        if store::delete_package_if_empty(pool, row.package_id).await? {
+            self.inner.emit(Event::PackageRemoved {
+                package_id: row.package_id,
+            });
+        }
+        Ok(())
+    }
+
+    /// Move a download into a new package called `name`, in the same queue and
+    /// folder as its current package.
+    pub async fn move_download_to_new_package(&self, id: DownloadId, name: &str) -> Result<()> {
+        let pool = &self.inner.pool;
+        let row = store::get_download(pool, id)
+            .await?
+            .ok_or_else(|| Error::NotFound(format!("download {id}")))?;
+        let current = store::get_package(pool, row.package_id)
+            .await?
+            .ok_or_else(|| Error::NotFound(format!("package {}", row.package_id)))?;
+        let package = self
+            .add_package(NewPackage {
+                name: name.trim().to_owned(),
+                dest_dir: PathBuf::from(current.dest_dir),
+                queue_id: current.queue_id,
+                downloads: Vec::new(),
+            })
+            .await?;
+        self.move_download(id, package).await
+    }
+
     /// Run a completed gallery again into its own folder, to fetch what's new
     /// there. gallery-dl skips the files already on disk (and in the site's
     /// archive), so only new ones come down; the count starts again.

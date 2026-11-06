@@ -87,8 +87,9 @@
 	let newCategoryFor = $state<number | null>(null);
 	let newCategory = $state('');
 
+	// The backend gives the link the category's folder.
 	function moveLink(id: number, group: LinkGroup) {
-		return grabber.setPackage([id], group.name).then(() => grabber.setFolder([id], group.destDir ?? null));
+		return grabber.setPackage([id], group.name);
 	}
 
 	function linkMenu(link: GrabbedLink, group: LinkGroup): MenuItem[] {
