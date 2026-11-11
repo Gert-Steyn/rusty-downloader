@@ -256,7 +256,7 @@ async fn ftp_links_go_through_linkgrabber_and_the_manager() {
         .await
         .unwrap();
 
-    let grabber = LinkGrabber::start(pool.clone(), Some(network.clone()), None)
+    let grabber = LinkGrabber::start(pool.clone(), Some(network.clone()), None, None)
         .await
         .unwrap();
     let url = server.url(None, PATH);

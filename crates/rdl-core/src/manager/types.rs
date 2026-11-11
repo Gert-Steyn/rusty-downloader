@@ -8,6 +8,7 @@ use crate::checksum::Checksum;
 use crate::gallerydl::GalleryDlOptions;
 use crate::proxy::ProxyChoice;
 use crate::request::RequestContext;
+use crate::torrent::TorrentOptions;
 use crate::ytdlp::YtDlpOptions;
 
 pub type PackageId = i64;
@@ -137,6 +138,8 @@ pub struct NewDownload {
     pub ytdlp: Option<YtDlpOptions>,
     /// Settings for `Gallerydl` downloads.
     pub gallerydl: Option<GalleryDlOptions>,
+    /// Which files to download, for `Torrent` downloads.
+    pub torrent: Option<TorrentOptions>,
     /// Media or gallery title, shown until the file name is known.
     pub title: Option<String>,
     /// Files in a gallery, when known in advance.
@@ -157,6 +160,7 @@ impl NewDownload {
             filename: None,
             ytdlp: None,
             gallerydl: None,
+            torrent: None,
             title: None,
             files_total: None,
             size: None,
@@ -192,6 +196,8 @@ pub struct Download {
     pub ytdlp: Option<YtDlpOptions>,
     /// Settings, for gallery-dl downloads.
     pub gallerydl: Option<GalleryDlOptions>,
+    /// Which files to download, for torrent downloads.
+    pub torrent: Option<TorrentOptions>,
     /// File count, for gallery-dl downloads.
     pub files: Option<FileCount>,
     pub title: Option<String>,
@@ -201,6 +207,21 @@ pub struct Download {
     pub checksum: Option<Checksum>,
     /// Which connection it uses.
     pub proxy: ProxyChoice,
+}
+
+/// One file of a torrent download, with how much of it is there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct TorrentFileProgress {
+    pub index: usize,
+    /// Relative to the torrent's folder, `/`-separated.
+    pub path: String,
+    pub size: u64,
+    /// Bytes of this file that are complete.
+    pub downloaded: u64,
+    /// Whether this file is one of the chosen ones.
+    pub selected: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

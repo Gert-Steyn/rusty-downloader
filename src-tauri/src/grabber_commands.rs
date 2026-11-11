@@ -149,6 +149,55 @@ pub async fn gallerydl_flags(state: State<'_, AppState>) -> CommandResult<Galler
     })
 }
 
+/// Choose which files of torrent links download (`None`: all of them). The
+/// numbers are the torrent's file indices; other links are skipped.
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_set_torrent_files(
+    state: State<'_, AppState>,
+    ids: Vec<LinkId>,
+    only_files: Option<Vec<usize>>,
+) -> CommandResult<()> {
+    Ok(state.grabber.set_torrent_files(&ids, only_files).await?)
+}
+
+/// A `.torrent` file dropped on the window, given as its contents. Staged
+/// like a link (source: drop), named after the torrent.
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_add_torrent_file(
+    state: State<'_, AppState>,
+    name: String,
+    bytes: Vec<u8>,
+) -> CommandResult<GrabResult> {
+    let outcome = state
+        .grabber
+        .add_torrent_bytes(&name, bytes, LinkSource::Drop)
+        .await?;
+    Ok(GrabResult {
+        added: outcome.added.len() as u32,
+        duplicates: outcome.duplicates as u32,
+    })
+}
+
+/// A `.torrent` file chosen with the open-file dialog, by its path. Staged
+/// like a link (source: manual).
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_add_torrent_path(
+    state: State<'_, AppState>,
+    path: String,
+) -> CommandResult<GrabResult> {
+    let outcome = state
+        .grabber
+        .add_torrent_path(&PathBuf::from(path), LinkSource::Manual)
+        .await?;
+    Ok(GrabResult {
+        added: outcome.added.len() as u32,
+        duplicates: outcome.duplicates as u32,
+    })
+}
+
 /// Queue the links as downloads; returns the new package ids.
 #[tauri::command]
 #[specta::specta]

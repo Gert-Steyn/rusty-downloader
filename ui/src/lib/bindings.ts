@@ -44,6 +44,21 @@ export const commands = {
 	grabberSetFormat: (ids: number[], options: YtDlpOptions_Deserialize) => typedError<null, CommandError>(__TAURI_INVOKE("grabber_set_format", { ids, options })),
 	/**  Change gallery-dl settings for links (other links are skipped). */
 	grabberSetGalleryOptions: (ids: number[], options: GalleryDlOptions_Deserialize) => typedError<null, CommandError>(__TAURI_INVOKE("grabber_set_gallery_options", { ids, options })),
+	/**
+	 *  Choose which files of torrent links download (`None`: all of them). The
+	 *  numbers are the torrent's file indices; other links are skipped.
+	 */
+	grabberSetTorrentFiles: (ids: number[], onlyFiles: number[] | null) => typedError<null, CommandError>(__TAURI_INVOKE("grabber_set_torrent_files", { ids, onlyFiles })),
+	/**
+	 *  A `.torrent` file dropped on the window, given as its contents. Staged
+	 *  like a link (source: drop), named after the torrent.
+	 */
+	grabberAddTorrentFile: (name: string, bytes: number[]) => typedError<GrabResult, CommandError>(__TAURI_INVOKE("grabber_add_torrent_file", { name, bytes })),
+	/**
+	 *  A `.torrent` file chosen with the open-file dialog, by its path. Staged
+	 *  like a link (source: manual).
+	 */
+	grabberAddTorrentPath: (path: string) => typedError<GrabResult, CommandError>(__TAURI_INVOKE("grabber_add_torrent_path", { path })),
 	/**  The options drawer's controls, filtered by what the installed gallery-dl supports. */
 	gallerydlFlags: () => typedError<GalleryDlFlags_Serialize, CommandError>(__TAURI_INVOKE("gallerydl_flags")),
 	/**  Queue the links as downloads; returns the new package ids. */
@@ -90,6 +105,11 @@ export const commands = {
 	setChecksum: (id: number, algo: ChecksumAlgo | null, text: string) => typedError<null, CommandError>(__TAURI_INVOKE("set_checksum", { id, algo, text })),
 	/**  Which connection a download uses; it applies when the download next starts. */
 	setDownloadProxy: (id: number, proxy: ProxyChoice) => typedError<null, CommandError>(__TAURI_INVOKE("set_download_proxy", { id, proxy })),
+	/**
+	 *  The files of a torrent download, with how much of each is there and
+	 *  whether it is chosen. Empty for other downloads.
+	 */
+	torrentFiles: (id: number) => typedError<TorrentFileProgress[], CommandError>(__TAURI_INVOKE("torrent_files", { id })),
 	proxyOverview: () => typedError<ProxyOverview_Serialize, CommandError>(__TAURI_INVOKE("proxy_overview")),
 	/**  A new profile; returns its id. */
 	proxyAdd: (input: ProxyInput_Deserialize) => typedError<number, CommandError>(__TAURI_INVOKE("proxy_add", { input })),
@@ -373,6 +393,8 @@ export type Download_Deserialize = {
 	ytdlp?: YtDlpOptions_Deserialize | null,
 	/**  Settings, for gallery-dl downloads. */
 	gallerydl?: GalleryDlOptions_Deserialize | null,
+	/**  Which files to download, for torrent downloads. */
+	torrent?: TorrentOptions_Deserialize | null,
 	/**  File count, for gallery-dl downloads. */
 	files?: FileCount_Deserialize | null,
 	title?: string | null,
@@ -399,6 +421,8 @@ export type Download_Serialize = {
 	ytdlp: YtDlpOptions_Serialize | null,
 	/**  Settings, for gallery-dl downloads. */
 	gallerydl: GalleryDlOptions_Serialize | null,
+	/**  Which files to download, for torrent downloads. */
+	torrent: TorrentOptions_Serialize | null,
 	/**  File count, for gallery-dl downloads. */
 	files: FileCount_Serialize | null,
 	title: string | null,
@@ -748,6 +772,13 @@ export type GrabbedLink_Deserialize = {
 	gallery?: Gallery_Deserialize | null,
 	/**  Settings, for `Gallerydl` links. */
 	gallerydl?: GalleryDlOptions_Deserialize | null,
+	/**  The torrent's files and total size, for `Torrent` links once checked. */
+	torrent?: TorrentInfo | null,
+	/**
+	 *  Which files to download, for `Torrent` links. `None` in the field
+	 *  means all of them. The size above is the chosen files' total.
+	 */
+	torrentOptions?: TorrentOptions_Deserialize | null,
 	/**  The last time this link was downloaded, when duplicate warnings are on. */
 	previous?: PreviousDownload | null,
 };
@@ -772,6 +803,13 @@ export type GrabbedLink_Serialize = {
 	gallery: Gallery_Serialize | null,
 	/**  Settings, for `Gallerydl` links. */
 	gallerydl: GalleryDlOptions_Serialize | null,
+	/**  The torrent's files and total size, for `Torrent` links once checked. */
+	torrent: TorrentInfo | null,
+	/**
+	 *  Which files to download, for `Torrent` links. `None` in the field
+	 *  means all of them. The size above is the chosen files' total.
+	 */
+	torrentOptions: TorrentOptions_Serialize | null,
 	/**  The last time this link was downloaded, when duplicate warnings are on. */
 	previous: PreviousDownload | null,
 };
@@ -1336,6 +1374,52 @@ export type ToolTask_Deserialize = { type: "checking" } | { type: "downloading";
 
 /**  What a tool is busy with right now. */
 export type ToolTask_Serialize = { type: "checking" } | { type: "downloading"; downloaded: number; total: number | null } | { type: "installing" };
+
+/**  One file of a torrent. */
+export type TorrentFile = {
+	/**  Its position in the torrent: the number file selection uses. */
+	index: number,
+	/**  Relative to the torrent's folder, `/`-separated. */
+	path: string,
+	size: number,
+};
+
+/**  One file of a torrent download, with how much of it is there. */
+export type TorrentFileProgress = {
+	index: number,
+	/**  Relative to the torrent's folder, `/`-separated. */
+	path: string,
+	size: number,
+	/**  Bytes of this file that are complete. */
+	downloaded: number,
+	/**  Whether this file is one of the chosen ones. */
+	selected: boolean,
+};
+
+/**  What a torrent is: name, size and files, as read from its metadata. */
+export type TorrentInfo = {
+	/**  40 lowercase hex digits. */
+	infoHash: string,
+	name: string,
+	/**  Total size of all its files, in bytes. */
+	size: number,
+	files: TorrentFile[],
+};
+
+/**  Which files of a torrent to download. `None` is all of them. */
+export type TorrentOptions = TorrentOptions_Serialize | TorrentOptions_Deserialize;
+
+/**  Which files of a torrent to download. `None` is all of them. */
+export type TorrentOptions_Deserialize = {
+	/**  Indices into the torrent's files (see [`TorrentFile::index`]). */
+	onlyFiles?: number[] | null,
+};
+
+/**  Which files of a torrent to download. `None` is all of them. */
+export type TorrentOptions_Serialize = {
+	/**  Indices into the torrent's files (see [`TorrentFile::index`]). */
+	onlyFiles: number[] | null,
+};
 
 /**  Per-download yt-dlp settings, stored as `handler_opts_json`. */
 export type YtDlpOptions = YtDlpOptions_Serialize | YtDlpOptions_Deserialize;

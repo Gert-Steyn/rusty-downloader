@@ -54,6 +54,7 @@ export type {
 	ToolName
 } from './bindings.js';
 export { isTauri };
+export type { GrabResult, TorrentFileProgress, TorrentInfo, TorrentOptions } from './bindings.js';
 
 // The backend serialises these; the UI only ever receives them.
 export type Package = Package_Serialize;

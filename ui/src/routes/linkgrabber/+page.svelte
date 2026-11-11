@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { open as pickFolder } from '@tauri-apps/plugin-dialog';
+	import { open as openDialog } from '@tauri-apps/plugin-dialog';
 	import AvailabilityBadge from '#lib/components/AvailabilityBadge.svelte';
 	import Dialog from '#lib/components/Dialog.svelte';
 	import EditableText from '#lib/components/EditableText.svelte';
@@ -9,6 +9,7 @@
 	import GalleryOptionsDialog from '#lib/components/GalleryOptionsDialog.svelte';
 	import ContextMenu, { type MenuItem } from '#lib/components/ContextMenu.svelte';
 	import Icon from '#lib/components/Icon.svelte';
+	import TorrentFilesDialog from '#lib/components/TorrentFilesDialog.svelte';
 	import { isTauri, type GalleryDlOptions, type GrabbedLink, type YtDlpOptions } from '#lib/api.js';
 	import { formatAgo, formatBytes, formatDuration, iconFor } from '#lib/format.js';
 	import { DEFAULT_GALLERY_OPTIONS, changedCount, galleryLine, sameOptions } from '#lib/gallerydl.js';
@@ -61,6 +62,27 @@
 	function optionsLabel(links: GrabbedLink[]): string {
 		const changed = Math.max(...links.map((l) => changedCount(l.gallerydl)));
 		return changed ? `Options (${changed})…` : 'Options…';
+	}
+
+	// The torrent file picker, for one torrent link. It reads the link from the
+	// store so the list stays current while the dialog is open.
+	let torrentEditId = $state<number | null>(null);
+	let torrentEditOpen = $state(false);
+	const torrentEdit = $derived(grabber.links.find((l) => l.id === torrentEditId && l.torrent));
+
+	function editFiles(link: GrabbedLink) {
+		torrentEditId = link.id;
+		torrentEditOpen = true;
+	}
+
+	/** "3 of 4 files" once a selection exists, else "4 files". */
+	function torrentLine(link: GrabbedLink): string {
+		const t = link.torrent;
+		if (!t) return '';
+		const n = t.files.length;
+		const chosen = link.torrentOptions?.onlyFiles;
+		if (chosen) return `${chosen.length} of ${n} files`;
+		return `${n} file${n === 1 ? '' : 's'}`;
 	}
 
 	/** The group's shared choice, or `mixed` when its videos differ. */
@@ -120,7 +142,7 @@
 	}
 
 	async function changeFolder(group: LinkGroup) {
-		const picked = await pickFolder({
+		const picked = await openDialog({
 			directory: true,
 			defaultPath: group.destDir ?? undefined,
 			title: `Folder for "${group.name}"`
@@ -130,6 +152,17 @@
 
 	async function start() {
 		if (await grabber.confirm()) goto('/');
+	}
+
+	/** Open .torrent files chosen in the file dialog, one link each. */
+	async function openTorrents() {
+		const picked = await openDialog({
+			multiple: true,
+			title: 'Open torrent files',
+			filters: [{ name: 'Torrent files', extensions: ['torrent'] }]
+		});
+		if (!picked) return;
+		for (const path of [picked].flat()) await grabber.addTorrentPath(path);
 	}
 
 	async function submitAdd() {
@@ -153,6 +186,9 @@
 			Watch clipboard
 		</label>
 		<span class="spacer"></span>
+		{#if isTauri()}
+			<button class="btn" onclick={openTorrents}><Icon name="file-up" /> Open .torrent…</button>
+		{/if}
 		<button class="btn" onclick={() => (adding = true)}><Icon name="plus" /> Add links…</button>
 		<button class="btn" disabled={!checked} onclick={() => grabber.recheck(grabber.checkedIds)}>Recheck</button>
 		<button class="btn" disabled={!checked} onclick={() => grabber.remove(grabber.checkedIds)}>
@@ -288,6 +324,8 @@
 										</span>
 									{/if}
 									{#if mediaLine(link)}<span class="meta">{mediaLine(link)}</span>{/if}
+									{#if link.kind === 'torrent' && torrentLine(link)}<span class="meta">{torrentLine(link)}</span>{/if}
+									{#if link.kind === 'torrent' && link.error}<span class="meta">{link.error}</span>{/if}
 									{#if link.previous}
 										<span
 											class="meta before"
@@ -326,6 +364,10 @@
 									>
 										{optionsLabel([link])}
 									</button>
+								{:else if link.kind === 'torrent' && link.torrent}
+									<button class="btn small" title="Choose which files of this torrent to download" onclick={() => editFiles(link)}>
+										Files…
+									</button>
 								{/if}
 							</span>
 							<span class="num" title={link.kind === 'ytdlp' && link.size != null ? 'Estimated from the formats on offer' : undefined}>
@@ -348,6 +390,17 @@
 		options={edit.options}
 		mixed={edit.mixed}
 		onsave={(o) => grabber.setGalleryOptions(edit.ids, o)}
+	/>
+{/if}
+
+{#if torrentEdit?.torrent}
+	{@const id = torrentEdit.id}
+	{@const torrent = torrentEdit.torrent}
+	<TorrentFilesDialog
+		bind:open={torrentEditOpen}
+		{torrent}
+		selected={torrentEdit.torrentOptions?.onlyFiles ?? null}
+		onsave={(files) => grabber.setTorrentFiles([id], files)}
 	/>
 {/if}
 

@@ -288,7 +288,7 @@ async fn sftp_links_go_through_linkgrabber_and_the_manager() {
     // No user in the links: the account's login is used.
     let base = format!("sftp://127.0.0.1:{}", server.port);
     let url = Url::parse(&format!("{base}{PATH}")).unwrap();
-    let grabber = LinkGrabber::start(pool.clone(), Some(network.clone()), None)
+    let grabber = LinkGrabber::start(pool.clone(), Some(network.clone()), None, None)
         .await
         .unwrap();
     grabber

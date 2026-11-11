@@ -2,6 +2,11 @@
 
 const TEXT_FILE = /\.(txt|url|html?|csv|md|json|xml|dlc)$/i;
 
+/** A `.torrent` file, which goes to the LinkGrabber as a torrent rather than as text. */
+export function isTorrentFile(file: File): boolean {
+	return /\.torrent$/i.test(file.name);
+}
+
 /** True if the drag carries something we might find links in. */
 export function isLinkDrag(dt: DataTransfer | null): boolean {
 	if (!dt) return false;

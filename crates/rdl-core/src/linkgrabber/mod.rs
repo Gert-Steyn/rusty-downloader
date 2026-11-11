@@ -14,6 +14,7 @@
 mod gallery;
 mod links;
 mod media;
+mod torrent_check;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -33,6 +34,7 @@ use crate::network::Network;
 use crate::proxy::ProxyChoice;
 use crate::request::RequestContext;
 use crate::tools::Tools;
+use crate::torrent::{MAX_TORRENT_FILE, TorrentEngine, TorrentInfo, TorrentOptions, selected_size};
 use crate::ytdlp::{MediaInfo, YtDlpOptions};
 use crate::{Error, Result, ftp, sftp};
 
@@ -116,6 +118,11 @@ pub struct GrabbedLink {
     pub gallery: Option<Gallery>,
     /// Settings, for `Gallerydl` links.
     pub gallerydl: Option<GalleryDlOptions>,
+    /// The torrent's files and total size, for `Torrent` links once checked.
+    pub torrent: Option<TorrentInfo>,
+    /// Which files to download, for `Torrent` links. `None` in the field
+    /// means all of them. The size above is the chosen files' total.
+    pub torrent_options: Option<TorrentOptions>,
     /// The last time this link was downloaded, when duplicate warnings are on.
     pub previous: Option<PreviousDownload>,
 }
@@ -160,6 +167,9 @@ struct Inner {
     tools: Option<Tools>,
     /// Look links up in the download history.
     warn_duplicates: AtomicBool,
+    /// Reads torrent file lists; shared with the manager. `None` checks
+    /// magnets by their name and size alone.
+    torrents: Option<TorrentEngine>,
 }
 
 /// Note which links were downloaded before (a no-op with warnings off).
@@ -230,6 +240,20 @@ impl LinkRow {
         let ytdlp = self.options(DownloadKind::Ytdlp);
         let gallery = self.info(DownloadKind::Gallerydl);
         let gallerydl = self.options(DownloadKind::Gallerydl);
+        let torrent: Option<TorrentInfo> = self.info(DownloadKind::Torrent);
+        let torrent_options: Option<TorrentOptions> = self.options(DownloadKind::Torrent);
+        let size = match &torrent {
+            Some(info) => Some(
+                match torrent_options
+                    .as_ref()
+                    .and_then(|o| o.only_files.as_deref())
+                {
+                    Some(chosen) => selected_size(&info.files, Some(chosen)),
+                    None => info.size,
+                },
+            ),
+            None => self.size.map(|s| s as u64),
+        };
         let host = Url::parse(&self.source_url)
             .ok()
             .and_then(|u| u.host_str().map(str::to_owned))
@@ -239,7 +263,7 @@ impl LinkRow {
             host,
             url: self.source_url,
             filename: self.filename,
-            size: self.size.map(|s| s as u64),
+            size,
             availability: Availability::parse(&self.availability),
             error: self.error,
             package: self.proposed_package.unwrap_or_else(|| "Links".to_owned()),
@@ -249,6 +273,8 @@ impl LinkRow {
             ytdlp,
             gallery,
             gallerydl,
+            torrent,
+            torrent_options,
             previous: None,
         }
     }
@@ -257,8 +283,15 @@ impl LinkRow {
 impl LinkGrabber {
     /// Load the grabber and re-check links whose probe didn't finish last run.
     /// Without `network` links are checked over direct connections; without
-    /// `tools`, every link is checked as a plain file.
-    pub async fn start(pool: Pool, network: Option<Network>, tools: Option<Tools>) -> Result<Self> {
+    /// `tools`, every link is checked as a plain file; without `torrents` (the
+    /// manager's engine, shared so there is one session) magnets are checked
+    /// by their name and size only.
+    pub async fn start(
+        pool: Pool,
+        network: Option<Network>,
+        tools: Option<Tools>,
+        torrents: Option<TorrentEngine>,
+    ) -> Result<Self> {
         let (events, _) = broadcast::channel(256);
         let grabber = Self {
             inner: Arc::new(Inner {
@@ -268,6 +301,7 @@ impl LinkGrabber {
                 probes: Arc::new(Semaphore::new(PROBE_CONCURRENCY)),
                 tools,
                 warn_duplicates: AtomicBool::new(true),
+                torrents,
             }),
         };
         let pending: Vec<LinkRow> = sqlx::query_as(
@@ -533,6 +567,116 @@ impl LinkGrabber {
         Ok(())
     }
 
+    /// Choose which files of torrent links download: `None` for all of them,
+    /// else the torrent's file indices. Indices the torrent doesn't have are
+    /// dropped; a choice with nothing left is refused, and so is one for a
+    /// torrent whose file list isn't known yet. Other links are left alone.
+    pub async fn set_torrent_files(
+        &self,
+        ids: &[LinkId],
+        only_files: Option<Vec<usize>>,
+    ) -> Result<()> {
+        if only_files.as_ref().is_some_and(Vec::is_empty) {
+            return Err(Error::InvalidInput("Choose at least one file.".into()));
+        }
+        // Every link is checked before any is written, so a refusal changes nothing.
+        let mut plan = Vec::new();
+        for id in ids {
+            let Some(row) = self.row(*id).await? else {
+                continue;
+            };
+            if row.kind() != DownloadKind::Torrent {
+                continue;
+            }
+            let chosen = match &only_files {
+                None => None,
+                Some(wanted) => {
+                    let Some(info) = row.info::<TorrentInfo>(DownloadKind::Torrent) else {
+                        return Err(Error::InvalidInput(
+                            "The file list is not known yet; wait for the check to finish.".into(),
+                        ));
+                    };
+                    let mut kept: Vec<usize> = wanted
+                        .iter()
+                        .copied()
+                        .filter(|index| *index < info.files.len())
+                        .collect();
+                    kept.sort_unstable();
+                    kept.dedup();
+                    if kept.is_empty() {
+                        return Err(Error::InvalidInput("Choose at least one file.".into()));
+                    }
+                    Some(kept)
+                }
+            };
+            plan.push((*id, TorrentOptions { only_files: chosen }));
+        }
+        for (id, options) in plan {
+            let json = serde_json::to_string(&options)?;
+            sqlx::query("UPDATE link_grabber SET handler_opts_json = ? WHERE id = ?")
+                .bind(&json)
+                .bind(id)
+                .execute(&self.inner.pool)
+                .await?;
+            self.updated(id).await?;
+        }
+        Ok(())
+    }
+
+    /// Stage a `.torrent` file given as its contents (a drop has no path).
+    /// The contents are checked and copied into the torrent folder, so the
+    /// original may be deleted; the link is named after the torrent. Needs
+    /// the torrent engine.
+    pub async fn add_torrent_bytes(
+        &self,
+        name: &str,
+        bytes: Vec<u8>,
+        source: LinkSource,
+    ) -> Result<AddOutcome> {
+        if bytes.len() > MAX_TORRENT_FILE {
+            return Err(Error::Torrent(
+                "the .torrent file is too large to be one".into(),
+            ));
+        }
+        let engine = self.inner.torrents.as_ref().ok_or_else(|| {
+            Error::Unsupported("torrent downloads without a torrent folder".into())
+        })?;
+        let (inspection, path) = engine.import_file(bytes).await?;
+        let url = Url::from_file_path(&path)
+            .map_err(|()| Error::InvalidUrl(path.display().to_string()))?;
+        let mut outcome = self.add(vec![url], source).await?;
+        let title = if inspection.name.trim().is_empty() {
+            let own = name.trim();
+            own.strip_suffix(".torrent").unwrap_or(own).to_owned()
+        } else {
+            inspection.name.clone()
+        };
+        for link in &mut outcome.added {
+            if !title.trim().is_empty() {
+                self.set_package(&[link.id], &title).await?;
+            }
+            let row = self.row(link.id).await?;
+            if let Some(row) = row {
+                let fresh = with_history(&self.inner, vec![row.into_link()]).await?;
+                if let Some(fresh) = fresh.into_iter().next() {
+                    *link = fresh;
+                }
+            }
+        }
+        Ok(outcome)
+    }
+
+    /// [`add_torrent_bytes`](Self::add_torrent_bytes) for a `.torrent` file on
+    /// disk, read in full.
+    pub async fn add_torrent_path(&self, path: &Path, source: LinkSource) -> Result<AddOutcome> {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let bytes = tokio::fs::read(path).await?;
+        self.add_torrent_bytes(&name, bytes, source).await
+    }
+
     /// Probe links again (after an error, or to refresh).
     pub async fn recheck(&self, ids: &[LinkId]) -> Result<()> {
         for id in ids {
@@ -739,7 +883,16 @@ fn new_download(link: &GrabbedLink, request: RequestContext) -> Option<NewDownlo
                 ..url_only
             });
         }
-        DownloadKind::Http | DownloadKind::Ftp | DownloadKind::Sftp | DownloadKind::Torrent => {
+        DownloadKind::Torrent => {
+            return Some(NewDownload {
+                filename: link.filename.clone(),
+                title: link.torrent.as_ref().map(|t| t.name.clone()),
+                size: link.size,
+                torrent: Some(link.torrent_options.clone().unwrap_or_default()),
+                ..url_only
+            });
+        }
+        DownloadKind::Http | DownloadKind::Ftp | DownloadKind::Sftp => {
             return Some(NewDownload {
                 filename: link.filename.clone(),
                 ..url_only
@@ -801,7 +954,7 @@ async fn probe_link(
     request: &RequestContext,
     default_package: Option<&str>,
 ) -> Result<()> {
-    let _permit = Arc::clone(&inner.probes)
+    let permit = Arc::clone(&inner.probes)
         .acquire_owned()
         .await
         .expect("semaphore is never closed");
@@ -817,6 +970,8 @@ async fn probe_link(
     updated(inner, id).await?;
 
     let parsed = Url::parse(url).map_err(|e| Error::InvalidUrl(e.to_string()));
+    // The file list of a torrent link, when it could be read (see `torrent_check`).
+    let mut checked = torrent_check::Checked::default();
     let result = match &parsed {
         Ok(parsed) if ftp::is_ftp(parsed) => {
             let (_, login) = inner
@@ -843,17 +998,43 @@ async fn probe_link(
                 Err(e) => Err(e),
             }
         }
-        // Nothing to fetch for a magnet link: its name and size are in the link.
-        // Reading the torrent's real metadata from the peers comes with the
-        // torrent downloads (see `torrent_job`), not here.
-        Ok(parsed) if parsed.scheme() == "magnet" => Ok(magnet_probe(parsed)),
-        Ok(parsed) => {
-            let (request, login) = inner.network.with_account(parsed, request.clone());
-            let spec = DownloadSpec::with_request(parsed.clone(), request).with_login(login);
-            match inner.network.client(parsed, ProxyChoice::Auto) {
-                Ok(client) => http::probe(&client, &spec).await,
+        // A magnet's name and size are in the link; its file list comes from
+        // the engine, when it can be had (see `torrent_check`).
+        Ok(parsed) if parsed.scheme() == "magnet" => {
+            // Waiting on peers for up to the magnet timeout must not hold a
+            // slot the other links' checks need.
+            drop(permit);
+            checked = torrent_check::check_magnet(inner, parsed).await;
+            Ok(magnet_probe(parsed))
+        }
+        // A `.torrent` file on disk is read here: the web client can't open it.
+        Ok(parsed)
+            if parsed.scheme() == "file"
+                && crate::torrent::is_torrent_link(parsed)
+                && inner.torrents.is_some() =>
+        {
+            match torrent_check::check_file(inner, parsed).await {
+                Ok((probe, found)) => {
+                    checked = found;
+                    Ok(probe)
+                }
                 Err(e) => Err(e),
             }
+        }
+        Ok(parsed) => {
+            let (spec_request, login) = inner.network.with_account(parsed, request.clone());
+            let spec = DownloadSpec::with_request(parsed.clone(), spec_request).with_login(login);
+            let probed = match inner.network.client(parsed, ProxyChoice::Auto) {
+                Ok(client) => http::probe(&client, &spec).await,
+                Err(e) => Err(e),
+            };
+            if let Ok(probe) = &probed
+                && inner.torrents.is_some()
+                && DownloadKind::for_url(&probe.final_url) == DownloadKind::Torrent
+            {
+                checked = torrent_check::check_http(inner, parsed, request).await;
+            }
+            probed
         }
         Err(e) => Err(Error::InvalidUrl(e.to_string())),
     };
@@ -916,26 +1097,40 @@ async fn probe_link(
             // seen online in the wrong package.
             let set = default_package.and(archive_set_name(&probe.filename));
             let kind = DownloadKind::for_url(&probe.final_url);
-            // A `.torrent` file's length is the file's own, not the download's
-            // (that is only known once its metadata is read). A magnet's `xl`
-            // is the size it declares.
-            let size = match (kind, probe.final_url.scheme()) {
-                (DownloadKind::Torrent, scheme) if scheme != "magnet" => None,
-                _ => probe.size,
+            // With the file list known, the torrent's own name and total size
+            // are the link's. Without it, a `.torrent` file's length is the
+            // file's own (not the download's), and a magnet's `xl` is the size
+            // it declares.
+            let (name, size) = match &checked.info {
+                Some(info) => (info.name.clone(), Some(info.size)),
+                None => (
+                    probe.filename.clone(),
+                    match (kind, probe.final_url.scheme()) {
+                        (DownloadKind::Torrent, scheme) if scheme != "magnet" => None,
+                        _ => probe.size,
+                    },
+                ),
             };
+            let info_json = checked
+                .info
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
             sqlx::query(
-                "UPDATE link_grabber SET kind = ?6, info_json = NULL, availability = 'online',
-                     error = NULL, filename = COALESCE(filename, ?1), size = ?2,
+                "UPDATE link_grabber SET kind = ?6, info_json = ?7, availability = 'online',
+                     error = ?8, filename = COALESCE(filename, ?1), size = ?2,
                      proposed_package = CASE WHEN ?3 IS NOT NULL AND proposed_package = ?4
                                              THEN ?3 ELSE proposed_package END
                  WHERE id = ?5",
             )
-            .bind(&probe.filename)
+            .bind(&name)
             .bind(size.map(|s| s as i64))
             .bind(set)
             .bind(default_package)
             .bind(id)
             .bind(kind.as_str())
+            .bind(info_json)
+            .bind(checked.note)
             .execute(pool)
             .await?;
         }

@@ -8,25 +8,24 @@
 //! Pause pauses the torrent in the engine; resuming finds it again by its
 //! info hash (or re-adds it, which re-checks the files already there).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use reqwest::header::HeaderMap;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use super::store::{self, DownloadRow, Resolved};
 use super::{Event, Inner};
-use crate::http::{self, DownloadSpec, Outcome, filename};
-use crate::torrent::{Inspection, ManagedTorrent, TorrentEngine, TorrentSource, TorrentStatsState};
+use crate::http::{Outcome, filename};
+use crate::torrent::{
+    Inspection, ManagedTorrent, TorrentEngine, TorrentSource, TorrentStatsState, fetch_http,
+    selected_size,
+};
 use crate::{Error, Result};
 
 /// How often progress is read from the engine.
 const POLL: Duration = Duration::from_millis(500);
-
-/// Largest `.torrent` file fetched over HTTP.
-const MAX_TORRENT_FILE: usize = 16 * 1024 * 1024;
 
 pub(super) async fn execute(
     inner: &Arc<Inner>,
@@ -40,6 +39,7 @@ pub(super) async fn execute(
     let pool = &inner.pool;
     let url = Url::parse(&row.source_url)
         .map_err(|e| Error::InvalidUrl(format!("{}: {e}", row.source_url)))?;
+    let only_files = row.torrent_options().unwrap_or_default().only_files;
 
     // A torrent the engine already has (from an earlier run, or this one)
     // carries on from where it was.
@@ -68,13 +68,21 @@ pub(super) async fn execute(
                 _ = cancel.cancelled() => return Ok(Outcome::Paused),
                 info = engine.inspect(source) => info?,
             };
-            let name = entry_name(&info);
-            let (folder, dest) = if info.files > 1 {
-                let folder = package.join(&name);
-                (folder.clone(), folder)
-            } else {
-                (package.clone(), package.join(&name))
+            // A resumed download keeps the path it already has.
+            let dest = match &row.dest_path {
+                Some(path) => PathBuf::from(path),
+                None => planned_dest(&package, row, &info),
             };
+            let folder = if info.files.len() > 1 {
+                dest.clone()
+            } else {
+                package.clone()
+            };
+            let name = dest
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let size = selected_size(&info.files, only_files.as_deref());
             {
                 let _claim = inner.dest_lock.lock().await;
                 // A resumed download already owns its path; a new one may not
@@ -93,7 +101,7 @@ pub(super) async fn execute(
                         resolved_url: &row.source_url,
                         filename: &name,
                         dest_path: &dest,
-                        size: Some(info.size),
+                        size: Some(size),
                         etag: None,
                         last_modified: None,
                     },
@@ -103,11 +111,16 @@ pub(super) async fn execute(
             inner.emit(Event::Resolved {
                 download_id: row.id,
                 filename: name,
-                size: Some(info.size),
+                size: Some(size),
             });
             let handle = tokio::select! {
                 _ = cancel.cancelled() => return Ok(Outcome::Paused),
-                handle = engine.add(TorrentSource::Bytes(info.torrent), &folder, false) => handle?,
+                handle = engine.add(
+                    TorrentSource::Bytes(info.torrent),
+                    &folder,
+                    false,
+                    only_files.clone(),
+                ) => handle?,
             };
             (handle, dest)
         }
@@ -210,33 +223,38 @@ async fn read_source(inner: &Inner, row: &DownloadRow, url: &Url) -> Result<Torr
                 .map_err(|()| Error::InvalidUrl(row.source_url.clone()))?;
             Ok(TorrentSource::Bytes(tokio::fs::read(&path).await?))
         }
-        _ => {
-            let client = inner.network.client(url, row.proxy())?;
-            let (request, login) = inner.network.with_account(url, row.request());
-            let spec = DownloadSpec::with_request(url.clone(), request).with_login(login);
-            let response = http::get(&client, &spec, url, &HeaderMap::new()).await?;
-            http::check_status(response.status(), url)?;
-            let bytes = response.bytes().await?;
-            if bytes.len() > MAX_TORRENT_FILE {
-                return Err(Error::Torrent(
-                    "the .torrent file is too large to be one".into(),
-                ));
-            }
-            Ok(TorrentSource::Bytes(bytes.to_vec()))
-        }
+        _ => Ok(TorrentSource::Bytes(
+            fetch_http(&inner.network, url, row.proxy(), row.request()).await?,
+        )),
     }
 }
 
-/// The name the files go under: the torrent's own, or its info hash if the
-/// name can't be a single folder or file name. A multi-file torrent's folder
-/// is ours to name, so characters Windows refuses (`:`, `?`, `*` …) are
+/// Where a new torrent goes: a single file as the torrent names it, and a
+/// multi-file torrent in a folder named after the download's name (the
+/// link's name, if the user changed it), else the torrent's own.
+fn planned_dest(package: &Path, row: &DownloadRow, info: &Inspection) -> PathBuf {
+    if info.files.len() > 1 {
+        let chosen = row
+            .filename
+            .as_deref()
+            .map(filename::sanitize)
+            .filter(|name| !name.trim().is_empty());
+        package.join(chosen.unwrap_or_else(|| entry_name(info)))
+    } else {
+        package.join(entry_name(info))
+    }
+}
+
+/// The name a torrent is known by: its own, or its info hash if the name
+/// can't be a single folder or file name. A multi-file torrent's folder is
+/// ours to name, so characters Windows refuses (`:`, `?`, `*` …) are
 /// replaced; a single file keeps the name the engine writes it under.
 fn entry_name(info: &Inspection) -> String {
     let name = info.name.trim();
     let unsafe_name = name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']);
     if unsafe_name {
         info.info_hash.clone()
-    } else if info.files > 1 {
+    } else if info.files.len() > 1 {
         let clean = filename::sanitize(name);
         if clean.is_empty() {
             info.info_hash.clone()

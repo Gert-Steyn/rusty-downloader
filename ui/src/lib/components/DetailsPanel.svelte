@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Check, X } from '@lucide/svelte';
+	import { commands, isTauri, unwrap, type TorrentFileProgress } from '#lib/api.js';
 	import { downloads } from '#lib/downloads.svelte.js';
 	import { network } from '#lib/network.svelte.js';
 	import {
@@ -16,6 +17,7 @@
 	import { presetLabel } from '#lib/media.js';
 	import { queues } from '#lib/queues.svelte.js';
 	import Icon from './Icon.svelte';
+	import ProgressBar from './ProgressBar.svelte';
 	import type { Selection } from './DownloadsTable.svelte';
 
 	let { selection, onremove }: { selection: Selection; onremove: () => void } = $props();
@@ -33,6 +35,41 @@
 	const canResume = $derived(
 		download?.status === 'paused' || download?.status === 'failed' || download?.status === 'canceled'
 	);
+
+	// A torrent's files and how far each has got. Refreshed every two seconds
+	// while the download runs, once otherwise. Tagged with its download's id so
+	// a list from the previous selection is never shown.
+	let torrentFiles = $state<{ id: number; files: TorrentFileProgress[] } | null>(null);
+	const files = $derived(torrentFiles && download && torrentFiles.id === download.id ? torrentFiles.files : []);
+
+	/** Sample files for the plain-browser preview; nothing outside development. */
+	async function previewFiles(): Promise<TorrentFileProgress[]> {
+		if (!import.meta.env.DEV) return [];
+		const mock = await import('#lib/mock.js');
+		return mock.torrentFiles();
+	}
+
+	$effect(() => {
+		const id = download?.id;
+		const isTorrent = download?.kind === 'torrent';
+		const active = download?.status === 'active';
+		if (id == null || !isTorrent) return;
+		let stopped = false;
+		const load = async () => {
+			try {
+				const list = isTauri() ? await unwrap(commands.torrentFiles(id)) : await previewFiles();
+				if (!stopped) torrentFiles = { id, files: list };
+			} catch {
+				// Keep the last list; the next refresh tries again.
+			}
+		};
+		void load();
+		const timer = active ? setInterval(load, 2000) : undefined;
+		return () => {
+			stopped = true;
+			clearInterval(timer);
+		};
+	});
 </script>
 
 <section class="details" aria-label="Details">
@@ -126,6 +163,24 @@
 			<dt>{download.files ? 'Folder' : 'Saved to'}</dt>
 			<dd class="wide mono selectable">{download.destPath ?? `${pkg.destDir} (name not known yet)`}</dd>
 		</dl>
+		{#if files.length}
+			<h3>Files</h3>
+			<ul class="files">
+				{#each files as f (f.index)}
+					{@const p = f.size ? (percent(f.downloaded, f.size) ?? 0) : 100}
+					<li class:skipped={!f.selected}>
+						<span class="path selectable" title={f.path}>{f.path}</span>
+						{#if f.selected}
+							<span class="bar"><ProgressBar value={p} status={download.status} /></span>
+							<span class="pct num">{Math.round(p)}%</span>
+						{:else}
+							<span class="skip">Skipped</span>
+						{/if}
+						<span class="size num">{formatBytes(f.size)}</span>
+					</li>
+				{/each}
+			</ul>
+		{/if}
 	{:else if pkg}
 		{@const s = summarize(pkg)}
 		{@const active = pkg.downloads.some((d) => d.status === 'active' || d.status === 'queued')}
@@ -249,6 +304,42 @@
 	}
 	.check.bad {
 		color: var(--danger);
+	}
+	h3 {
+		margin: var(--space-4) 0 var(--space-2);
+		font: var(--type-caption);
+		color: var(--text-muted);
+	}
+	.files {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		font: var(--type-small);
+	}
+	.files li {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 96px 40px 72px;
+		align-items: center;
+		gap: var(--space-3);
+	}
+	.files .path {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+	.files .pct,
+	.files .size {
+		text-align: right;
+		color: var(--text-muted);
+	}
+	.files .skip {
+		grid-column: 2 / 4;
+		color: var(--text-muted);
+	}
+	.files li.skipped .path {
+		color: var(--text-muted);
 	}
 	.empty {
 		margin: 0;

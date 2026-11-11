@@ -10,12 +10,22 @@ import type {
 	Queue,
 	Settings,
 	Status,
+	TorrentFileProgress,
+	TorrentInfo,
 	ToolInfo
 } from './api.js';
 import type { Live } from './downloads.svelte.js';
 
 const MB = 1024 * 1024;
 let nextId = 1;
+
+/** Sintel's files as its metadata lists them: folders, and one that is skipped by default. */
+const SINTEL_FILES: TorrentInfo['files'] = [
+	{ index: 0, path: 'Sintel/Sintel.mp4', size: 620 * MB },
+	{ index: 1, path: 'Sintel/Subtitles/en.srt', size: 48 * 1024 },
+	{ index: 2, path: 'Sintel/Subtitles/de.srt', size: 47 * 1024 },
+	{ index: 3, path: 'Sintel/Extras/making-of.mkv', size: 380 * MB }
+];
 
 function dl(
 	packageId: number,
@@ -38,6 +48,7 @@ function dl(
 		error,
 		ytdlp: null,
 		gallerydl: null,
+		torrent: null,
 		files: null,
 		title: null,
 		speedLimit: null,
@@ -134,6 +145,8 @@ export function grabbedLinks(): GrabbedLink[] {
 		ytdlp: null,
 		gallery: null,
 		gallerydl: null,
+		torrent: null,
+		torrentOptions: null,
 		previous:
 			path === 'notes.pdf'
 				? { finishedAt: Date.now() - 3 * 24 * 3600 * 1000, path: 'C:\\Users\\You\\Downloads\\notes.pdf', exists: true }
@@ -169,6 +182,8 @@ export function grabbedLinks(): GrabbedLink[] {
 		ytdlp: { preset: 'best', customFormat: null },
 		gallery: null,
 		gallerydl: null,
+		torrent: null,
+		torrentOptions: null,
 		previous: null
 	});
 	const gallery = (path: string, title: string, files: number, category: string, sub: string): GrabbedLink => ({
@@ -202,26 +217,48 @@ export function grabbedLinks(): GrabbedLink[] {
 			keepFolders: false,
 			folderPattern: null
 		},
+		torrent: null,
+		torrentOptions: null,
 		previous: null
 	});
-	// A magnet link has no host; its size is the `xl` it declares.
-	const magnet = (hash: string, title: string, pkg: string, size: number): GrabbedLink => ({
-		id: id++,
-		url: `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(title)}&xl=${size}`,
-		host: '',
-		filename: title,
-		size,
-		availability: 'online',
-		error: null,
-		package: pkg,
-		destDir: null,
-		kind: 'torrent',
-		media: null,
-		ytdlp: null,
-		gallery: null,
-		gallerydl: null,
-		previous: null
-	});
+	// A magnet link has no host. Its files are known once the torrent's metadata
+	// arrived (`torrent`); `onlyFiles` is the selection, and the size is its total.
+	const magnet = (
+		hash: string,
+		title: string,
+		pkg: string,
+		torrent: TorrentInfo | null,
+		onlyFiles: number[] | null = null,
+		error: string | null = null
+	): GrabbedLink => {
+		const files = torrent ? torrent.files.filter((f) => !onlyFiles || onlyFiles.includes(f.index)) : [];
+		return {
+			id: id++,
+			url: `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(title)}`,
+			host: '',
+			filename: title,
+			size: torrent ? files.reduce((sum, f) => sum + f.size, 0) : null,
+			availability: 'online',
+			error,
+			package: pkg,
+			destDir: null,
+			kind: 'torrent',
+			media: null,
+			ytdlp: null,
+			gallery: null,
+			gallerydl: null,
+			torrent,
+			torrentOptions: torrent ? { onlyFiles } : null,
+			previous: null
+		};
+	};
+	const SINTEL_HASH = '08ada5a7a6183aae1e09d831df6748d566095a10';
+	const sintel: TorrentInfo = {
+		infoHash: SINTEL_HASH,
+		name: 'Sintel',
+		size: SINTEL_FILES.reduce((sum, f) => sum + f.size, 0),
+		files: SINTEL_FILES
+	};
 	return [
 		link('movie.part1.rar', 'movie', 'online', 1024 * MB),
 		link('movie.part2.rar', 'movie', 'online', 1024 * MB),
@@ -233,8 +270,19 @@ export function grabbedLinks(): GrabbedLink[] {
 		video('eRsGyueVLvQ', 'Sintel', 'Open Movies', null, [], 888),
 		video('R6MlUcmOul8', 'Tears of Steel', 'Open Movies', null, [], 734),
 		gallery('a/mountain', 'Mountain trip', 40, 'imgur', 'album'),
-		magnet('08ada5a7a6183aae1e09d831df6748d566095a10', 'Sintel', 'Open Movies', 1.2 * 1024 * MB)
+		magnet(SINTEL_HASH, 'Sintel', 'Open Movies', sintel, [0, 1, 2]),
+		magnet('c9e15763f722f23e98a29decdfae341b98d53056', 'Elephants Dream', 'Open Movies', null, null, "Couldn't get the file list: no peers answered yet")
 	];
+}
+
+/** The files of the sample torrent download (`Sintel`) while it runs. */
+export function torrentFiles(): TorrentFileProgress[] {
+	const chosen = [0, 1, 2];
+	return SINTEL_FILES.map((f) => {
+		const selected = chosen.includes(f.index);
+		const downloaded = f.index === 1 ? f.size : selected ? Math.round(f.size * 0.37) : 0;
+		return { index: f.index, path: f.path, size: f.size, downloaded, selected };
+	});
 }
 
 export function tools(): ToolInfo[] {

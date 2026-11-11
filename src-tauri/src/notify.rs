@@ -411,6 +411,7 @@ mod tests {
             error: None,
             ytdlp: None,
             gallerydl: None,
+            torrent: None,
             files: None,
             title: None,
             speed_limit: None,

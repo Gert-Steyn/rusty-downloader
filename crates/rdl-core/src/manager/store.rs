@@ -85,6 +85,10 @@ impl DownloadRow {
         self.options(DownloadKind::Gallerydl)
     }
 
+    pub fn torrent_options(&self) -> Option<crate::torrent::TorrentOptions> {
+        self.options(DownloadKind::Torrent)
+    }
+
     /// Referer, user agent and cookies to send.
     pub fn request(&self) -> RequestContext {
         RequestContext::from_json(self.request_json.as_deref())
@@ -116,6 +120,7 @@ impl DownloadRow {
             error: self.error.clone(),
             ytdlp: self.ytdlp_options(),
             gallerydl: self.gallerydl_options(),
+            torrent: self.torrent_options(),
             files: self.files(),
             title: self.title.clone(),
             speed_limit: self.speed_limit(),
@@ -213,10 +218,11 @@ async fn insert_downloads(
     first: i64,
 ) -> Result<()> {
     for (offset, download) in downloads.iter().enumerate() {
-        let opts = match (&download.ytdlp, &download.gallerydl) {
-            (Some(o), _) => Some(serde_json::to_string(o)?),
-            (None, Some(o)) => Some(serde_json::to_string(o)?),
-            (None, None) => None,
+        let opts = match (&download.ytdlp, &download.gallerydl, &download.torrent) {
+            (Some(o), _, _) => Some(serde_json::to_string(o)?),
+            (None, Some(o), _) => Some(serde_json::to_string(o)?),
+            (None, None, Some(o)) => Some(serde_json::to_string(o)?),
+            (None, None, None) => None,
         };
         sqlx::query(
             "INSERT INTO downloads (package_id, kind, source_url, filename, handler_opts_json, title,

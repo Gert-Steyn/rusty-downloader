@@ -40,7 +40,7 @@ use crate::{Error, Result, gallerydl, ytdlp};
 pub use queues::{OnComplete, Queue, QueueChanges, QueueSchedule};
 pub use types::{
     DEFAULT_QUEUE, Download, DownloadId, DownloadKind, Event, FileCount, NewDownload, NewPackage,
-    Package, PackageId, QueueId, Status,
+    Package, PackageId, QueueId, Status, TorrentFileProgress,
 };
 
 #[derive(Debug, Clone)]
@@ -277,6 +277,49 @@ impl Manager {
 
     pub fn speed_limit(&self) -> Option<u64> {
         self.inner.global_limit.rate()
+    }
+
+    /// The torrent engine, shared with the LinkGrabber (one session for the
+    /// app). `None` without a torrent folder.
+    pub fn torrents(&self) -> Option<TorrentEngine> {
+        self.inner.torrents.clone()
+    }
+
+    /// The files of a torrent download, with how much of each is there and
+    /// whether it is chosen. A torrent the engine doesn't have yet (or one
+    /// that was never inspected) lists nothing extra: its files come from the
+    /// metadata copy, with nothing downloaded. Empty for other downloads.
+    pub async fn torrent_files(&self, id: DownloadId) -> Result<Vec<TorrentFileProgress>> {
+        let row = store::get_download(&self.inner.pool, id)
+            .await?
+            .ok_or_else(|| Error::NotFound(format!("download {id}")))?;
+        if row.kind() != DownloadKind::Torrent {
+            return Ok(Vec::new());
+        }
+        let (Some(engine), Some(info_hash)) = (&self.inner.torrents, &row.info_hash) else {
+            return Ok(Vec::new());
+        };
+        let Some(info) = engine.inspect_cached(info_hash) else {
+            return Ok(Vec::new());
+        };
+        let (downloaded, selected) = match engine.find(info_hash).await? {
+            Some(handle) => (handle.stats().file_progress, handle.only_files()),
+            None => (
+                Vec::new(),
+                row.torrent_options().unwrap_or_default().only_files,
+            ),
+        };
+        Ok(info
+            .files
+            .into_iter()
+            .map(|file| TorrentFileProgress {
+                selected: selected.as_ref().is_none_or(|s| s.contains(&file.index)),
+                downloaded: downloaded.get(file.index).copied().unwrap_or(0),
+                index: file.index,
+                path: file.path,
+                size: file.size,
+            })
+            .collect())
     }
 
     /// A download's own speed limit (`None`: only the global one applies).

@@ -7,6 +7,7 @@ use rdl_core::checksum::ChecksumAlgo;
 use rdl_core::linkgrabber::default_package_name;
 use rdl_core::manager::{
     DEFAULT_QUEUE, Download, DownloadId, NewDownload, NewPackage, Package, PackageId, Status,
+    TorrentFileProgress,
 };
 use rdl_core::proxy::ProxyChoice;
 use serde::{Deserialize, Serialize};
@@ -159,6 +160,17 @@ pub async fn set_download_proxy(
     proxy: ProxyChoice,
 ) -> CommandResult<()> {
     Ok(state.downloads.set_download_proxy(id, proxy).await?)
+}
+
+/// The files of a torrent download, with how much of each is there and
+/// whether it is chosen. Empty for other downloads.
+#[tauri::command]
+#[specta::specta]
+pub async fn torrent_files(
+    state: State<'_, AppState>,
+    id: DownloadId,
+) -> CommandResult<Vec<TorrentFileProgress>> {
+    Ok(state.downloads.torrent_files(id).await?)
 }
 
 /// A download's expected checksum from pasted text (`algo`: `None`

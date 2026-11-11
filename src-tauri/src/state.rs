@@ -85,8 +85,13 @@ impl AppState {
             },
         )
         .await?;
-        let grabber =
-            LinkGrabber::start(db.clone(), Some(network.clone()), Some(tools.clone())).await?;
+        let grabber = LinkGrabber::start(
+            db.clone(),
+            Some(network.clone()),
+            Some(tools.clone()),
+            downloads.torrents(),
+        )
+        .await?;
 
         let state = Self {
             paths,

@@ -8,6 +8,7 @@ import {
 	isTauri,
 	unwrap,
 	type GalleryDlOptions,
+	type GrabResult,
 	type GrabbedLink,
 	type GrabberEventBatch,
 	type LinkSource,
@@ -125,6 +126,23 @@ class GrabberStore {
 	/** Stage the links found in `text`. Returns how many were added. */
 	async add(text: string, source: LinkSource): Promise<number> {
 		const result = await this.run(() => unwrap(commands.grabberAdd(text, source)));
+		return this.#announce(result, source);
+	}
+
+	/** Stage a `.torrent` file dropped on the window. Returns how many were added. */
+	async addTorrentFile(file: File): Promise<number> {
+		const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+		const result = await this.run(() => unwrap(commands.grabberAddTorrentFile(file.name, bytes)));
+		return this.#announce(result, 'drop');
+	}
+
+	/** Stage a `.torrent` file picked in the open dialog. Returns how many were added. */
+	async addTorrentPath(path: string): Promise<number> {
+		const result = await this.run(() => unwrap(commands.grabberAddTorrentPath(path)));
+		return this.#announce(result, 'manual');
+	}
+
+	#announce(result: GrabResult | undefined, source: LinkSource): number {
 		if (!result) return 0;
 		const dupes = result.duplicates ? `, ${result.duplicates} already here` : '';
 		this.say(`${plural(result.added, 'link')} added${SOURCE_LABEL[source]}${dupes}`, result.added > 0);
@@ -143,6 +161,9 @@ class GrabberStore {
 		this.run(() => unwrap(commands.grabberSetFormat(ids, options)));
 	setGalleryOptions = (ids: number[], options: GalleryDlOptions) =>
 		this.run(() => unwrap(commands.grabberSetGalleryOptions(ids, options)));
+	/** The chosen file indices of torrent links, or `null` for all of them. */
+	setTorrentFiles = (ids: number[], onlyFiles: number[] | null) =>
+		this.run(() => unwrap(commands.grabberSetTorrentFiles(ids, onlyFiles)));
 
 	/**
 	 * Queue the ticked links. Links still being checked stay in the LinkGrabber

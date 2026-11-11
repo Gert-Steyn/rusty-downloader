@@ -362,7 +362,7 @@ async fn http_proxy_link_checks_and_the_test_button() {
         .await
         .unwrap();
     let before = http.tunnels();
-    let grabber = LinkGrabber::start(fx.pool.clone(), Some(fx.network.clone()), None)
+    let grabber = LinkGrabber::start(fx.pool.clone(), Some(fx.network.clone()), None, None)
         .await
         .unwrap();
     let mut events = grabber.subscribe();

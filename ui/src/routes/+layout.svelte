@@ -12,7 +12,7 @@
 	import { mainNav, footerNav, type NavItem } from '#lib/nav.js';
 	import { commands, isTauri, unwrap, type LinkSource } from '#lib/api.js';
 	import { downloads } from '#lib/downloads.svelte.js';
-	import { isLinkDrag, textFromDrop } from '#lib/drop.js';
+	import { isLinkDrag, isTorrentFile, textFromDrop } from '#lib/drop.js';
 	import { formatSpeed } from '#lib/format.js';
 	import { grabber } from '#lib/linkgrabber.svelte.js';
 	import { network } from '#lib/network.svelte.js';
@@ -104,9 +104,13 @@
 		if (dragDepth === 0 || !e.dataTransfer) return;
 		e.preventDefault();
 		dragDepth = 0;
+		// Read the files before the first await: the drop's file list goes away with the event.
+		const torrents = Array.from(e.dataTransfer.files).filter(isTorrentFile);
 		const text = await textFromDrop(e.dataTransfer);
+		for (const file of torrents) await grabber.addTorrentFile(file);
+		if (torrents.length && page.url.pathname !== '/linkgrabber') goto('/linkgrabber');
 		if (LINK_HINT.test(text)) grab(text, 'drop');
-		else grabber.say('No links found in what was dropped');
+		else if (!torrents.length) grabber.say('No links found in what was dropped');
 	}
 </script>
 
@@ -189,7 +193,7 @@
 		<div class="drop-card">
 			<Icon name="link" size={24} />
 			<strong>Drop to add links</strong>
-			<span>Links, selected text and link-list files go to the LinkGrabber</span>
+			<span>Links, selected text, link-list files and .torrent files go to the LinkGrabber</span>
 		</div>
 	</div>
 {/if}

@@ -555,7 +555,7 @@ async fn browser_cookies_go_to_gallery_dl_when_checking_and_downloading() {
 
     let root = tempfile::tempdir().unwrap();
     let (pool, tools) = fake_tools(root.path()).await;
-    let grabber = LinkGrabber::start(pool.clone(), None, Some(tools.clone()))
+    let grabber = LinkGrabber::start(pool.clone(), None, Some(tools.clone()), None)
         .await
         .unwrap();
     let request = RequestContext {
@@ -611,7 +611,7 @@ async fn linkgrabber_offers_pages_yt_dlp_rejects_to_gallery_dl() {
 
     let root = tempfile::tempdir().unwrap();
     let (pool, tools) = fake_tools(root.path()).await;
-    let grabber = LinkGrabber::start(pool.clone(), None, Some(tools.clone()))
+    let grabber = LinkGrabber::start(pool.clone(), None, Some(tools.clone()), None)
         .await
         .unwrap();
 
@@ -718,7 +718,9 @@ async fn check_link(
             .await
             .unwrap();
     }
-    let grabber = LinkGrabber::start(pool, None, Some(tools)).await.unwrap();
+    let grabber = LinkGrabber::start(pool, None, Some(tools), None)
+        .await
+        .unwrap();
     let url = Url::parse("http://127.0.0.1:9/wiki/Category:Clips").unwrap();
     grabber.add(vec![url], LinkSource::Manual).await.unwrap();
     tokio::time::timeout(Duration::from_secs(20), async {
