@@ -14,7 +14,7 @@ import type {
 	TorrentInfo,
 	ToolInfo
 } from './api.js';
-import type { Live } from './downloads.svelte.js';
+import type { Live, Seed } from './downloads.svelte.js';
 
 const MB = 1024 * 1024;
 let nextId = 1;
@@ -26,6 +26,9 @@ const SINTEL_FILES: TorrentInfo['files'] = [
 	{ index: 2, path: 'Sintel/Subtitles/de.srt', size: 47 * 1024 },
 	{ index: 3, path: 'Sintel/Extras/making-of.mkv', size: 380 * MB }
 ];
+
+/** The files Sintel's sample download chooses (0, 1, 2): its size on disk. */
+const SINTEL_SELECTED_SIZE = SINTEL_FILES.filter((f) => f.index !== 3).reduce((sum, f) => sum + f.size, 0);
 
 function dl(
 	packageId: number,
@@ -53,7 +56,10 @@ function dl(
 		title: null,
 		speedLimit: null,
 		checksum: null,
-		proxy: { mode: 'auto' }
+		proxy: { mode: 'auto' },
+		uploaded: 0,
+		seeding: false,
+		seededSecs: 0
 	};
 }
 
@@ -113,10 +119,14 @@ export function packages(): Package[] {
 		]),
 		pkg(7, 'Sintel', [
 			{
-				...dl(7, 'Sintel', 1024 * MB, 0.37, 'active'),
+				...dl(7, 'Sintel', SINTEL_SELECTED_SIZE, 1, 'completed'),
 				kind: 'torrent',
 				sourceUrl: 'magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel',
-				destPath: 'C:\\Users\\You\\Downloads\\Sintel'
+				destPath: 'C:\\Users\\You\\Downloads\\Sintel',
+				torrent: { onlyFiles: [0, 1, 2], customSeed: false, seedRatio: null, seedMinutes: null },
+				uploaded: 400 * MB,
+				seeding: true,
+				seededSecs: 2400
 			}
 		])
 	];
@@ -248,7 +258,7 @@ export function grabbedLinks(): GrabbedLink[] {
 			gallery: null,
 			gallerydl: null,
 			torrent,
-			torrentOptions: torrent ? { onlyFiles } : null,
+			torrentOptions: torrent ? { onlyFiles, customSeed: false, seedRatio: null, seedMinutes: null } : null,
 			previous: null
 		};
 	};
@@ -385,8 +395,13 @@ export function live(): Record<number, Live> {
 	return {
 		1: { speedBps: 18.4 * MB, connections: 8 },
 		3: { speedBps: 6.1 * MB, connections: 4 },
-		// The Sintel torrent: its download id is the eleventh (after the gallery).
-		11: { speedBps: 2.7 * MB, connections: 14 }
+	};
+}
+
+/** Seeding torrents: the Sintel torrent (download id 11) seeds to two peers. */
+export function seeds(): Record<number, Seed> {
+	return {
+		11: { uploadBps: 540 * 1024, peers: 2 }
 	};
 }
 
@@ -428,7 +443,10 @@ export function settings(): Settings {
 		speedLimit: 2 * 1024 * 1024,
 		speedSchedule: [{ days: [0, 1, 2, 3, 4], from: '08:00', to: '18:00', limit: 1024 * 1024 }],
 		bindAdapter: null,
-		killSwitch: true
+		killSwitch: true,
+		seedRatio: 1,
+		seedMinutes: null,
+		uploadLimit: null
 	};
 }
 

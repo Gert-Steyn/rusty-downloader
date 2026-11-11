@@ -11,6 +11,7 @@ mod checksums;
 mod gallerydl_job;
 mod job;
 mod queues;
+mod seeding;
 mod store;
 mod torrent_job;
 mod types;
@@ -67,6 +68,12 @@ pub struct ManagerConfig {
     /// Tests only: peers every torrent asks for, with DHT and trackers off
     /// (see [`TorrentConfig::test_peers`]). Leave empty in the app.
     pub torrent_test_peers: Vec<SocketAddr>,
+    /// Seeding limits of torrents without their own: a ratio, and minutes
+    /// (see [`Manager::set_seed_defaults`]).
+    pub seed_ratio: Option<f64>,
+    pub seed_minutes: Option<u32>,
+    /// Upload limit for torrents, bytes per second; `None` is unlimited.
+    pub upload_limit: Option<u64>,
 }
 
 impl Default for ManagerConfig {
@@ -82,6 +89,9 @@ impl Default for ManagerConfig {
             hold: None,
             torrent_dir: None,
             torrent_test_peers: Vec::new(),
+            seed_ratio: Some(1.0),
+            seed_minutes: None,
+            upload_limit: None,
         }
     }
 }
@@ -121,6 +131,13 @@ struct Inner {
     /// new files this rerun has fetched so far. In memory only: a rerun that
     /// was queued before an app restart runs like any other download.
     reruns: Mutex<HashMap<DownloadId, u32>>,
+    /// Every change to a seeding torrent, and what the seeder remembers of
+    /// each (see `seeding`).
+    seeding: tokio::sync::Mutex<seeding::Tracks>,
+    /// Wakes the seeder for a check now (a limit or the hold changed).
+    seed_wake: Notify,
+    /// The seeding limits of torrents without their own.
+    seed_defaults: Mutex<seeding::SeedDefaults>,
 }
 
 struct RunningJob {
@@ -156,6 +173,10 @@ impl Inner {
             throttle: Throttle::new([Arc::clone(&self.global_limit), Arc::clone(limit)]),
             ..self.config.segment.clone()
         }
+    }
+
+    fn seed_defaults(&self) -> seeding::SeedDefaults {
+        *self.seed_defaults.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// The `--limit-rate` for a yt-dlp or gallery-dl run starting now: the
@@ -241,6 +262,10 @@ impl Manager {
             };
             TorrentEngine::new(torrent, network.clone())
         });
+        if let Some(torrents) = &torrents {
+            torrents.set_upload_limit(config.upload_limit);
+        }
+        let seed_defaults = (config.seed_ratio, config.seed_minutes);
         let inner = Arc::new(Inner {
             max_connections: AtomicUsize::new(config.segment.max_connections),
             network,
@@ -257,9 +282,61 @@ impl Manager {
             ended_in: Mutex::new(HashSet::new()),
             hold: Mutex::new(hold),
             reruns: Mutex::new(HashMap::new()),
+            seeding: tokio::sync::Mutex::new(seeding::Tracks::default()),
+            seed_wake: Notify::new(),
+            seed_defaults: Mutex::new(seed_defaults),
         });
         tokio::spawn(scheduler(Arc::clone(&inner)));
+        tokio::spawn(seeding::follow(Arc::clone(&inner)));
         Ok(Self { inner })
+    }
+
+    /// The upload limit for all torrents, in bytes per second; `None` lifts
+    /// it. Takes effect at once.
+    pub fn set_upload_limit(&self, limit: Option<u64>) {
+        if let Some(torrents) = &self.inner.torrents {
+            torrents.set_upload_limit(limit);
+        }
+    }
+
+    /// The seeding limits of torrents without their own: a ratio of uploaded
+    /// to size, and a number of minutes (`None` for either: no such limit).
+    /// Takes effect at once, on the torrents seeding now.
+    pub fn set_seed_defaults(&self, ratio: Option<f64>, minutes: Option<u32>) {
+        *self
+            .inner
+            .seed_defaults
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = (ratio, minutes);
+        self.inner.seed_wake.notify_one();
+    }
+
+    /// Give a torrent its own seeding limits (`custom`: its `ratio` and
+    /// `minutes`, where `None` is no limit), or none of its own (`custom`
+    /// false: the app's limits apply). Checked against the torrent at once.
+    pub async fn set_torrent_seed_limits(
+        &self,
+        id: DownloadId,
+        custom: bool,
+        ratio: Option<f64>,
+        minutes: Option<u32>,
+    ) -> Result<()> {
+        let mut tracks = self.inner.seeding.lock().await;
+        seeding::set_limits(&self.inner, &mut tracks, id, custom, ratio, minutes).await
+    }
+
+    /// Stop a finished torrent seeding: it stops uploading and keeps its
+    /// files. It stays `Completed`. A torrent that isn't seeding is left alone.
+    pub async fn stop_seeding(&self, id: DownloadId) -> Result<()> {
+        let mut tracks = self.inner.seeding.lock().await;
+        seeding::stop_by_hand(&self.inner, &mut tracks, id).await
+    }
+
+    /// Seed a finished torrent again. If its limits are already met, it gets
+    /// limits of its own that are none, so it seeds until stopped by hand.
+    pub async fn start_seeding(&self, id: DownloadId) -> Result<()> {
+        let mut tracks = self.inner.seeding.lock().await;
+        seeding::start_by_hand(&self.inner, &mut tracks, id).await
     }
 
     /// The speed limit all downloads share, in bytes per second; `None` lifts it.
@@ -507,6 +584,7 @@ impl Manager {
         *hold = reason;
         drop(hold);
         self.inner.wake.notify_one();
+        self.inner.seed_wake.notify_one();
     }
 
     /// Why downloads are held, if they are.
@@ -759,6 +837,13 @@ impl Manager {
             .ok_or_else(|| Error::NotFound(format!("download {id}")))?;
 
         let completed = row.status() == Status::Completed;
+        // A torrent is forgotten and its row deleted under the seeder's lock,
+        // so the seeder can't add it back in between.
+        let _seeding = if row.kind() == DownloadKind::Torrent {
+            Some(self.inner.seeding.lock().await)
+        } else {
+            None
+        };
         if row.kind() == DownloadKind::Torrent {
             // The engine deletes the torrent's files itself, if asked.
             if let (Some(torrents), Some(info_hash)) = (&self.inner.torrents, &row.info_hash) {
@@ -834,6 +919,13 @@ impl Manager {
         for mut finished in waits {
             let _ = finished.wait_for(|done| *done).await;
         }
+        // A seeding check in progress ends first, and the uploads so far are
+        // saved before the session stops (seeding resumes on the next start).
+        let mut tracks = self.inner.seeding.lock().await;
+        if let Err(e) = seeding::save_uploads(&self.inner, &mut tracks).await {
+            tracing::warn!(error = %e, "could not save seeding progress");
+        }
+        drop(tracks);
         if let Some(torrents) = &self.inner.torrents {
             torrents.stop().await;
         }

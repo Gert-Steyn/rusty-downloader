@@ -178,7 +178,7 @@ pub struct NewPackage {
     pub downloads: Vec<NewDownload>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct Download {
@@ -207,10 +207,16 @@ pub struct Download {
     pub checksum: Option<Checksum>,
     /// Which connection it uses.
     pub proxy: ProxyChoice,
+    /// Bytes a torrent has uploaded, across all its runs.
+    pub uploaded: u64,
+    /// Whether a finished torrent is seeding now (uploading to peers).
+    pub seeding: bool,
+    /// Seconds a torrent has spent seeding, across all its runs.
+    pub seeded_secs: u64,
 }
 
 /// One file of a torrent download, with how much of it is there.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct TorrentFileProgress {
@@ -224,7 +230,7 @@ pub struct TorrentFileProgress {
     pub selected: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct Package {
@@ -283,6 +289,17 @@ pub enum Event {
     SpeedLimitChanged {
         download_id: DownloadId,
         speed_limit: Option<u64>,
+    },
+    /// A torrent's seeding changed, or it was reported while seeding: what it
+    /// has uploaded and seeded so far, the upload speed and peers now, and
+    /// whether it is still seeding (`false`: it stopped, by its limits or by hand).
+    Seeding {
+        download_id: DownloadId,
+        uploaded: u64,
+        upload_speed: u64,
+        peers: usize,
+        seeded_secs: u64,
+        seeding: bool,
     },
     /// A download's expected checksum was set or cleared, or its file was checked.
     ChecksumChanged {

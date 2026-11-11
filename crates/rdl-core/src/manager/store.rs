@@ -43,6 +43,9 @@ pub(crate) struct DownloadRow {
     pub checksum_ok: Option<i64>,
     pub proxy: Option<String>,
     pub info_hash: Option<String>,
+    pub uploaded: i64,
+    pub seeding: i64,
+    pub seeded_secs: i64,
 }
 
 impl DownloadRow {
@@ -126,6 +129,9 @@ impl DownloadRow {
             speed_limit: self.speed_limit(),
             checksum: self.checksum(),
             proxy: self.proxy(),
+            uploaded: self.uploaded as u64,
+            seeding: self.seeding != 0,
+            seeded_secs: self.seeded_secs as u64,
         }
     }
 }
@@ -631,6 +637,60 @@ pub(crate) async fn set_info_hash(pool: &Pool, id: DownloadId, info_hash: &str) 
         .execute(pool)
         .await?;
     Ok(())
+}
+
+/// Torrent downloads that should be seeding now.
+pub(crate) async fn seeding_downloads(pool: &Pool) -> Result<Vec<DownloadRow>> {
+    Ok(
+        sqlx::query_as(
+            "SELECT * FROM downloads WHERE kind = 'torrent' AND seeding = 1 ORDER BY id",
+        )
+        .fetch_all(pool)
+        .await?,
+    )
+}
+
+/// Set whether a torrent should be seeding. Returns whether the download exists.
+pub(crate) async fn set_seeding(pool: &Pool, id: DownloadId, seeding: bool) -> Result<bool> {
+    let result = sqlx::query("UPDATE downloads SET seeding = ? WHERE id = ?")
+        .bind(i64::from(seeding))
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Add to a torrent's upload and seeding-time totals (a delta, not a total).
+pub(crate) async fn add_seeding_progress(
+    pool: &Pool,
+    id: DownloadId,
+    uploaded: u64,
+    secs: u64,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE downloads SET uploaded = uploaded + ?1, seeded_secs = seeded_secs + ?2 WHERE id = ?3",
+    )
+    .bind(uploaded as i64)
+    .bind(secs as i64)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Store a torrent's options (which files, and its seeding limits).
+/// Returns whether the download exists.
+pub(crate) async fn set_torrent_options(
+    pool: &Pool,
+    id: DownloadId,
+    options: &crate::torrent::TorrentOptions,
+) -> Result<bool> {
+    let result = sqlx::query("UPDATE downloads SET handler_opts_json = ? WHERE id = ?")
+        .bind(serde_json::to_string(options)?)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 /// Returns whether the download exists.

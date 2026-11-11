@@ -22,7 +22,7 @@ pub const MAX_ACTIVE: u32 = 20;
 pub const MAX_CONNECTIONS: u32 = 32;
 
 /// The user's preferences. Missing fields (older saves) get their defaults.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -63,6 +63,14 @@ pub struct Settings {
     /// While that adapter is down, hold downloads (they carry on when it's
     /// back) instead of letting them fail.
     pub kill_switch: bool,
+    /// A finished torrent stops seeding once it has uploaded this many times
+    /// its size. `None`: no ratio limit.
+    pub seed_ratio: Option<f64>,
+    /// A finished torrent stops seeding after this many minutes. `None`: no
+    /// time limit. With neither limit it seeds until stopped.
+    pub seed_minutes: Option<u32>,
+    /// Upload limit for torrents, bytes per second; `None` is unlimited.
+    pub upload_limit: Option<u64>,
 }
 
 impl Default for Settings {
@@ -86,6 +94,9 @@ impl Default for Settings {
             speed_schedule: Vec::new(),
             bind_adapter: None,
             kill_switch: true,
+            seed_ratio: Some(1.0),
+            seed_minutes: None,
+            upload_limit: None,
         }
     }
 }
@@ -128,6 +139,9 @@ impl Settings {
         if self.speed_schedule.len() > speed::MAX_RULES {
             return invalid(format!("At most {} scheduled limits.", speed::MAX_RULES));
         }
+        crate::torrent::check_seed_limits(self.seed_ratio, self.seed_minutes)?;
+        // An upload limit of 0 is no limit.
+        self.upload_limit = self.upload_limit.filter(|limit| *limit > 0);
         self.speed_schedule = self
             .speed_schedule
             .into_iter()
@@ -291,6 +305,47 @@ mod tests {
                     to: "18:00".into(),
                     limit: 4096,
                 }],
+                ..Settings::default()
+            },
+        ] {
+            assert!(bad.validated().is_err());
+        }
+    }
+
+    #[test]
+    fn seeding_settings_default_and_load_from_older_saves() {
+        // A save from before 5c: the ratio limit is the default, the rest none.
+        let old: Settings = serde_json::from_str(r#"{"maxActive": 2}"#).unwrap();
+        assert_eq!(old.seed_ratio, Some(1.0));
+        assert_eq!(old.seed_minutes, None);
+        assert_eq!(old.upload_limit, None);
+        // An explicit "no ratio limit" survives a save.
+        let none: Settings = serde_json::from_str(r#"{"seedRatio": null}"#).unwrap();
+        assert_eq!(none.seed_ratio, None);
+    }
+
+    #[test]
+    fn seeding_limits_are_checked_and_zero_upload_is_no_limit() {
+        let ok = Settings {
+            seed_ratio: None,
+            seed_minutes: Some(30),
+            upload_limit: Some(0),
+            ..Settings::default()
+        }
+        .validated()
+        .unwrap();
+        assert_eq!(ok.upload_limit, None);
+        for bad in [
+            Settings {
+                seed_ratio: Some(0.0),
+                ..Settings::default()
+            },
+            Settings {
+                seed_ratio: Some(f64::NAN),
+                ..Settings::default()
+            },
+            Settings {
+                seed_minutes: Some(0),
                 ..Settings::default()
             },
         ] {

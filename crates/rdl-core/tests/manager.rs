@@ -40,6 +40,9 @@ fn config() -> ManagerConfig {
         hold: None,
         torrent_dir: None,
         torrent_test_peers: Vec::new(),
+        seed_ratio: Some(1.0),
+        seed_minutes: None,
+        upload_limit: None,
     }
 }
 

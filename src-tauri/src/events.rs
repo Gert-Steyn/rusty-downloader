@@ -57,6 +57,8 @@ pub trait Batch<E>: Default {
 #[derive(Default)]
 pub struct DownloadBatch {
     progress: HashMap<DownloadId, Event>,
+    /// Seeding reports carry the totals so far, so the newest one per download wins.
+    seeding: HashMap<DownloadId, Event>,
     other: Vec<Event>,
     resync: bool,
 }
@@ -69,6 +71,9 @@ impl Batch<Event> for DownloadBatch {
             Event::Progress { download_id, .. } => {
                 self.progress.insert(download_id, event);
             }
+            Event::Seeding { download_id, .. } => {
+                self.seeding.insert(download_id, event);
+            }
             other => self.other.push(other),
         }
     }
@@ -78,12 +83,13 @@ impl Batch<Event> for DownloadBatch {
     }
 
     fn is_empty(&self) -> bool {
-        self.progress.is_empty() && self.other.is_empty() && !self.resync
+        self.progress.is_empty() && self.seeding.is_empty() && self.other.is_empty() && !self.resync
     }
 
     fn take(&mut self) -> DownloadEvents {
         let batch = std::mem::take(self);
         let mut events: Vec<Event> = batch.progress.into_values().collect();
+        events.extend(batch.seeding.into_values());
         events.extend(batch.other);
         DownloadEvents {
             events,
@@ -214,6 +220,32 @@ mod tests {
         assert_eq!(out.events.len(), 2);
         assert_eq!(out.events[0], progress(1, 100));
         assert!(matches!(out.events[1], Event::StatusChanged { .. }));
+        assert!(batch.is_empty());
+    }
+
+    fn seeding(id: DownloadId, uploaded: u64, seeding: bool) -> Event {
+        Event::Seeding {
+            download_id: id,
+            uploaded,
+            upload_speed: 0,
+            peers: 0,
+            seeded_secs: 0,
+            seeding,
+        }
+    }
+
+    #[test]
+    fn download_batch_keeps_the_newest_seeding_report_per_download() {
+        let mut batch = DownloadBatch::default();
+        batch.push(seeding(1, 10, true));
+        batch.push(seeding(2, 5, true));
+        batch.push(seeding(1, 20, false));
+
+        let out = batch.take();
+
+        assert_eq!(out.events.len(), 2);
+        assert!(out.events.contains(&seeding(1, 20, false)));
+        assert!(out.events.contains(&seeding(2, 5, true)));
         assert!(batch.is_empty());
     }
 

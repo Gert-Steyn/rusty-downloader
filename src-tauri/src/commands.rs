@@ -173,6 +173,39 @@ pub async fn torrent_files(
     Ok(state.downloads.torrent_files(id).await?)
 }
 
+/// A torrent's own seeding limits when `custom` is on (`ratio`, `minutes`:
+/// `None` is no limit of that kind), or none of its own when it's off, so the
+/// app's limits apply. Checked against the torrent at once.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_seed_limits(
+    state: State<'_, AppState>,
+    id: DownloadId,
+    custom: bool,
+    ratio: Option<f64>,
+    minutes: Option<u32>,
+) -> CommandResult<()> {
+    Ok(state
+        .downloads
+        .set_torrent_seed_limits(id, custom, ratio, minutes)
+        .await?)
+}
+
+/// Stop a finished torrent seeding: it stops uploading and keeps its files.
+#[tauri::command]
+#[specta::specta]
+pub async fn stop_seeding(state: State<'_, AppState>, id: DownloadId) -> CommandResult<()> {
+    Ok(state.downloads.stop_seeding(id).await?)
+}
+
+/// Seed a finished torrent again (if its limits are already met, it seeds
+/// until stopped by hand).
+#[tauri::command]
+#[specta::specta]
+pub async fn start_seeding(state: State<'_, AppState>, id: DownloadId) -> CommandResult<()> {
+    Ok(state.downloads.start_seeding(id).await?)
+}
+
 /// A download's expected checksum from pasted text (`algo`: `None`
 /// recognises it by length); empty text removes it. A finished file is
 /// checked at once.

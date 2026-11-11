@@ -81,6 +81,9 @@ impl AppState {
                     max_connections: settings.max_connections as usize,
                     ..SegmentConfig::default()
                 },
+                seed_ratio: settings.seed_ratio,
+                seed_minutes: settings.seed_minutes,
+                upload_limit: settings.upload_limit,
                 ..ManagerConfig::default()
             },
         )
@@ -135,6 +138,9 @@ impl AppState {
         self.grabber.set_warn_duplicates(settings.warn_duplicates);
         self.downloads
             .set_speed_limit(settings.active_speed_limit_now().limit);
+        self.downloads
+            .set_seed_defaults(settings.seed_ratio, settings.seed_minutes);
+        self.downloads.set_upload_limit(settings.upload_limit);
         Ok(())
     }
 

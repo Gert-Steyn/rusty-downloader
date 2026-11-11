@@ -61,6 +61,21 @@ export function iconFor(kind: string): 'video' | 'gallery' | 'torrent' | 'file' 
 	return kind === 'ytdlp' ? 'video' : kind === 'gallerydl' ? 'gallery' : 'file';
 }
 
+/** `1 h 12 min`, `45 min`, or `Under 1 min` for a seeding time. */
+export function formatSeedTime(seconds: number | null | undefined): string {
+	const total = Math.floor(seconds ?? 0);
+	const h = Math.floor(total / 3600);
+	const m = Math.floor((total % 3600) / 60);
+	if (h > 0) return `${h} h ${m} min`;
+	if (m > 0) return `${m} min`;
+	return 'Under 1 min';
+}
+
+/** Upload ratio (uploaded over size), 2 decimals, or `—` when the size is unknown or 0. */
+export function formatRatio(uploaded: number, size: number | null | undefined): string {
+	return size ? (uploaded / size).toFixed(2) : '—';
+}
+
 /** `3:07` or `1:02:03`. */
 export function formatDuration(seconds: number | null | undefined): string {
 	if (seconds == null || !Number.isFinite(seconds)) return '';

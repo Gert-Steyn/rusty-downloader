@@ -7,6 +7,7 @@
 //! multi-file one is the folder `<package folder>/<name>` holding its files.
 //! Pause pauses the torrent in the engine; resuming finds it again by its
 //! info hash (or re-adds it, which re-checks the files already there).
+//! A finished torrent seeds on (see `seeding`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -130,11 +131,56 @@ pub(super) async fn execute(
     let Some(size) = run(inner, engine, row, &handle, cancel).await? else {
         return Ok(Outcome::Paused);
     };
-    // Seeding comes later; a finished torrent is paused until then.
-    if let Err(e) = engine.pause(&handle).await {
-        tracing::warn!(download = row.id, error = %e, "could not pause finished torrent");
+    // A finished torrent seeds, unless its limits are already met: then it
+    // is paused, as it was before seeding existed. The seeder takes over the
+    // upload count of a seeding torrent at its next check.
+    let stats = handle.stats();
+    let seeded_secs = row.seeded_secs as u64;
+    let uploaded = row.uploaded as u64 + stats.uploaded_bytes;
+    let (ratio, minutes) = super::seeding::limits_for(row, inner.seed_defaults());
+    if super::seeding::limits_met(ratio, minutes, uploaded, size, seeded_secs) {
+        store::add_seeding_progress(&inner.pool, row.id, stats.uploaded_bytes, 0).await?;
+        if let Err(e) = engine.pause(&handle).await {
+            tracing::warn!(download = row.id, error = %e, "could not pause finished torrent");
+        }
+    } else {
+        store::set_seeding(&inner.pool, row.id, true).await?;
+        super::seeding::emit(inner, row.id, uploaded, seeded_secs, true, Some(&stats));
     }
     Ok(Outcome::Completed { path: dest, size })
+}
+
+/// Puts a download's torrent back in the engine, unpaused, when the session
+/// doesn't have it (after an app restart, say). It is added from its metadata
+/// copy into the folder its files are in. `None` when that copy is gone.
+pub(super) async fn readd(
+    engine: &TorrentEngine,
+    row: &DownloadRow,
+) -> Result<Option<Arc<ManagedTorrent>>> {
+    let (Some(info_hash), Some(dest)) = (&row.info_hash, &row.dest_path) else {
+        return Ok(None);
+    };
+    let Some(info) = engine.inspect_cached(info_hash) else {
+        return Ok(None);
+    };
+    let only_files = row.torrent_options().unwrap_or_default().only_files;
+    let dest = Path::new(dest);
+    // A multi-file torrent is in its own folder; a single file is in the
+    // package's folder, which holds its path.
+    let folder = if info.files.len() > 1 {
+        dest.to_path_buf()
+    } else {
+        dest.parent().unwrap_or(dest).to_path_buf()
+    };
+    engine
+        .add(
+            TorrentSource::Bytes(info.torrent),
+            &folder,
+            false,
+            only_files,
+        )
+        .await
+        .map(Some)
 }
 
 /// Mirror the torrent's progress until it's complete: `Some(size)` then.
@@ -154,9 +200,13 @@ async fn run(
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
+                // The engine's upload count starts again on the next run, so
+                // what this run uploaded is saved before the pause.
+                let uploaded = handle.stats().uploaded_bytes;
                 if let Err(e) = engine.pause(handle).await {
                     tracing::warn!(download = row.id, error = %e, "could not pause torrent");
                 }
+                store::add_seeding_progress(pool, row.id, uploaded, 0).await?;
                 store::set_downloaded(pool, row.id, handle.stats().progress_bytes).await?;
                 return Ok(None);
             }

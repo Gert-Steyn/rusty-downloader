@@ -162,6 +162,9 @@
 		<span><Icon name="downloads" /> {downloads.stats.speed ? formatSpeed(downloads.stats.speed) : '0 B/s'}</span>
 		<span>{downloads.stats.active} active</span>
 		<span>{downloads.stats.queued} queued</span>
+		{#if downloads.stats.seeding}
+			<span><Icon name="upload" /> {downloads.stats.seeding} seeding · {downloads.stats.upload ? formatSpeed(downloads.stats.upload) : '0 B/s'}</span>
+		{/if}
 		<span class="spacer"></span>
 		{#if network.status.state === 'down'}
 			<a class="net down" href="/settings" title="Settings → Network">

@@ -7,7 +7,7 @@
 	// in (or near) the viewport are in the DOM, so thousands stay smooth.
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { Download, Package } from '#lib/api.js';
-	import type { Live } from '#lib/downloads.svelte.js';
+	import type { Live, Seed } from '#lib/downloads.svelte.js';
 	import {
 		STATUS_LABELS,
 		displayName,
@@ -26,6 +26,7 @@
 	let {
 		packages,
 		live,
+		seeds,
 		selection = $bindable(null),
 		onactivate,
 		onmenu,
@@ -33,6 +34,8 @@
 	}: {
 		packages: Package[];
 		live: Record<number, Live>;
+		/** Upload speed and peers of torrents that are seeding. */
+		seeds: Record<number, Seed>;
 		selection?: Selection;
 		onactivate?: (selection: NonNullable<Selection>) => void;
 		/** Right click on a row (already selected), at client coordinates. */
@@ -283,12 +286,20 @@
 							<ProgressBar value={pct} status={d.status} />
 							<span class="pct" title={d.files ? 'Files done' : undefined}>{progressText(d)}</span>
 						</span>
-						<span class="num" role="gridcell">{d.status === 'active' ? formatSpeed(speed) : '—'}</span>
+						<span class="num" role="gridcell">
+							{#if d.seeding}
+								<span class="upload" title="Upload speed">
+									<Icon name="upload" />{formatSpeed(seeds[d.id]?.uploadBps)}
+								</span>
+							{:else}
+								{d.status === 'active' ? formatSpeed(speed) : '—'}
+							{/if}
+						</span>
 						<span class="num" role="gridcell">
 							{d.status === 'active' ? formatEta(d.size == null ? null : d.size - d.downloaded, speed) : '—'}
 						</span>
-						<span class="status {d.status}" role="gridcell" title={d.error ?? undefined}>
-							{STATUS_LABELS[d.status]}
+						<span class="status {d.seeding ? 'seeding' : d.status}" role="gridcell" title={d.error ?? undefined}>
+							{d.seeding ? 'Seeding' : STATUS_LABELS[d.status]}
 						</span>
 					</div>
 				{/if}
@@ -453,7 +464,15 @@
 	.status.completed {
 		color: var(--success);
 	}
+	.status.seeding {
+		color: var(--accent);
+	}
 	.status.failed {
 		color: var(--danger);
+	}
+	.upload {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
 	}
 </style>

@@ -26,6 +26,7 @@
 		Magnet,
 		Trash2,
 		Undo2,
+		Upload,
 		Video,
 		Wrench,
 		X,
@@ -63,7 +64,8 @@
 		'move-bottom': ArrowDownToLine,
 		speed: Gauge,
 		checksum: ShieldCheck,
-		network: Globe
+		network: Globe,
+		upload: Upload
 	} as const;
 
 	export type IconName = keyof typeof icons;

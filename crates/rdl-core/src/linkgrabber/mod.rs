@@ -609,7 +609,13 @@ impl LinkGrabber {
                     Some(kept)
                 }
             };
-            plan.push((*id, TorrentOptions { only_files: chosen }));
+            plan.push((
+                *id,
+                TorrentOptions {
+                    only_files: chosen,
+                    ..Default::default()
+                },
+            ));
         }
         for (id, options) in plan {
             let json = serde_json::to_string(&options)?;

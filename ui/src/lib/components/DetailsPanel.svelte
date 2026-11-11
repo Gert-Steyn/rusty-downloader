@@ -3,12 +3,15 @@
 	import { commands, isTauri, unwrap, type TorrentFileProgress } from '#lib/api.js';
 	import { downloads } from '#lib/downloads.svelte.js';
 	import { network } from '#lib/network.svelte.js';
+	import { settings } from '#lib/settings.svelte.js';
 	import {
 		CHECKSUM_LABELS,
 		STATUS_LABELS,
 		displayName,
 		formatBytes,
 		formatEta,
+		formatRatio,
+		formatSeedTime,
 		formatSpeed,
 		percent,
 		summarize
@@ -18,6 +21,7 @@
 	import { queues } from '#lib/queues.svelte.js';
 	import Icon from './Icon.svelte';
 	import ProgressBar from './ProgressBar.svelte';
+	import SeedLimits from './SeedLimits.svelte';
 	import type { Selection } from './DownloadsTable.svelte';
 
 	let { selection, onremove }: { selection: Selection; onremove: () => void } = $props();
@@ -31,6 +35,7 @@
 				: undefined
 	);
 	const live = $derived(download ? downloads.live[download.id] : undefined);
+	const seed = $derived(download ? downloads.seeds[download.id] : undefined);
 	const canPause = $derived(download?.status === 'active' || download?.status === 'queued');
 	const canResume = $derived(
 		download?.status === 'paused' || download?.status === 'failed' || download?.status === 'canceled'
@@ -48,6 +53,11 @@
 		const mock = await import('#lib/mock.js');
 		return mock.torrentFiles();
 	}
+
+	// The Settings defaults are shown under a torrent's seeding limits.
+	$effect(() => {
+		if (download?.kind === 'torrent' && !settings.value) void settings.load();
+	});
 
 	$effect(() => {
 		const id = download?.id;
@@ -91,6 +101,13 @@
 				{#if download.status === 'completed'}
 					<button class="btn" onclick={() => downloads.open(download.id)}><Icon name="open" /> Open</button>
 				{/if}
+				{#if download.kind === 'torrent' && download.status === 'completed'}
+					{#if download.seeding}
+						<button class="btn" onclick={() => downloads.stopSeeding(download.id)}><Icon name="pause" /> Stop seeding</button>
+					{:else}
+						<button class="btn" onclick={() => downloads.startSeeding(download.id)}><Icon name="upload" /> Seed again</button>
+					{/if}
+				{/if}
 				<button class="btn" onclick={() => downloads.reveal(download.id)}><Icon name="folder" /> Show in folder</button>
 				<button class="btn" onclick={onremove}><Icon name="trash" /> Remove</button>
 			</div>
@@ -118,7 +135,17 @@
 			</dd>
 			{#if download.kind === 'torrent'}
 				<dt>Peers</dt>
-				<dd>{download.status === 'active' ? (live?.connections ?? 0) : '—'}</dd>
+				<dd>{download.status === 'active' ? (live?.connections ?? 0) : download.seeding ? (seed?.peers ?? 0) : '—'}</dd>
+				<dt>Uploaded</dt>
+				<dd>{formatBytes(download.uploaded)}</dd>
+				<dt>Ratio</dt>
+				<dd class="num">{formatRatio(download.uploaded, download.size)}</dd>
+				<dt>Seeding time</dt>
+				<dd>{formatSeedTime(download.seededSecs)}</dd>
+				{#if download.seeding}
+					<dt>Upload speed</dt>
+					<dd>{formatSpeed(seed?.uploadBps)}</dd>
+				{/if}
 			{/if}
 			<dt>Time left</dt>
 			<dd>
@@ -163,6 +190,11 @@
 			<dt>{download.files ? 'Folder' : 'Saved to'}</dt>
 			<dd class="wide mono selectable">{download.destPath ?? `${pkg.destDir} (name not known yet)`}</dd>
 		</dl>
+		{#if download.kind === 'torrent'}
+			{#key download.id}
+				<SeedLimits {download} />
+			{/key}
+		{/if}
 		{#if files.length}
 			<h3>Files</h3>
 			<ul class="files">

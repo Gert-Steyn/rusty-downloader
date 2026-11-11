@@ -656,7 +656,8 @@ async fn torrent_files_lists_each_file_with_its_selection() {
     assert_eq!(
         manager.get(id).await.unwrap().torrent,
         Some(TorrentOptions {
-            only_files: Some(vec![1])
+            only_files: Some(vec![1]),
+            ..Default::default()
         })
     );
     manager.shutdown().await;
@@ -792,7 +793,8 @@ async fn set_torrent_files_refuses_an_empty_or_unknown_choice() {
     assert_eq!(
         grabber.list().await.unwrap()[0].torrent_options,
         Some(TorrentOptions {
-            only_files: Some(vec![1])
+            only_files: Some(vec![1]),
+            ..Default::default()
         })
     );
     // Back to all of them.

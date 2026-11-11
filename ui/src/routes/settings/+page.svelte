@@ -84,6 +84,38 @@
 		await speed.refresh();
 	}
 
+	/**
+	 * A torrent limit field: empty is no limit (`null`); a number from `min` up is
+	 * its value; anything else is `undefined`, so the field goes back to the saved value.
+	 */
+	function limitField(input: HTMLInputElement, min: number): number | null | undefined {
+		const text = input.value.trim().replace(',', '.');
+		if (text === '') return null;
+		const n = Number(text);
+		return Number.isFinite(n) && n >= min ? n : undefined;
+	}
+
+	async function setSeedRatio(input: HTMLInputElement) {
+		const ratio = limitField(input, 0.1);
+		if (ratio !== undefined && ratio !== s?.seedRatio) await settings.update({ seedRatio: ratio });
+		input.value = settings.value?.seedRatio != null ? String(settings.value.seedRatio) : '';
+	}
+
+	async function setSeedMinutes(input: HTMLInputElement) {
+		const value = limitField(input, 1);
+		const minutes = value == null ? value : Math.round(value);
+		if (minutes !== undefined && minutes !== s?.seedMinutes) await settings.update({ seedMinutes: minutes });
+		input.value = settings.value?.seedMinutes != null ? String(settings.value.seedMinutes) : '';
+	}
+
+	/** Upload limit in MB/s; 0 or empty is no limit. */
+	async function setUploadLimit(input: HTMLInputElement) {
+		const value = limitField(input, 0);
+		const bytes = value ? Math.round(value * MB) : value === undefined ? undefined : null;
+		if (bytes !== undefined && bytes !== s?.uploadLimit) await settings.update({ uploadLimit: bytes });
+		input.value = settings.value?.uploadLimit ? mbps(settings.value.uploadLimit) : '';
+	}
+
 	async function setSwitch(on: boolean) {
 		await settings.update({ speedLimitOn: on });
 		await speed.refresh();
@@ -261,6 +293,62 @@
 						saveRule(s?.speedSchedule.length ?? 0, { days: [0, 1, 2, 3, 4], from: '08:00', to: '18:00', limit: MB })}
 					>Add a scheduled limit</button
 				>
+			</div>
+		</section>
+
+		<section aria-labelledby="set-torrents">
+			<h2 id="set-torrents">Torrents</h2>
+			<div class="grid">
+				<label class="label" for="set-seed-ratio">Seed until ratio</label>
+				<div class="control">
+					<input
+						id="set-seed-ratio"
+						class="textbox narrow"
+						type="number"
+						min="0.1"
+						step="0.1"
+						placeholder="No limit"
+						value={s.seedRatio ?? ''}
+						onchange={(e) => setSeedRatio(e.currentTarget)}
+					/>
+					<small>Stop seeding once a torrent has uploaded this many times its size.</small>
+				</div>
+
+				<label class="label" for="set-seed-minutes">Seed for at most</label>
+				<div class="control">
+					<span class="inline">
+						<input
+							id="set-seed-minutes"
+							class="textbox narrow"
+							type="number"
+							min="1"
+							step="1"
+							placeholder="No limit"
+							value={s.seedMinutes ?? ''}
+							onchange={(e) => setSeedMinutes(e.currentTarget)}
+						/>
+						<span class="muted">minutes</span>
+					</span>
+					<small>Stop seeding after this long, whatever the ratio.</small>
+				</div>
+
+				<label class="label" for="set-upload-limit">Upload speed limit</label>
+				<div class="control">
+					<span class="inline">
+						<input
+							id="set-upload-limit"
+							class="textbox narrow"
+							type="number"
+							min="0.01"
+							step="0.1"
+							placeholder="No limit"
+							value={s.uploadLimit ? mbps(s.uploadLimit) : ''}
+							onchange={(e) => setUploadLimit(e.currentTarget)}
+						/>
+						<span class="muted">MB/s</span>
+					</span>
+					<small>Applies to all torrents together.</small>
+				</div>
 			</div>
 		</section>
 

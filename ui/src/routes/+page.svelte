@@ -101,6 +101,13 @@
 			...(d.kind === 'gallerydl' && d.status === 'completed'
 				? [{ label: 'Check for new files', icon: 'refresh' as const, action: () => downloads.rerunGallery(id) }]
 				: []),
+			...(d.kind === 'torrent' && d.status === 'completed'
+				? [
+						d.seeding
+							? { label: 'Stop seeding', icon: 'pause' as const, action: () => downloads.stopSeeding(id) }
+							: { label: 'Seed again', icon: 'play' as const, action: () => downloads.startSeeding(id) }
+					]
+				: []),
 			{ label: 'Open', icon: 'open', disabled: d.status !== 'completed', action: () => downloads.open(id) },
 			{ label: 'Show in folder', icon: 'folder', action: () => downloads.reveal(id) },
 			{ label: 'Copy link', icon: 'copy', action: () => copy(d.sourceUrl) },
@@ -276,6 +283,7 @@
 		<DownloadsTable
 			packages={downloads.packages}
 			live={downloads.live}
+			seeds={downloads.seeds}
 			bind:selection
 			onactivate={activate}
 			onmenu={openMenu}

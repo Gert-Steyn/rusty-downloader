@@ -110,6 +110,19 @@ export const commands = {
 	 *  whether it is chosen. Empty for other downloads.
 	 */
 	torrentFiles: (id: number) => typedError<TorrentFileProgress[], CommandError>(__TAURI_INVOKE("torrent_files", { id })),
+	/**
+	 *  A torrent's own seeding limits when `custom` is on (`ratio`, `minutes`:
+	 *  `None` is no limit of that kind), or none of its own when it's off, so the
+	 *  app's limits apply. Checked against the torrent at once.
+	 */
+	setSeedLimits: (id: number, custom: boolean, ratio: number | null, minutes: number | null) => typedError<null, CommandError>(__TAURI_INVOKE("set_seed_limits", { id, custom, ratio, minutes })),
+	/**  Stop a finished torrent seeding: it stops uploading and keeps its files. */
+	stopSeeding: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("stop_seeding", { id })),
+	/**
+	 *  Seed a finished torrent again (if its limits are already met, it seeds
+	 *  until stopped by hand).
+	 */
+	startSeeding: (id: number) => typedError<null, CommandError>(__TAURI_INVOKE("start_seeding", { id })),
 	proxyOverview: () => typedError<ProxyOverview_Serialize, CommandError>(__TAURI_INVOKE("proxy_overview")),
 	/**  A new profile; returns its id. */
 	proxyAdd: (input: ProxyInput_Deserialize) => typedError<number, CommandError>(__TAURI_INVOKE("proxy_add", { input })),
@@ -404,6 +417,12 @@ export type Download_Deserialize = {
 	checksum?: Checksum_Deserialize | null,
 	/**  Which connection it uses. */
 	proxy: ProxyChoice,
+	/**  Bytes a torrent has uploaded, across all its runs. */
+	uploaded: number,
+	/**  Whether a finished torrent is seeding now (uploading to peers). */
+	seeding: boolean,
+	/**  Seconds a torrent has spent seeding, across all its runs. */
+	seededSecs: number,
 };
 
 export type Download_Serialize = {
@@ -432,6 +451,12 @@ export type Download_Serialize = {
 	checksum: Checksum_Serialize | null,
 	/**  Which connection it uses. */
 	proxy: ProxyChoice,
+	/**  Bytes a torrent has uploaded, across all its runs. */
+	uploaded: number,
+	/**  Whether a finished torrent is seeding now (uploading to peers). */
+	seeding: boolean,
+	/**  Seconds a torrent has spent seeding, across all its runs. */
+	seededSecs: number,
 };
 
 /**
@@ -460,6 +485,12 @@ export type Event_Deserialize = { type: "packageAdded"; packageId: number } | { 
 { type: "queueFinished"; queueId: number; onComplete: OnComplete } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error?: string | null } | 
 /**  A download's own speed limit changed. */
 { type: "speedLimitChanged"; downloadId: number; speedLimit?: number | null } | 
+/**
+ *  A torrent's seeding changed, or it was reported while seeding: what it
+ *  has uploaded and seeded so far, the upload speed and peers now, and
+ *  whether it is still seeding (`false`: it stopped, by its limits or by hand).
+ */
+{ type: "seeding"; downloadId: number; uploaded: number; uploadSpeed: number; peers: number; seededSecs: number; seeding: boolean } | 
 /**  A download's expected checksum was set or cleared, or its file was checked. */
 { type: "checksumChanged"; downloadId: number; checksum?: Checksum_Deserialize | null } | 
 /**  A download's connection choice changed. */
@@ -493,6 +524,12 @@ export type Event_Serialize = { type: "packageAdded"; packageId: number } | { ty
 { type: "queueFinished"; queueId: number; onComplete: OnComplete } | { type: "downloadRemoved"; downloadId: number; packageId: number } | { type: "statusChanged"; downloadId: number; status: Status; error: string | null } | 
 /**  A download's own speed limit changed. */
 { type: "speedLimitChanged"; downloadId: number; speedLimit: number | null } | 
+/**
+ *  A torrent's seeding changed, or it was reported while seeding: what it
+ *  has uploaded and seeded so far, the upload speed and peers now, and
+ *  whether it is still seeding (`false`: it stopped, by its limits or by hand).
+ */
+{ type: "seeding"; downloadId: number; uploaded: number; uploadSpeed: number; peers: number; seededSecs: number; seeding: boolean } | 
 /**  A download's expected checksum was set or cleared, or its file was checked. */
 { type: "checksumChanged"; downloadId: number; checksum: Checksum_Serialize | null } | 
 /**  A download's connection choice changed. */
@@ -1218,6 +1255,18 @@ export type Settings_Deserialize = {
 	 *  back) instead of letting them fail.
 	 */
 	killSwitch?: boolean,
+	/**
+	 *  A finished torrent stops seeding once it has uploaded this many times
+	 *  its size. `None`: no ratio limit.
+	 */
+	seedRatio?: number | null,
+	/**
+	 *  A finished torrent stops seeding after this many minutes. `None`: no
+	 *  time limit. With neither limit it seeds until stopped.
+	 */
+	seedMinutes?: number | null,
+	/**  Upload limit for torrents, bytes per second; `None` is unlimited. */
+	uploadLimit?: number | null,
 };
 
 /**  The user's preferences. Missing fields (older saves) get their defaults. */
@@ -1263,6 +1312,18 @@ export type Settings_Serialize = {
 	 *  back) instead of letting them fail.
 	 */
 	killSwitch: boolean,
+	/**
+	 *  A finished torrent stops seeding once it has uploaded this many times
+	 *  its size. `None`: no ratio limit.
+	 */
+	seedRatio: number | null,
+	/**
+	 *  A finished torrent stops seeding after this many minutes. `None`: no
+	 *  time limit. With neither limit it seeds until stopped.
+	 */
+	seedMinutes: number | null,
+	/**  Upload limit for torrents, bytes per second; `None` is unlimited. */
+	uploadLimit: number | null,
 };
 
 /**  What limits the speed now changed. */
@@ -1406,19 +1467,40 @@ export type TorrentInfo = {
 	files: TorrentFile[],
 };
 
-/**  Which files of a torrent to download. `None` is all of them. */
+/**
+ *  Which files of a torrent to download, and its seeding limits. `None` is all
+ *  of the files.
+ */
 export type TorrentOptions = TorrentOptions_Serialize | TorrentOptions_Deserialize;
 
-/**  Which files of a torrent to download. `None` is all of them. */
+/**
+ *  Which files of a torrent to download, and its seeding limits. `None` is all
+ *  of the files.
+ */
 export type TorrentOptions_Deserialize = {
 	/**  Indices into the torrent's files (see [`TorrentFile::index`]). */
 	onlyFiles?: number[] | null,
+	/**  Seed by this torrent's own limits below, not the ones in Settings. */
+	customSeed?: boolean,
+	/**  With `custom_seed`: stop seeding at this upload ratio. `None`: no ratio limit. */
+	seedRatio?: number | null,
+	/**  With `custom_seed`: stop seeding after this many minutes. `None`: no time limit. */
+	seedMinutes?: number | null,
 };
 
-/**  Which files of a torrent to download. `None` is all of them. */
+/**
+ *  Which files of a torrent to download, and its seeding limits. `None` is all
+ *  of the files.
+ */
 export type TorrentOptions_Serialize = {
 	/**  Indices into the torrent's files (see [`TorrentFile::index`]). */
 	onlyFiles: number[] | null,
+	/**  Seed by this torrent's own limits below, not the ones in Settings. */
+	customSeed: boolean,
+	/**  With `custom_seed`: stop seeding at this upload ratio. `None`: no ratio limit. */
+	seedRatio: number | null,
+	/**  With `custom_seed`: stop seeding after this many minutes. `None`: no time limit. */
+	seedMinutes: number | null,
 };
 
 /**  Per-download yt-dlp settings, stored as `handler_opts_json`. */

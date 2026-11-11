@@ -18,10 +18,18 @@ export interface Live {
 	connections: number;
 }
 
+/** A seeding torrent's upload speed and peers now. */
+export interface Seed {
+	uploadBps: number;
+	peers: number;
+}
+
 class DownloadsStore {
 	packages = $state<Package[]>([]);
 	/** Speed and connections, only for downloads that are running. */
 	live = $state<Record<number, Live>>({});
+	/** Upload speed and peers, only for torrents that are seeding. */
+	seeds = $state<Record<number, Seed>>({});
 	ready = $state(false);
 	error = $state<string | null>(null);
 
@@ -29,6 +37,8 @@ class DownloadsStore {
 		let speed = 0;
 		let active = 0;
 		let queued = 0;
+		let seeding = 0;
+		let upload = 0;
 		for (const p of this.packages) {
 			for (const d of p.downloads) {
 				if (d.status === 'active') {
@@ -37,9 +47,13 @@ class DownloadsStore {
 				} else if (d.status === 'queued') {
 					queued++;
 				}
+				if (d.seeding) {
+					seeding++;
+					upload += this.seeds[d.id]?.uploadBps ?? 0;
+				}
 			}
 		}
-		return { speed, active, queued };
+		return { speed, active, queued, seeding, upload };
 	});
 
 	#byId = new Map<number, Download>();
@@ -54,6 +68,7 @@ class DownloadsStore {
 				const mock = await import('./mock.js');
 				this.packages = mock.packages();
 				this.live = mock.live();
+				this.seeds = mock.seeds();
 				this.#reindex();
 			}
 			this.ready = true;
@@ -131,6 +146,22 @@ class DownloadsStore {
 	/** Put a package before another (`null`: last); the order is the start order. */
 	movePackage = (id: number, before: number | null) =>
 		this.run(() => unwrap(commands.movePackage(id, before)));
+	/** Stop a finished torrent seeding; its files stay. */
+	stopSeeding = (id: number) => this.run(() => unwrap(commands.stopSeeding(id)));
+	/** Seed a finished torrent again (it stops by its limits, or never if it has none). */
+	startSeeding = (id: number) => this.run(() => unwrap(commands.startSeeding(id)));
+	/**
+	 * A torrent's own seeding limits: `custom` uses these instead of Settings.
+	 * `null` means no limit. Updates the torrent's options on success.
+	 */
+	async setSeedLimits(id: number, custom: boolean, ratio: number | null, minutes: number | null) {
+		const saved = await this.run(() => unwrap(commands.setSeedLimits(id, custom, ratio, minutes)));
+		if (saved !== undefined) {
+			const d = this.#byId.get(id);
+			if (d?.torrent) d.torrent = { ...d.torrent, customSeed: custom, seedRatio: ratio, seedMinutes: minutes };
+		}
+		return saved;
+	}
 
 	#reindex() {
 		// Index the reactive proxies so in-place updates re-render.
@@ -206,6 +237,20 @@ class DownloadsStore {
 					);
 					break;
 				}
+				case 'seeding': {
+					const d = this.#byId.get(event.downloadId);
+					if (d) {
+						d.uploaded = event.uploaded;
+						d.seeding = event.seeding;
+						d.seededSecs = event.seededSecs;
+					}
+					if (event.seeding) {
+						this.seeds[event.downloadId] = { uploadBps: event.uploadSpeed, peers: event.peers };
+					} else {
+						delete this.seeds[event.downloadId];
+					}
+					break;
+				}
 				case 'checksumChanged': {
 					const d = this.#byId.get(event.downloadId);
 					if (d) d.checksum = event.checksum;
@@ -221,6 +266,7 @@ class DownloadsStore {
 					if (p) p.downloads = p.downloads.filter((d) => d.id !== event.downloadId);
 					this.#byId.delete(event.downloadId);
 					delete this.live[event.downloadId];
+					delete this.seeds[event.downloadId];
 					break;
 				}
 				case 'packageRemoved':

@@ -417,6 +417,9 @@ mod tests {
             speed_limit: None,
             checksum: None,
             proxy: Default::default(),
+            uploaded: 0,
+            seeding: false,
+            seeded_secs: 0,
         }
     }
 

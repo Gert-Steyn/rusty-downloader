@@ -88,13 +88,37 @@ pub struct TorrentInfo {
     pub files: Vec<TorrentFile>,
 }
 
-/// Which files of a torrent to download. `None` is all of them.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Which files of a torrent to download, and its seeding limits. `None` is all
+/// of the files.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct TorrentOptions {
     /// Indices into the torrent's files (see [`TorrentFile::index`]).
     pub only_files: Option<Vec<usize>>,
+    /// Seed by this torrent's own limits below, not the ones in Settings.
+    pub custom_seed: bool,
+    /// With `custom_seed`: stop seeding at this upload ratio. `None`: no ratio limit.
+    pub seed_ratio: Option<f64>,
+    /// With `custom_seed`: stop seeding after this many minutes. `None`: no time limit.
+    pub seed_minutes: Option<u32>,
+}
+
+/// Check seeding limits: a ratio must be above 0, and minutes at least 1.
+pub fn check_seed_limits(ratio: Option<f64>, minutes: Option<u32>) -> Result<()> {
+    if let Some(ratio) = ratio
+        && !(ratio.is_finite() && ratio > 0.0)
+    {
+        return Err(Error::InvalidInput(
+            "The seed ratio must be more than 0.".into(),
+        ));
+    }
+    if minutes == Some(0) {
+        return Err(Error::InvalidInput(
+            "The seed time must be at least 1 minute.".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Total size of the files that `only_files` selects (all when `None`).
@@ -216,6 +240,8 @@ struct Inner {
     session: OnceCell<Arc<Session>>,
     /// The download speed limit for the whole session, bytes per second.
     download_limit: Mutex<Option<u64>>,
+    /// The upload limit for the whole session, bytes per second.
+    upload_limit: Mutex<Option<u64>>,
 }
 
 impl TorrentEngine {
@@ -227,6 +253,7 @@ impl TorrentEngine {
                 network,
                 session: OnceCell::new(),
                 download_limit: Mutex::new(None),
+                upload_limit: Mutex::new(None),
             }),
         }
     }
@@ -287,6 +314,9 @@ impl TorrentEngine {
         session
             .ratelimits
             .set_download_bps(bps(*lock(&self.inner.download_limit)));
+        session
+            .ratelimits
+            .set_upload_bps(bps(*lock(&self.inner.upload_limit)));
         tracing::info!(address = %ip, port, "torrent session started");
         Ok(session)
     }
@@ -449,6 +479,24 @@ impl TorrentEngine {
         }))
     }
 
+    /// The torrent with this info hash if the session is running and has it.
+    /// Never starts the session (so it never touches the network).
+    pub fn running_handle(&self, info_hash: &str) -> Option<Arc<ManagedTorrent>> {
+        let session = self.inner.session.get()?;
+        session.with_torrents(|torrents| {
+            torrents
+                .map(|(_, handle)| handle)
+                .find(|handle| handle.info_hash().as_string() == info_hash)
+                .map(Arc::clone)
+        })
+    }
+
+    /// The port the session listens on for peers, once it is running. Other
+    /// peers reach our torrents there; tests use it to leech from us.
+    pub async fn listen_addr(&self) -> Result<Option<SocketAddr>> {
+        Ok(self.session().await?.listen_addr())
+    }
+
     /// The torrent a download resumes with. Test mode only: a torrent restored
     /// from the session file has lost its test peers (librqbit doesn't store
     /// them), so it is taken out, its files kept, and added again from its
@@ -500,6 +548,16 @@ impl TorrentEngine {
         *lock(&self.inner.download_limit) = bytes_per_second;
         if let Some(session) = self.inner.session.get() {
             session.ratelimits.set_download_bps(bps(bytes_per_second));
+        }
+    }
+
+    /// The upload limit for all torrents, in bytes per second; `None` lifts
+    /// it. Takes effect at once, and at the next start if the session isn't
+    /// running yet.
+    pub fn set_upload_limit(&self, bytes_per_second: Option<u64>) {
+        *lock(&self.inner.upload_limit) = bytes_per_second;
+        if let Some(session) = self.inner.session.get() {
+            session.ratelimits.set_upload_bps(bps(bytes_per_second));
         }
     }
 
@@ -714,5 +772,26 @@ mod tests {
         assert_eq!(selected_size(&files, None), 110);
         assert_eq!(selected_size(&files, Some(&[1])), 100);
         assert_eq!(selected_size(&files, Some(&[])), 0);
+    }
+
+    #[test]
+    fn torrent_options_from_before_seeding_have_no_limits_of_their_own() {
+        let old: TorrentOptions = serde_json::from_str(r#"{"onlyFiles": [1]}"#).unwrap();
+        assert_eq!(old.only_files, Some(vec![1]));
+        assert!(!old.custom_seed);
+        assert_eq!(old.seed_ratio, None);
+        assert_eq!(old.seed_minutes, None);
+        let empty: TorrentOptions = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty, TorrentOptions::default());
+    }
+
+    #[test]
+    fn seed_limits_must_be_positive() {
+        assert!(check_seed_limits(None, None).is_ok());
+        assert!(check_seed_limits(Some(0.25), Some(1)).is_ok());
+        assert!(check_seed_limits(Some(0.0), None).is_err());
+        assert!(check_seed_limits(Some(-1.0), None).is_err());
+        assert!(check_seed_limits(Some(f64::INFINITY), None).is_err());
+        assert!(check_seed_limits(None, Some(0)).is_err());
     }
 }
