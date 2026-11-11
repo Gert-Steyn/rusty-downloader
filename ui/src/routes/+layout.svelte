@@ -6,7 +6,7 @@
 	import '#lib/styles/graphite.css';
 	import '#lib/styles/theme.css';
 	import { applyTheme, loadTheme } from '#lib/theme.js';
-	import favicon from '#lib/assets/favicon.svg';
+	import favicon from '#lib/assets/favicon.png';
 	import Icon from '#lib/components/Icon.svelte';
 	import Toast from '#lib/components/Toast.svelte';
 	import { mainNav, footerNav, type NavItem } from '#lib/nav.js';
