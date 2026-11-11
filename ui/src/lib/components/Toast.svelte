@@ -30,7 +30,7 @@
 		<span>{message.text}</span>
 		{#if action && onaction}
 			<button
-				class="btn"
+				class="btn ghost small"
 				onclick={() => {
 					visible = false;
 					onaction();
@@ -43,19 +43,22 @@
 <style>
 	.toast {
 		position: fixed;
-		right: 20px;
-		bottom: 44px;
+		right: var(--space-5);
+		/* Sits just above the 28px status bar. */
+		bottom: calc(28px + var(--space-5));
 		z-index: 10;
 		display: flex;
 		align-items: center;
-		gap: 12px;
-		max-width: 420px;
-		padding: 10px 10px 10px 16px;
-		border: 1px solid var(--stroke-card);
-		border-radius: var(--radius-overlay);
-		background: var(--page-fallback);
-		box-shadow: 0 8px 16px rgba(0, 0, 0, 0.14);
-		animation: rise 160ms ease-out;
+		gap: var(--space-4);
+		max-width: 360px;
+		padding: var(--space-4);
+		font: var(--type-body);
+		color: var(--text);
+		background: var(--raised);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-lg);
+		box-shadow: var(--shadow-popover);
+		animation: rise var(--motion-base) var(--ease);
 	}
 	@keyframes rise {
 		from {

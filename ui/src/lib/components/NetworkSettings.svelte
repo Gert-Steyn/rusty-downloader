@@ -3,6 +3,7 @@
 	// kill-switch), proxy profiles, the default, and per-site rules.
 	import type { ProxySettings } from '#lib/api.js';
 	import { KIND_LABELS, network } from '#lib/network.svelte.js';
+	import { ArrowDown, ArrowUp } from '@lucide/svelte';
 	import { settings } from '#lib/settings.svelte.js';
 	import ProxyDialog from './ProxyDialog.svelte';
 
@@ -67,7 +68,7 @@
 	}
 </script>
 
-<section class="card" aria-labelledby="set-network">
+<section aria-labelledby="set-network">
 	<h2 id="set-network">Network</h2>
 	{#if network.error}<p class="error-text">{network.error}</p>{/if}
 
@@ -174,13 +175,21 @@
 						<option value={String(p.id)}>through {p.name}</option>
 					{/each}
 				</select>
-				<button type="button" class="btn icon" aria-label="Move up" disabled={i === 0} onclick={() => move(i, -1)}>↑</button>
 				<button
 					type="button"
-					class="btn icon"
+					class="btn ghost icon-only"
+					title="Move up"
+					aria-label="Move up"
+					disabled={i === 0}
+					onclick={() => move(i, -1)}><ArrowUp size={16} strokeWidth={1.5} aria-hidden="true" /></button
+				>
+				<button
+					type="button"
+					class="btn ghost icon-only"
+					title="Move down"
 					aria-label="Move down"
 					disabled={i === network.settings.rules.length - 1}
-					onclick={() => move(i, 1)}>↓</button
+					onclick={() => move(i, 1)}><ArrowDown size={16} strokeWidth={1.5} aria-hidden="true" /></button
 				>
 				<button type="button" class="btn" onclick={() => saveRule(i, null)}>Remove</button>
 			</div>
@@ -217,80 +226,79 @@
 <style>
 	section {
 		display: grid;
-		gap: 10px;
-		padding: 16px;
 	}
 	h2 {
-		margin: 0 0 2px;
-		font: 600 14px/20px var(--font-ui);
+		margin: 0 0 var(--space-3);
+		font: var(--type-heading);
+		color: var(--text);
 	}
 	h3 {
-		margin: 6px 0 0;
-		font: 600 13px/18px var(--font-ui);
+		margin: var(--space-5) 0 0;
+		font: var(--type-label);
+		color: var(--text);
 	}
 	small {
-		font-size: 12px;
-		color: var(--text-secondary);
-	}
-	.muted {
-		color: var(--text-secondary);
-	}
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 12px;
+		font: var(--type-small);
+		color: var(--text-muted);
 	}
 	.row {
 		display: flex;
-		gap: 8px;
+		flex-wrap: wrap;
+		gap: var(--space-3);
+		padding-top: var(--space-4);
 	}
 	.profile {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
-		gap: 4px 12px;
-		font-size: 13px;
+		gap: var(--space-2) var(--space-4);
+		padding: var(--space-4) 0;
+		border-top: 1px solid var(--border-subtle);
+		font: var(--type-body);
 	}
 	.what {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: baseline;
-		gap: 4px 8px;
+		gap: var(--space-2) var(--space-3);
 		min-width: 0;
 	}
 	.name {
-		font-weight: 600;
+		font: var(--type-label);
+		color: var(--text);
 	}
 	.actions {
 		display: flex;
-		gap: 6px;
+		gap: var(--space-3);
 	}
 	.result {
 		grid-column: 1 / -1;
-		font-size: 12px;
+		font: var(--type-small);
+		color: var(--text-muted);
 		overflow-wrap: anywhere;
 	}
 	.result.ok {
 		color: var(--success);
 	}
 	.result.bad {
-		color: var(--critical);
+		color: var(--danger);
 	}
 	.rule {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 8px;
-		font-size: 13px;
+		gap: var(--space-3);
+		padding: var(--space-4) 0;
+		border-top: 1px solid var(--border-subtle);
+		font: var(--type-body);
 	}
 	.site {
 		width: 220px;
 	}
-	.icon {
-		min-width: 32px;
-		padding-inline: 6px;
-	}
 	.everything {
 		width: 220px;
+		font: var(--type-label);
+		color: var(--text);
 	}
 	.error-text {
 		margin: 0;
@@ -300,26 +308,29 @@
 	}
 	.state {
 		margin: 0;
-		font-size: 13px;
+		font: var(--type-body);
+		color: var(--text-secondary);
 	}
 	.state.ok {
 		color: var(--success);
 	}
 	.state.bad {
-		color: var(--critical);
+		color: var(--danger);
 	}
 	.check {
 		display: flex;
 		align-items: flex-start;
-		gap: 10px;
-		font-size: 13px;
+		gap: var(--space-3);
+		padding: var(--space-4) 0;
+		border-top: 1px solid var(--border-subtle);
+		font: var(--type-body);
 	}
 	.check input {
-		margin-top: 2px;
+		margin-top: var(--space-1);
 	}
 	.check span {
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: var(--space-1);
 	}
 </style>

@@ -6,6 +6,19 @@
 	import NetworkSettings from '#lib/components/NetworkSettings.svelte';
 	import { settings } from '#lib/settings.svelte.js';
 	import { speed } from '#lib/speed.svelte.js';
+	import { loadTheme, saveTheme, type ThemeChoice } from '#lib/theme.js';
+
+	const THEMES: { value: ThemeChoice; label: string }[] = [
+		{ value: 'system', label: 'System' },
+		{ value: 'dark', label: 'Dark' },
+		{ value: 'light', label: 'Light' }
+	];
+	let theme = $state<ThemeChoice>(loadTheme());
+
+	function chooseTheme(choice: ThemeChoice) {
+		theme = choice;
+		saveTheme(choice);
+	}
 
 	let info = $state<AppInfo | null>(null);
 	let infoError = $state<string | null>(null);
@@ -106,10 +119,25 @@
 		</span>
 	</header>
 
+	<section aria-labelledby="set-appearance">
+		<h2 id="set-appearance">Appearance</h2>
+		<div class="setting">
+			<span class="label" id="set-theme">Theme</span>
+			<div class="segmented" role="group" aria-labelledby="set-theme">
+				{#each THEMES as t (t.value)}
+					<button type="button" class="segment" aria-pressed={theme === t.value} onclick={() => chooseTheme(t.value)}>
+						{t.label}
+					</button>
+				{/each}
+			</div>
+		</div>
+		<small>System follows the Windows setting. Dark or Light applies on this device straight away.</small>
+	</section>
+
 	{#if !s}
 		<p class="muted">{settings.error ?? 'Loading…'}</p>
 	{:else}
-		<section class="card" aria-labelledby="set-downloads">
+		<section aria-labelledby="set-downloads">
 			<h2 id="set-downloads">Downloads</h2>
 			<div class="grid">
 				<span class="label">Save new downloads to</span>
@@ -154,7 +182,7 @@
 			</div>
 		</section>
 
-		<section class="card" aria-labelledby="set-speed">
+		<section aria-labelledby="set-speed">
 			<h2 id="set-speed">Speed</h2>
 			<label class="check">
 				<input type="checkbox" checked={s.speedLimitOn} onchange={(e) => setSwitch(e.currentTarget.checked)} />
@@ -242,7 +270,7 @@
 
 		<KnownHostsSettings />
 
-		<section class="card" aria-labelledby="set-grabber">
+		<section aria-labelledby="set-grabber">
 			<h2 id="set-grabber">LinkGrabber</h2>
 			<label class="check">
 				<input type="checkbox" checked={s.clipboardWatch} onchange={(e) => set('clipboardWatch', e.currentTarget.checked)} />
@@ -279,7 +307,7 @@
 			</label>
 		</section>
 
-		<section class="card" aria-labelledby="set-windows">
+		<section aria-labelledby="set-windows">
 			<h2 id="set-windows">Windows</h2>
 			<label class="check">
 				<input
@@ -309,9 +337,9 @@
 			</label>
 		</section>
 
-		<section class="card" aria-labelledby="set-notify">
+		<section aria-labelledby="set-notify">
 			<h2 id="set-notify">Notifications</h2>
-			<p class="muted small">Shown while the app is in the background.</p>
+			<p class="muted">Shown while the app is in the background.</p>
 			<label class="check">
 				<input type="checkbox" checked={s.notifyFinished} onchange={(e) => set('notifyFinished', e.currentTarget.checked)} />
 				<span>When a package finishes</span>
@@ -323,7 +351,7 @@
 		</section>
 	{/if}
 
-	<section class="card" aria-labelledby="set-about">
+	<section aria-labelledby="set-about">
 		<h2 id="set-about">About</h2>
 		{#if info}
 			<dl>
@@ -349,72 +377,92 @@
 <style>
 	.page {
 		display: grid;
-		gap: 12px;
-		padding: 16px 20px;
+		gap: var(--space-6);
 		max-width: 900px;
+		padding: var(--page-pad);
 	}
 	header {
 		display: flex;
 		align-items: baseline;
-		gap: 16px;
+		gap: var(--space-5);
 	}
 	h1 {
-		margin: 0 0 4px;
-		font: 600 20px/28px var(--font-display);
+		margin: 0;
+		font: var(--type-title);
+		color: var(--text);
 	}
 	.status {
-		font-size: 13px;
-		color: var(--text-secondary);
+		font: var(--type-small);
+		color: var(--text-muted);
 	}
+	/* Groups: a heading, then rows divided by hairlines. No card chrome. */
 	section {
 		display: grid;
-		gap: 10px;
-		padding: 16px;
 	}
 	h2 {
-		margin: 0 0 2px;
-		font: 600 14px/20px var(--font-ui);
+		margin: 0 0 var(--space-3);
+		font: var(--type-heading);
+		color: var(--text);
 	}
-	.grid {
+	.grid,
+	.setting {
 		display: grid;
 		grid-template-columns: 200px 1fr;
+		column-gap: 0;
+	}
+	.grid {
 		align-items: start;
-		gap: 14px 16px;
+	}
+	.setting {
+		align-items: center;
+	}
+	.grid > * {
+		padding: var(--space-4) 0;
+		border-top: 1px solid var(--border-subtle);
+	}
+	.setting {
+		padding: var(--space-4) 0;
+		border-top: 1px solid var(--border-subtle);
 	}
 	.label {
-		padding-top: 6px;
-		font-size: 13px;
+		padding-right: var(--space-5);
+		font: var(--type-label);
+		color: var(--text);
 	}
 	.control,
 	.check span {
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
+		gap: var(--space-2);
 		min-width: 0;
 	}
 	.row {
 		display: flex;
-		gap: 8px;
+		flex-wrap: wrap;
+		gap: var(--space-3);
 	}
 	.narrow {
 		width: 90px;
 	}
 	h3 {
-		margin: 6px 0 0;
-		font: 600 13px/18px var(--font-ui);
+		margin: var(--space-4) 0 0;
+		font: var(--type-label);
+		color: var(--text);
 	}
 	.inline {
 		display: flex !important;
 		flex-direction: row !important;
 		align-items: center;
-		gap: 8px;
+		gap: var(--space-3);
 	}
 	.rule {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 8px;
-		font-size: 13px;
+		gap: var(--space-3);
+		padding: var(--space-4) 0;
+		border-top: 1px solid var(--border-subtle);
+		font: var(--type-body);
 	}
 	.rule .textbox {
 		width: 90px;
@@ -424,51 +472,106 @@
 	}
 	.days {
 		display: flex;
-		gap: 2px;
+		gap: var(--space-1);
 	}
 	.day {
-		width: 26px;
-		height: 26px;
-		border: 1px solid var(--stroke-control, var(--stroke-divider));
-		border-radius: 4px;
-		font: 600 12px var(--font-ui);
+		width: var(--control-h);
+		height: var(--control-h);
+		padding: 0;
+		font: var(--type-label);
 		color: var(--text-secondary);
 		background: transparent;
-		cursor: pointer;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		cursor: default;
+		transition:
+			background var(--motion-fast) var(--ease),
+			border-color var(--motion-fast) var(--ease),
+			color var(--motion-fast) var(--ease);
 	}
-	.day.on {
-		color: var(--accent-text);
-		background: var(--accent);
-		border-color: var(--accent);
+	.day:hover {
+		color: var(--text);
+		border-color: var(--border-strong);
+	}
+	.day:active {
+		background: var(--pressed);
+	}
+	.day[aria-pressed='true'] {
+		color: var(--on-accent);
+		background: var(--accent-fill);
+		border-color: transparent;
+	}
+	.day[aria-pressed='true']:hover {
+		background: var(--accent-fill-hover);
+	}
+	.day[aria-pressed='true']:active {
+		background: var(--accent-fill-pressed);
 	}
 	.check {
 		display: flex;
 		align-items: flex-start;
-		gap: 10px;
-		font-size: 13px;
+		gap: var(--space-3);
+		padding: var(--space-4) 0;
+		border-top: 1px solid var(--border-subtle);
+		font: var(--type-body);
 	}
 	.check input {
-		margin-top: 2px;
+		margin-top: var(--space-1);
 	}
 	.indent {
-		margin-left: 26px;
+		margin-left: var(--space-6);
+	}
+	.field {
+		margin: 0;
+		padding: var(--space-4) 0;
+		border-top: 1px solid var(--border-subtle);
 	}
 	small {
-		font-size: 12px;
-		color: var(--text-secondary);
+		font: var(--type-small);
+		color: var(--text-muted);
 	}
 	code {
-		font-family: var(--font-mono);
+		font: var(--type-mono);
 	}
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 12px;
+	/* Segmented control: mode switch within one view. */
+	.segmented {
+		display: inline-flex;
+		justify-self: start;
+		gap: var(--space-1);
+		padding: var(--space-1);
+		background: var(--surface);
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--radius-md);
+	}
+	.segment {
+		height: var(--control-h-sm);
+		padding: 0 var(--space-3);
+		font: var(--type-label);
+		color: var(--text-secondary);
+		background: transparent;
+		border: 0;
+		border-radius: var(--radius-sm);
+		cursor: default;
+		transition:
+			background var(--motion-fast) var(--ease),
+			color var(--motion-fast) var(--ease);
+	}
+	.segment:hover {
+		color: var(--text);
+	}
+	.segment:active {
+		background: var(--pressed);
+	}
+	.segment[aria-pressed='true'] {
+		color: var(--text);
+		background: var(--hover);
 	}
 	dl {
 		display: grid;
 		grid-template-columns: 120px 1fr;
-		gap: 8px 16px;
+		gap: var(--space-3) var(--space-5);
 		margin: 0;
+		font: var(--type-body);
 	}
 	dt {
 		color: var(--text-secondary);
@@ -477,15 +580,7 @@
 		margin: 0;
 	}
 	.path {
-		font-family: var(--font-mono);
-		font-size: 12px;
+		font: var(--type-mono);
 		word-break: break-all;
-	}
-	.muted {
-		margin: 0;
-		color: var(--text-secondary);
-	}
-	.small {
-		font-size: 13px;
 	}
 </style>

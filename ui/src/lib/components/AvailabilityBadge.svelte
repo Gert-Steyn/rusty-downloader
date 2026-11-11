@@ -10,53 +10,35 @@
 		offline: 'Offline',
 		error: 'Check failed'
 	};
+
+	// Semantic colour only where it carries meaning; waiting stays neutral.
+	const VARIANT: Record<Availability, '' | 'accent' | 'success' | 'warning' | 'danger'> = {
+		unknown: '',
+		checking: 'accent',
+		online: 'success',
+		offline: 'danger',
+		error: 'warning'
+	};
 </script>
 
-<span class="badge {value}" title={error ?? undefined}>
+<span class="tag {VARIANT[value]}" title={error ?? undefined}>
 	{#if value === 'checking'}<span class="spinner" aria-hidden="true"></span>{:else}<span class="dot" aria-hidden="true"></span>{/if}
 	{LABELS[value]}
 </span>
 
 <style>
-	.badge {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		padding: 0 8px;
-		height: 20px;
-		border-radius: 10px;
-		font-size: 12px;
-		white-space: nowrap;
-		color: var(--text-secondary);
-		background: var(--fill-subtle-hover);
-		--tone: var(--text-disabled);
-	}
-	.online {
-		--tone: var(--success);
-		color: var(--success);
-	}
-	.offline {
-		--tone: var(--critical);
-		color: var(--critical);
-	}
-	.error {
-		--tone: var(--caution);
-	}
-	.checking {
-		--tone: var(--accent);
-	}
 	.dot {
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: var(--tone);
+		width: 8px;
+		height: 8px;
+		border-radius: var(--radius-full);
+		background: currentColor;
 	}
 	.spinner {
 		width: 10px;
 		height: 10px;
-		border: 2px solid var(--stroke-divider);
-		border-top-color: var(--tone);
-		border-radius: 50%;
+		border: 2px solid var(--border);
+		border-top-color: currentColor;
+		border-radius: var(--radius-full);
 		animation: spin 0.8s linear infinite;
 	}
 	@keyframes spin {

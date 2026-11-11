@@ -262,9 +262,9 @@
 	</header>
 
 	{#if downloads.error}
-		<div class="banner" role="alert">
+		<div class="banner danger" role="alert">
 			<span>{downloads.error}</span>
-			<button class="btn" onclick={() => (downloads.error = null)} aria-label="Dismiss">
+			<button class="btn ghost icon-only" onclick={() => (downloads.error = null)} title="Dismiss" aria-label="Dismiss">
 				<Icon name="close" />
 			</button>
 		</div>
@@ -314,7 +314,7 @@
 	</label>
 	{#snippet footer()}
 		<button type="submit" class="btn accent" disabled={!newPackageName.trim()}>Move</button>
-		<button type="button" class="btn" onclick={() => (newPackageFor = null)}>Cancel</button>
+		<button type="button" class="btn ghost" onclick={() => (newPackageFor = null)}>Cancel</button>
 	{/snippet}
 </Dialog>
 <ConnectionDialog bind:open={connectionOpen} id={connecting} />
@@ -330,26 +330,22 @@
 	.toolbar {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		padding: 16px 20px 12px;
+		gap: var(--space-3);
+		height: var(--toolbar-h);
+		padding: 0 var(--space-5);
+		background: var(--canvas);
+		border-bottom: 1px solid var(--border-subtle);
 	}
 	h1 {
 		margin: 0;
-		font: 600 20px/28px var(--font-display);
+		font: var(--type-heading);
 	}
 	.spacer,
 	.fill {
 		flex: 1;
 	}
 	.banner {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		margin: 0 20px 12px;
-		padding: 6px 6px 6px 16px;
-		border-radius: var(--radius-control);
-		border: 1px solid var(--stroke-card);
-		background: color-mix(in srgb, var(--critical) 12%, transparent);
+		margin: var(--space-4) var(--space-5) 0;
 	}
 	.banner span {
 		flex: 1;

@@ -41,30 +41,33 @@
 	<small>Applies when the download next starts; one that's running now keeps its connection until paused.</small>
 
 	{#snippet footer()}
+		<button type="button" class="btn ghost" onclick={() => (open = false)}>Cancel</button>
 		<button type="submit" class="btn accent">Save</button>
-		<button type="button" class="btn" onclick={() => (open = false)}>Cancel</button>
 	{/snippet}
 </Dialog>
 
 <style>
 	p {
-		margin: 0 0 12px;
+		margin: 0 0 var(--space-4);
+		font: var(--type-body);
+		color: var(--text-secondary);
 		overflow-wrap: anywhere;
 	}
 	.choices {
 		display: grid;
-		gap: 8px;
-		margin-bottom: 12px;
-		font-size: 13px;
+		gap: var(--space-3);
+		margin-bottom: var(--space-4);
+		font: var(--type-body);
+		color: var(--text);
 	}
 	.choices label {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: var(--space-3);
 	}
 	small {
 		display: block;
-		font-size: 12px;
-		color: var(--text-secondary);
+		font: var(--type-small);
+		color: var(--text-muted);
 	}
 </style>

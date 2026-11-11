@@ -75,7 +75,7 @@
 	</header>
 
 	{#if error}
-		<p class="banner" role="alert">{error}</p>
+		<p class="banner danger" role="alert">{error}</p>
 	{/if}
 
 	{#if !ready}
@@ -110,11 +110,11 @@
 					<span class="num" role="cell">{formatBytes(e.size)}</span>
 					<span class="muted" role="cell">{formatDate(e.finishedAt)}</span>
 					<span class="actions" role="cell">
-						<button class="btn icon" title="Open" aria-label="Open {e.name}" disabled={!e.exists} onclick={() => open(e, false)}>
+						<button class="btn ghost icon-only" title="Open" aria-label="Open {e.name}" disabled={!e.exists} onclick={() => open(e, false)}>
 							<Icon name="open" />
 						</button>
 						<button
-							class="btn icon"
+							class="btn ghost icon-only"
 							title="Show in folder"
 							aria-label="Show {e.name} in folder"
 							disabled={!e.exists}
@@ -122,7 +122,7 @@
 						>
 							<Icon name="folder" />
 						</button>
-						<button class="btn icon" title="Forget (keeps the file)" aria-label="Forget {e.name}" onclick={() => forget(e)}>
+						<button class="btn ghost icon-only" title="Forget (keeps the file)" aria-label="Forget {e.name}" onclick={() => forget(e)}>
 							<Icon name="close" />
 						</button>
 					</span>
@@ -143,8 +143,8 @@
 		trigger duplicate warnings. Downloaded files are not touched.
 	</p>
 	{#snippet footer()}
-		<button type="submit" class="btn accent">Clear history</button>
-		<button type="button" class="btn" onclick={() => (clearing = false)}>Cancel</button>
+		<button type="button" class="btn ghost" onclick={() => (clearing = false)}>Cancel</button>
+		<button type="submit" class="btn danger">Clear history</button>
 	{/snippet}
 </Dialog>
 
@@ -157,12 +157,15 @@
 	.toolbar {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		padding: 16px 20px 12px;
+		gap: var(--space-3);
+		height: var(--toolbar-h);
+		padding: 0 var(--space-5);
+		background: var(--canvas);
+		border-bottom: 1px solid var(--border-subtle);
 	}
 	h1 {
-		margin: 0 12px 0 0;
-		font: 600 20px/28px var(--font-display);
+		margin: 0 var(--space-4) 0 0;
+		font: var(--type-heading);
 	}
 	.search {
 		width: 280px;
@@ -172,43 +175,40 @@
 		flex: 1;
 	}
 	.banner {
-		margin: 0 20px 12px;
-		padding: 8px 16px;
-		border-radius: var(--radius-control);
-		background: color-mix(in srgb, var(--critical) 12%, transparent);
+		margin: var(--space-4) var(--page-pad) 0;
 	}
 	.list {
 		flex: 1;
 		overflow-y: auto;
-		padding: 0 4px 16px;
+		padding: 0 var(--space-2) var(--space-5);
 	}
 	.row {
 		display: grid;
 		grid-template-columns: minmax(240px, 1fr) minmax(100px, 200px) 88px 150px 104px;
 		align-items: center;
-		gap: 12px;
-		min-height: 44px;
-		padding: 0 12px;
-		border-radius: var(--radius-control);
-		font-size: 13px;
+		gap: var(--space-4);
+		min-height: var(--row-h);
+		padding: var(--space-2) var(--space-3);
+		font: var(--type-body);
+		border-bottom: 1px solid var(--border-subtle);
 	}
 	.row:not(.head):hover {
-		background: var(--fill-subtle-hover);
+		background: var(--hover);
 	}
 	.head {
 		position: sticky;
 		top: 0;
 		z-index: 1;
-		min-height: 32px;
-		font-size: 12px;
-		color: var(--text-secondary);
-		background: var(--page-fallback);
-		border-bottom: 1px solid var(--stroke-divider);
-		border-radius: 0;
+		height: var(--control-h);
+		min-height: var(--control-h);
+		padding: 0 var(--space-3);
+		font: var(--type-caption);
+		color: var(--text-muted);
+		background: var(--canvas);
+		border-bottom: 1px solid var(--border-subtle);
 	}
-	:global([data-shell='tauri']) .head {
-		background: transparent;
-		backdrop-filter: blur(20px);
+	.head:hover {
+		background: var(--canvas);
 	}
 	.gone .title,
 	.gone .name {
@@ -217,7 +217,7 @@
 	.name {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: var(--space-3);
 		min-width: 0;
 	}
 	.label {
@@ -233,11 +233,8 @@
 		white-space: nowrap;
 	}
 	.meta {
-		font-size: 12px;
-		color: var(--text-secondary);
-	}
-	.muted {
-		color: var(--text-secondary);
+		font: var(--type-small);
+		color: var(--text-muted);
 	}
 	.num {
 		text-align: right;
@@ -246,22 +243,22 @@
 	.actions {
 		display: flex;
 		justify-content: flex-end;
-		gap: 2px;
-	}
-	.btn.icon {
-		min-height: 28px;
-		padding: 4px 6px;
+		gap: var(--space-1);
 	}
 	.none {
-		padding: 16px 12px;
+		margin: 0;
+		padding: var(--space-5) var(--space-3);
+		font: var(--type-body);
 		color: var(--text-secondary);
 	}
 	.more {
-		margin: 12px auto 0;
+		margin: var(--space-4) auto 0;
 		display: block;
 	}
 	.confirm {
 		margin: 0;
+		font: var(--type-body);
+		color: var(--text-secondary);
 	}
 	.sr-only {
 		position: absolute;

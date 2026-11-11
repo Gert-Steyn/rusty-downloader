@@ -48,9 +48,9 @@
 		<h1>Queues</h1>
 		{#if queues.error}<span class="error-text" role="alert">{queues.error}</span>{/if}
 	</header>
-	<p class="muted intro">
-		Packages start in their queue's order. Each queue can run only at set times, and do something when it
-		has finished. Move a package to another queue from its right-click menu on the Downloads page.
+	<p class="intro">
+		Packages start in their queue's order. Each queue can run only at set times, and do something when it has
+		finished. Move a package to another queue from its right-click menu on the Downloads page.
 	</p>
 
 	{#each queues.list as q (q.id)}
@@ -66,11 +66,11 @@
 						onchange={(e) => save(q, { name: e.currentTarget.value })}
 					/>
 				{/if}
-				<span class="pill" class:closed={!q.open}>
+				<span class="tag" class:accent={q.open}>
 					{q.open ? 'Running' : `Waits until ${q.schedule.start}`}
 				</span>
 				<span class="spacer"></span>
-				<span class="muted small">{counts(q)}</span>
+				<span class="counts">{counts(q)}</span>
 			</div>
 
 			<div class="grid">
@@ -149,8 +149,8 @@
 						{/each}
 					</select>
 					<small
-						>Once all its downloads are done (paused ones count as not done). Counts down a minute first, with
-						a Cancel button in the app and in a notification.</small
+						>Once all its downloads are done (paused ones count as not done). Counts down a minute first, with a
+						Cancel button in the app and in a notification.</small
 					>
 				</div>
 			</div>
@@ -166,58 +166,51 @@
 
 	<form class="add" onsubmit={add}>
 		<input class="textbox" placeholder="New queue name" aria-label="New queue name" bind:value={newName} />
-		<button type="submit" class="btn" disabled={!newName.trim()}>Add queue</button>
+		<button type="submit" class="btn accent" disabled={!newName.trim()}>Add queue</button>
 	</form>
 </div>
 
 <style>
 	.page {
 		display: grid;
-		gap: 12px;
-		padding: 16px 20px;
-		max-width: 900px;
+		gap: var(--space-4);
+		padding: var(--page-pad);
+		max-width: var(--content-max);
 	}
 	header {
 		display: flex;
 		align-items: baseline;
-		gap: 16px;
+		gap: var(--space-5);
 	}
 	h1 {
 		margin: 0;
-		font: 600 20px/28px var(--font-display);
+		font: var(--type-title);
 	}
 	.intro {
 		margin: 0;
-		font-size: 13px;
+		font: var(--type-body);
+		color: var(--text-secondary);
 	}
-	section {
+	.card {
 		display: grid;
-		gap: 14px;
-		padding: 16px;
+		gap: var(--space-4);
+		padding: var(--space-4);
 	}
 	.head {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		gap: var(--space-4);
 	}
 	h2 {
 		margin: 0;
-		font: 600 14px/20px var(--font-ui);
+		font: var(--type-heading);
 	}
 	.name {
 		width: 240px;
-		font-weight: 600;
 	}
-	.pill {
-		padding: 1px 8px;
-		border-radius: 10px;
-		font-size: 12px;
-		color: var(--accent-text);
-		background: var(--accent);
-	}
-	.pill.closed {
-		color: var(--text-secondary);
-		background: var(--fill-subtle-hover);
+	.counts {
+		font: var(--type-small);
+		color: var(--text-muted);
 	}
 	.spacer {
 		flex: 1;
@@ -226,16 +219,17 @@
 		display: grid;
 		grid-template-columns: 160px 1fr;
 		align-items: start;
-		gap: 14px 16px;
+		gap: var(--space-4) var(--space-5);
 	}
 	.label {
-		padding-top: 6px;
-		font-size: 13px;
+		padding-top: var(--space-3);
+		font: var(--type-label);
+		color: var(--text);
 	}
 	.control {
 		display: flex;
 		flex-direction: column;
-		gap: 6px;
+		gap: var(--space-3);
 		min-width: 0;
 	}
 	.narrow {
@@ -244,60 +238,73 @@
 	.select {
 		width: 240px;
 	}
+	small {
+		font: var(--type-small);
+		color: var(--text-muted);
+	}
 	.check {
 		display: flex;
 		align-items: center;
-		gap: 10px;
-		font-size: 13px;
-		padding-top: 6px;
+		gap: var(--space-3);
+		font: var(--type-body);
+		padding-top: var(--space-3);
 	}
 	.window {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 8px;
-		font-size: 13px;
+		gap: var(--space-3);
+		font: var(--type-body);
 	}
 	.time {
 		width: 120px;
 	}
 	.days {
 		display: flex;
-		gap: 2px;
+		gap: var(--space-1);
 	}
 	.day {
-		width: 26px;
-		height: 26px;
-		border: 1px solid var(--stroke-control);
-		border-radius: 4px;
-		font: 600 12px var(--font-ui);
+		width: var(--control-h-sm);
+		height: var(--control-h-sm);
+		padding: 0;
+		font: var(--type-label);
 		color: var(--text-secondary);
 		background: transparent;
-		cursor: pointer;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-md);
+		cursor: default;
+		transition:
+			background var(--motion-fast) var(--ease),
+			border-color var(--motion-fast) var(--ease),
+			color var(--motion-fast) var(--ease);
+	}
+	.day:hover {
+		color: var(--text);
+		background: var(--hover);
+		border-color: var(--border-strong);
+	}
+	.day:active {
+		background: var(--pressed);
 	}
 	.day.on {
-		color: var(--accent-text);
-		background: var(--accent);
-		border-color: var(--accent);
+		color: var(--on-accent);
+		background: var(--accent-fill);
+		border-color: transparent;
+	}
+	.day.on:hover {
+		background: var(--accent-fill-hover);
+	}
+	.day.on:active {
+		background: var(--accent-fill-pressed);
 	}
 	.foot {
 		display: flex;
 		align-items: center;
-		gap: 10px;
-	}
-	small {
-		font-size: 12px;
-		color: var(--text-secondary);
-	}
-	.small {
-		font-size: 12px;
-	}
-	.muted {
-		color: var(--text-secondary);
+		gap: var(--space-4);
 	}
 	.add {
 		display: flex;
-		gap: 8px;
+		gap: var(--space-3);
 	}
 	.add .textbox {
 		width: 240px;

@@ -165,7 +165,7 @@
 	</header>
 
 	{#if grabber.error}
-		<p class="banner" role="alert">{grabber.error}</p>
+		<p class="banner danger" role="alert">{grabber.error}</p>
 	{/if}
 
 	{#if !grabber.ready}
@@ -209,7 +209,7 @@
 								hint="Package name: groups downloads in the list; it isn't a folder."
 								onsave={(name) => grabber.setPackage(group.links.map((l) => l.id), name)}
 							/>
-							<span class="count">{group.links.length}</span>
+							<span class="tag count">{group.links.length}</span>
 						</span>
 						<span class="folder" title={group.destDir ?? 'The folder chosen in Settings (Downloads unless changed)'}>
 							{group.destDir ?? 'Default folder'}
@@ -284,7 +284,7 @@
 									{#if link.kind === 'gallerydl' && link.filename}
 										{@const path = `${group.destDir ?? 'Default folder'}\\${link.filename}`}
 										<span class="meta dest" title="Saves to {path}">
-											<Icon name="folder" size={12} /> Saves into a folder with this name
+											<Icon name="folder" /> Saves into a folder with this name
 										</span>
 									{/if}
 									{#if mediaLine(link)}<span class="meta">{mediaLine(link)}</span>{/if}
@@ -364,8 +364,8 @@
 		<input class="textbox" bind:value={newCategory} placeholder="Several links with one name form one category" />
 	</label>
 	{#snippet footer()}
+		<button type="button" class="btn ghost" onclick={() => (newCategoryFor = null)}>Cancel</button>
 		<button type="submit" class="btn accent" disabled={!newCategory.trim()}>Move</button>
-		<button type="button" class="btn" onclick={() => (newCategoryFor = null)}>Cancel</button>
 	{/snippet}
 </Dialog>
 
@@ -381,8 +381,8 @@
 		></textarea>
 	</label>
 	{#snippet footer()}
+		<button type="button" class="btn ghost" onclick={() => (adding = false)}>Cancel</button>
 		<button type="submit" class="btn accent" disabled={!addText.trim()}>Add</button>
-		<button type="button" class="btn" onclick={() => (adding = false)}>Cancel</button>
 	{/snippet}
 </Dialog>
 
@@ -395,12 +395,15 @@
 	.toolbar {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		padding: 16px 20px 12px;
+		gap: var(--space-3);
+		height: var(--toolbar-h);
+		padding: 0 var(--space-5);
+		background: var(--canvas);
+		border-bottom: 1px solid var(--border-subtle);
 	}
 	h1 {
-		margin: 0 12px 0 0;
-		font: 600 20px/28px var(--font-display);
+		margin: 0 var(--space-4) 0 0;
+		font: var(--type-heading);
 	}
 	.spacer,
 	.fill {
@@ -409,67 +412,65 @@
 	.switch {
 		display: inline-flex;
 		align-items: center;
-		gap: 8px;
-		font-size: 13px;
+		gap: var(--space-3);
+		font: var(--type-label);
 		color: var(--text-secondary);
 	}
 	.banner {
-		margin: 0 20px 12px;
-		padding: 8px 16px;
-		border-radius: var(--radius-control);
-		background: color-mix(in srgb, var(--critical) 12%, transparent);
+		margin: var(--space-4) var(--space-5) 0;
 	}
 	.list {
 		flex: 1;
 		overflow-y: auto;
-		padding: 0 4px 16px;
+		padding: 0 var(--space-3) var(--space-5);
 	}
 	.row {
 		display: grid;
 		grid-template-columns: 28px minmax(220px, 1fr) minmax(100px, 200px) 170px 88px 150px;
 		align-items: center;
-		gap: 12px;
-		min-height: 32px;
-		padding: 0 12px;
-		font-size: 13px;
+		gap: var(--space-4);
+		min-height: var(--row-h);
+		padding: 0 var(--space-3);
+		font: var(--type-body);
 	}
 	.head {
 		position: sticky;
 		top: 0;
 		z-index: 1;
-		font-size: 12px;
-		color: var(--text-secondary);
-		background: var(--page-fallback);
-		border-bottom: 1px solid var(--stroke-divider);
-	}
-	:global([data-shell='tauri']) .head {
-		background: transparent;
-		backdrop-filter: blur(20px);
+		min-height: var(--control-h);
+		font: var(--type-caption);
+		color: var(--text-muted);
+		background: var(--canvas);
+		border-bottom: 1px solid var(--border-subtle);
 	}
 	.group {
-		margin-top: 6px;
+		margin-top: var(--space-3);
 	}
 	.package {
-		font-weight: 600;
-		border-radius: var(--radius-control);
-		background: var(--fill-subtle-hover);
+		font: var(--type-label);
+		background: var(--surface);
+		border-radius: var(--radius-md);
 	}
 	.link {
-		border-radius: var(--radius-control);
+		border-radius: var(--radius-md);
+		transition: background var(--motion-fast) var(--ease);
 	}
 	.link:hover {
-		background: var(--fill-subtle-hover);
+		background: var(--hover);
+	}
+	.link:active {
+		background: var(--pressed);
 	}
 	.link.off {
 		color: var(--text-secondary);
 	}
 	.link .name {
-		padding-left: 22px;
+		padding-left: var(--space-6);
 	}
 	.name {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: var(--space-3);
 		min-width: 0;
 	}
 	.label {
@@ -478,15 +479,17 @@
 		flex-direction: column;
 		min-width: 0;
 	}
+	.count {
+		flex-shrink: 0;
+	}
 	.meta {
-		font-size: 12px;
-		font-weight: 400;
-		color: var(--text-secondary);
+		font: var(--type-small);
+		color: var(--text-muted);
 	}
 	.meta.dest {
 		display: flex;
 		align-items: center;
-		gap: 4px;
+		gap: var(--space-2);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -495,48 +498,26 @@
 		flex-shrink: 0;
 	}
 	.meta.before {
-		color: var(--caution);
+		color: var(--warning);
 	}
 	.format {
 		min-width: 0;
-		font-weight: 400;
-	}
-	.count {
-		flex-shrink: 0;
-		padding: 0 6px;
-		border-radius: 8px;
-		font-size: 11px;
-		font-weight: 400;
-		line-height: 16px;
-		color: var(--text-secondary);
-		background: var(--fill-subtle-hover);
 	}
 	.folder,
-	.host,
+	.host {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--text-secondary);
+	}
 	.pending {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-		font-weight: 400;
+		font: var(--type-mono);
 		color: var(--text-secondary);
-	}
-	.pending {
-		font-family: var(--font-mono);
-		font-size: 12px;
 	}
 	.num {
 		text-align: right;
-		font-variant-numeric: tabular-nums;
-		font-weight: 400;
-	}
-	.btn.small {
-		min-height: 24px;
-		padding: 2px 8px;
-		font-size: 12px;
-		font-weight: 400;
-	}
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 12px;
 	}
 </style>

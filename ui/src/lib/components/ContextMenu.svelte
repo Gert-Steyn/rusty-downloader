@@ -81,7 +81,7 @@
 				<div class="sep" role="separator"></div>
 			{:else}
 				<button role="menuitem" class:danger={item.danger} disabled={item.disabled} onclick={() => pick(item)}>
-					<span class="icon">{#if item.icon}<Icon name={item.icon} size={16} />{/if}</span>
+					<span class="icon">{#if item.icon}<Icon name={item.icon} />{/if}</span>
 					{item.label}
 				</button>
 			{/if}
@@ -94,48 +94,51 @@
 		position: fixed;
 		z-index: 30;
 		min-width: 200px;
-		padding: 4px;
-		border: 1px solid var(--stroke-card);
-		border-radius: var(--radius-overlay);
-		background: var(--page-fallback);
-		box-shadow: 0 8px 16px rgba(0, 0, 0, 0.14);
+		padding: var(--space-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-lg);
+		background: var(--raised);
+		box-shadow: var(--shadow-popover);
 		outline: none;
 	}
 	button {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: var(--space-3);
 		width: 100%;
-		height: 32px;
-		padding: 0 12px 0 8px;
+		height: var(--control-h);
+		padding: 0 var(--space-3);
 		border: 0;
-		border-radius: var(--radius-control);
-		font: inherit;
-		font-size: 13px;
+		border-radius: var(--radius-sm);
+		font: var(--type-body);
 		text-align: left;
-		color: var(--text-primary);
+		color: var(--text);
 		background: transparent;
 		cursor: default;
+		transition: background var(--motion-fast) var(--ease);
 	}
 	button:hover:not(:disabled),
 	button:focus-visible {
-		background: var(--fill-subtle-hover);
-		outline: none;
+		background: var(--hover);
+	}
+	button:active:not(:disabled) {
+		background: var(--pressed);
 	}
 	button:disabled {
-		color: var(--text-secondary);
-		opacity: 0.6;
+		color: var(--text-disabled);
+		background: transparent;
 	}
 	button.danger {
-		color: var(--critical);
+		color: var(--danger);
 	}
 	.icon {
 		display: inline-flex;
-		width: 16px;
+		flex: none;
+		width: var(--icon);
 	}
 	.sep {
 		height: 1px;
-		margin: 4px 0;
-		background: var(--stroke-divider);
+		margin: var(--space-2) 0;
+		background: var(--border-subtle);
 	}
 </style>

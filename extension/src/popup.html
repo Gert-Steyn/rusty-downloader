@@ -3,22 +3,10 @@
 	<head>
 		<meta charset="utf-8" />
 		<title>Rusty Downloader</title>
+		<link rel="stylesheet" href="graphite.css" />
 		<link rel="stylesheet" href="style.css" />
-		<style>
-			body {
-				width: 280px;
-				padding: 14px 16px;
-			}
-			footer {
-				display: flex;
-				justify-content: space-between;
-				border-top: 1px solid var(--line);
-				margin-top: 12px;
-				padding-top: 10px;
-			}
-		</style>
 	</head>
-	<body>
+	<body class="popup">
 		<h1>Rusty Downloader</h1>
 		<div class="status">
 			<span class="dot" id="dot"></span>
@@ -30,8 +18,8 @@
 		<label><input type="checkbox" id="intercept" /> Take over downloads</label>
 		<div class="muted" id="rule"></div>
 		<footer>
-			<button id="options">Rules and options</button>
-			<button id="recheck">Check again</button>
+			<button class="btn ghost small" id="options">Rules and options</button>
+			<button class="btn small" id="recheck">Check again</button>
 		</footer>
 		<script type="module" src="popup.js"></script>
 	</body>

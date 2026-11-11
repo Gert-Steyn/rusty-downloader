@@ -19,8 +19,6 @@
         "minWidth": 800,
         "minHeight": 500,
         "center": true,
-        "transparent": true,
-        "windowEffects": { "effects": ["mica"] },
         "dragDropEnabled": false,
         "visible": false,
         "create": false

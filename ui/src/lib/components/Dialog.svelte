@@ -46,30 +46,31 @@
 
 <style>
 	dialog {
-		max-width: calc(100vw - 32px);
+		max-width: calc(100vw - 2 * var(--space-5));
 		padding: 0;
-		border: 1px solid var(--stroke-card);
-		border-radius: var(--radius-overlay);
-		color: var(--text-primary);
-		background: var(--page-fallback);
-		box-shadow: 0 32px 64px rgba(0, 0, 0, 0.19), 0 2px 21px rgba(0, 0, 0, 0.15);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-xl);
+		color: var(--text);
+		background: var(--raised);
+		box-shadow: var(--shadow-popover);
 	}
 	dialog::backdrop {
-		background: rgba(0, 0, 0, 0.3);
+		background: var(--scrim);
 	}
 	.body {
-		padding: 24px;
+		padding: var(--space-6) var(--space-6) 0;
+		color: var(--text-secondary);
 	}
 	h2 {
-		margin: 0 0 16px;
-		font: 600 20px/28px var(--font-display);
+		margin: 0 0 var(--space-3);
+		font: var(--type-title);
+		color: var(--text);
 	}
 	footer {
 		display: flex;
 		justify-content: flex-end;
-		gap: 8px;
-		padding: 20px 24px;
-		background: var(--layer);
-		border-top: 1px solid var(--stroke-divider);
+		gap: var(--space-3);
+		margin-top: var(--space-6);
+		padding: 0 var(--space-6) var(--space-6);
 	}
 </style>

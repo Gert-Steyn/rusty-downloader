@@ -63,7 +63,7 @@
 <style>
 	.picker {
 		display: flex;
-		gap: 4px;
+		gap: var(--space-2);
 		min-width: 0;
 	}
 	.select {
@@ -71,15 +71,6 @@
 		flex: 1;
 	}
 	.custom {
-		min-height: 28px;
 		width: 90px;
-		padding: 3px 6px;
-	}
-	.custom:focus {
-		padding-bottom: 2px;
-	}
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 12px;
 	}
 </style>

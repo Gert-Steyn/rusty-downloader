@@ -103,22 +103,21 @@
 	{#if error}<p class="error-text" role="alert">{error}</p>{/if}
 
 	{#snippet footer()}
+		<button type="button" class="btn ghost" onclick={() => (open = false)}>Cancel</button>
 		<button type="submit" class="btn accent" disabled={!links.length || busy}>
 			{busy ? 'Adding…' : 'Start downloads'}
 		</button>
-		<button type="button" class="btn" onclick={() => (open = false)}>Cancel</button>
 	{/snippet}
 </Dialog>
 
 <style>
 	.row {
 		display: flex;
-		gap: 8px;
+		gap: var(--space-3);
 	}
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 12px;
-		line-height: 18px;
+	.field > label {
+		font: var(--type-label);
+		color: var(--text);
 	}
 	.error-text {
 		margin: 0;

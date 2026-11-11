@@ -1,104 +1,283 @@
-:root {
-	color-scheme: light dark;
-	--bg: #f7f7f8;
-	--fg: #1b1b1f;
-	--muted: #5f6068;
-	--line: #d9d9de;
-	--accent: #0f6cbd;
-	--ok: #107c10;
-	--bad: #c42b1c;
-	font: 13px/1.45 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+/*
+ * Inter and JetBrains Mono are bundled from @fontsource (SIL Open Font License 1.1,
+ * https://openfontlicense.org). They ship with the extension so text renders the same everywhere.
+ */
+@font-face {
+	font-family: 'Inter';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('fonts/inter-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'Inter';
+	font-style: normal;
+	font-weight: 500;
+	font-display: swap;
+	src: url('fonts/inter-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'Inter';
+	font-style: normal;
+	font-weight: 600;
+	font-display: swap;
+	src: url('fonts/inter-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'JetBrains Mono';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('fonts/jetbrains-mono-latin-400-normal.woff2') format('woff2');
 }
 
-@media (prefers-color-scheme: dark) {
-	:root {
-		--bg: #202024;
-		--fg: #f1f1f3;
-		--muted: #a9a9b2;
-		--line: #3a3a40;
-		--accent: #4cc2ff;
-		--ok: #6ccb5f;
-		--bad: #ff99a4;
-	}
+/* Shared base: the same rules as the app's theme.css, written for a plain extension page. */
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
 }
 
 body {
 	margin: 0;
-	background: var(--bg);
-	color: var(--fg);
+	padding: var(--page-pad);
+	font: var(--type-body);
+	color: var(--text);
+	background: var(--canvas);
+	-webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2 {
+	margin: 0;
 }
 
 h1 {
-	font-size: 15px;
-	font-weight: 600;
-	margin: 0 0 8px;
+	font: var(--type-heading);
+	margin-bottom: var(--space-3);
+}
+
+h2 {
+	font: var(--type-heading);
+	margin-bottom: var(--space-2);
+}
+
+p {
+	margin: 0 0 var(--space-3);
+	font: var(--type-body);
+}
+
+p.muted,
+.muted {
+	color: var(--text-muted);
+}
+
+p.muted {
+	font: var(--type-small);
 }
 
 label {
 	display: flex;
-	gap: 8px;
 	align-items: center;
+	gap: var(--space-3);
+	font: var(--type-body);
+	color: var(--text);
 }
 
-.muted {
-	color: var(--muted);
+input[type='checkbox'] {
+	width: var(--icon);
+	height: var(--icon);
+	margin: 0;
+	flex: none;
+	accent-color: var(--accent-fill);
 }
 
+/* ---------- Buttons (same specs as theme.css) ---------- */
+button {
+	font: inherit;
+	color: inherit;
+}
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-2);
+	height: var(--control-h);
+	padding: 0 var(--control-pad-x);
+	font: var(--type-label);
+	white-space: nowrap;
+	color: var(--text);
+	background: transparent;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	cursor: default;
+	transition:
+		background var(--motion-fast) var(--ease),
+		border-color var(--motion-fast) var(--ease),
+		color var(--motion-fast) var(--ease);
+}
+.btn:hover:not(:disabled) {
+	background: var(--hover);
+	border-color: var(--border-strong);
+}
+.btn:active:not(:disabled) {
+	background: var(--pressed);
+}
+.btn:disabled {
+	color: var(--text-disabled);
+	background: var(--hover);
+	border-color: transparent;
+}
+.btn:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
+.btn.accent {
+	color: var(--on-accent);
+	background: var(--accent-fill);
+	border-color: transparent;
+}
+.btn.accent:hover:not(:disabled) {
+	background: var(--accent-fill-hover);
+	border-color: transparent;
+}
+.btn.accent:active:not(:disabled) {
+	background: var(--accent-fill-pressed);
+}
+
+.btn.ghost {
+	color: var(--text-secondary);
+	border-color: transparent;
+}
+.btn.ghost:hover:not(:disabled) {
+	color: var(--text);
+	border-color: transparent;
+}
+
+.btn.small {
+	height: var(--control-h-sm);
+	padding: 0 var(--space-3);
+}
+
+/* ---------- Fields ---------- */
+.textbox,
+input[type='number'],
+textarea {
+	font: var(--type-body);
+	color: var(--text);
+	background: var(--canvas);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	outline: none;
+	transition: border-color var(--motion-fast) var(--ease);
+}
+input[type='number'] {
+	height: var(--control-h);
+	padding: var(--space-2) var(--space-3);
+}
+textarea {
+	width: 100%;
+	padding: var(--space-3);
+	resize: vertical;
+}
+input[type='number']:hover,
+textarea:hover {
+	border-color: var(--border-strong);
+}
+input[type='number']:focus,
+textarea:focus {
+	border-color: var(--accent);
+}
+input[type='number']:focus-visible,
+textarea:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+textarea::placeholder {
+	color: var(--text-muted);
+}
+
+/* ---------- Status and rows ---------- */
 .status {
 	display: flex;
-	gap: 8px;
+	gap: var(--space-3);
 	align-items: flex-start;
-	margin: 8px 0 12px;
+	margin: var(--space-3) 0 var(--space-4);
 }
 
 .dot {
 	flex: none;
-	width: 9px;
-	height: 9px;
-	margin-top: 5px;
-	border-radius: 50%;
-	background: var(--muted);
+	width: 8px;
+	height: 8px;
+	margin-top: var(--space-2);
+	border-radius: var(--radius-full);
+	background: var(--text-muted);
 }
-
 .dot.ok {
-	background: var(--ok);
+	background: var(--success);
 }
-
 .dot.bad {
-	background: var(--bad);
+	background: var(--danger);
 }
 
-button,
-.link {
-	font: inherit;
-	color: var(--accent);
-	background: none;
-	border: 0;
-	padding: 0;
-	cursor: pointer;
-	text-decoration: none;
+#state {
+	font: var(--type-label);
+	color: var(--text);
+}
+#detail,
+#rule {
+	font: var(--type-small);
+	color: var(--text-muted);
 }
 
-button.primary {
-	color: #fff;
-	background: var(--accent);
-	border-radius: 4px;
-	padding: 5px 12px;
+/* ---------- Popup ---------- */
+body.popup {
+	width: 280px;
+	padding: var(--space-4) var(--space-5);
 }
 
-textarea,
-input[type='number'] {
-	font: inherit;
-	color: inherit;
-	background: transparent;
-	border: 1px solid var(--line);
-	border-radius: 4px;
-	padding: 4px 6px;
+body.popup footer {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--space-3);
+	margin-top: var(--space-4);
+	padding-top: var(--space-3);
+	border-top: 1px solid var(--border-subtle);
 }
 
-textarea {
+/* ---------- Options ---------- */
+body.options {
+	max-width: 560px;
+	padding: var(--page-pad);
+}
+
+body.options section {
+	margin-bottom: var(--space-6);
+}
+
+body.options section:last-of-type {
+	margin-bottom: var(--space-4);
+}
+
+body.options label {
+	flex-wrap: wrap;
+	align-items: flex-start;
+}
+
+body.options input[type='checkbox'] {
+	margin-top: var(--space-1);
+}
+
+body.options textarea {
 	width: 100%;
-	box-sizing: border-box;
-	min-height: 56px;
-	resize: vertical;
+}
+
+#minSizeMB {
+	width: 70px;
+}
+
+#access[hidden] {
+	display: none;
 }

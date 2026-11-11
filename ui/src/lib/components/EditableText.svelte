@@ -58,22 +58,28 @@
 	.text {
 		min-width: 0;
 		max-width: 100%;
-		padding: 2px 4px;
-		margin: -2px -4px;
+		/* Inner padding with a matching negative margin, so the text lines up with its container. */
+		padding: 0 var(--space-2);
+		margin: 0 calc(-1 * var(--space-2));
 		border: 0;
-		border-radius: var(--radius-control);
+		border-radius: var(--radius-md);
 		background: transparent;
+		color: inherit;
 		text-align: left;
 		font: inherit;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+		transition: background var(--motion-fast) var(--ease);
 	}
 	.text:hover {
-		background: var(--fill-subtle-hover);
+		background: var(--hover);
+	}
+	.text:active {
+		background: var(--pressed);
 	}
 	.edit {
-		min-height: 26px;
-		padding: 2px 6px;
+		min-height: var(--control-h-sm);
+		padding: 0 var(--space-3);
 	}
 </style>

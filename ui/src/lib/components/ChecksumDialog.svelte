@@ -58,24 +58,26 @@
 	{#if error}<p class="error-text">{error}</p>{/if}
 
 	{#snippet footer()}
-		<button type="submit" class="btn accent">Save</button>
 		{#if download?.checksum}
 			<button type="button" class="btn" onclick={() => save('')}>Remove</button>
 		{/if}
-		<button type="button" class="btn" onclick={() => (open = false)}>Cancel</button>
+		<button type="button" class="btn ghost" onclick={() => (open = false)}>Cancel</button>
+		<button type="submit" class="btn accent">Save</button>
 	{/snippet}
 </Dialog>
 
 <style>
 	p {
-		margin: 0 0 12px;
+		margin: 0 0 var(--space-4);
 		overflow-wrap: anywhere;
+		font: var(--type-body);
+		color: var(--text-secondary);
 	}
 	.entry {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		margin-bottom: 8px;
+		gap: var(--space-3);
+		margin-bottom: var(--space-3);
 	}
 	.entry input {
 		flex: 1;
@@ -83,10 +85,10 @@
 	}
 	small {
 		display: block;
-		font-size: 12px;
-		color: var(--text-secondary);
+		font: var(--type-small);
+		color: var(--text-muted);
 	}
 	.error-text {
-		margin: 8px 0 0;
+		margin: var(--space-3) 0 0;
 	}
 </style>

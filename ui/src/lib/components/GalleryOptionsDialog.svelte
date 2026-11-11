@@ -173,13 +173,13 @@
 	{#snippet footer()}
 		<button
 			type="button"
-			class="btn reset"
+			class="btn ghost reset"
 			onclick={() => (draft = structuredClone(DEFAULT_GALLERY_OPTIONS))}
 		>
 			Reset to defaults
 		</button>
+		<button type="button" class="btn ghost" onclick={() => (open = false)}>Cancel</button>
 		<button type="submit" class="btn accent">Save</button>
-		<button type="button" class="btn" onclick={() => (open = false)}>Cancel</button>
 	{/snippet}
 </Dialog>
 
@@ -187,31 +187,29 @@
 	.scroll {
 		max-height: min(60vh, 560px);
 		overflow-y: auto;
-		margin: 0 -24px;
-		padding: 0 24px;
 	}
 	.note {
-		margin: 8px 0;
-		font-size: 13px;
+		margin: var(--space-3) 0;
+		font: var(--type-body);
 		color: var(--text-secondary);
 	}
 	.note.error {
-		color: var(--critical);
+		color: var(--danger);
 	}
 	.check {
 		display: flex;
 		align-items: flex-start;
-		gap: 8px;
-		margin: 0 0 10px;
-		font-size: 13px;
+		gap: var(--space-3);
+		margin: 0 0 var(--space-4);
+		font: var(--type-body);
 	}
 	.check input {
-		margin-top: 2px;
+		margin-top: var(--space-1);
 	}
 	.check span {
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: var(--space-1);
 	}
 	.check.wide {
 		grid-column: 1 / -1;
@@ -221,51 +219,46 @@
 		display: inline;
 	}
 	small {
-		font-size: 12px;
-		color: var(--text-secondary);
+		font: var(--type-small);
+		color: var(--text-muted);
 	}
 	code {
-		font-family: var(--font-mono);
-		font-size: 11px;
-		color: var(--text-secondary);
+		font: var(--type-mono);
+		color: var(--text-muted);
 	}
 	details {
-		margin: 8px 0;
-		border-top: 1px solid var(--stroke-divider);
-		padding-top: 8px;
+		margin: var(--space-3) 0;
+		border-top: 1px solid var(--border-subtle);
+		padding-top: var(--space-3);
 	}
 	summary {
 		cursor: default;
-		font-weight: 600;
-		font-size: 14px;
-		padding: 4px 0;
+		font: var(--type-heading);
+		padding: var(--space-2) 0;
 	}
 	.grid {
 		display: grid;
 		grid-template-columns: 170px 1fr;
 		align-items: start;
-		gap: 8px 12px;
-		margin: 8px 0 4px;
-		font-size: 13px;
+		gap: var(--space-3) var(--space-4);
+		margin: var(--space-3) 0 var(--space-2);
+		font: var(--type-body);
 	}
 	.grid > label:not(.check) {
-		padding-top: 6px;
-		color: var(--text-secondary);
+		padding-top: var(--space-2);
+		font: var(--type-label);
+		color: var(--text);
 	}
 	.control {
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: var(--space-1);
 		min-width: 0;
 	}
 	.raw {
-		margin-top: 12px;
-		border-top: 1px solid var(--stroke-divider);
-		padding-top: 12px;
-	}
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 12px;
+		margin-top: var(--space-4);
+		border-top: 1px solid var(--border-subtle);
+		padding-top: var(--space-4);
 	}
 	.reset {
 		margin-right: auto;

@@ -63,7 +63,7 @@
 		dragging = dropBefore = null;
 	}
 
-	const ROW = 34;
+	const ROW = 32;
 	const OVERSCAN = 8;
 
 	type Row =
@@ -243,7 +243,7 @@
 									toggle(row.pkg.id);
 								}}
 							>
-								<Icon name={collapsed.has(row.pkg.id) ? 'chevron-right' : 'chevron-down'} size={14} />
+								<Icon name={collapsed.has(row.pkg.id) ? 'chevron-right' : 'chevron-down'} />
 							</button>
 							<Icon name="folder" />
 							<span class="label">{row.pkg.name}</span>
@@ -312,18 +312,19 @@
 		display: grid;
 		grid-template-columns: minmax(220px, 1fr) 88px minmax(120px, 180px) 96px 72px 112px;
 		align-items: center;
-		gap: 12px;
-		padding: 0 16px;
+		gap: var(--space-4);
+		padding: 0 var(--space-3);
 	}
+	/* Inset like the rows (8) plus the same cell padding (8), so columns line up. */
 	.header {
-		height: 32px;
-		font-size: 12px;
-		color: var(--text-secondary);
-		border-bottom: 1px solid var(--stroke-divider);
+		height: var(--control-h);
+		margin: 0 var(--space-3);
+		font: var(--type-caption);
+		color: var(--text-muted);
+		border-bottom: 1px solid var(--border-subtle);
 	}
 	.num {
 		text-align: right;
-		font-variant-numeric: tabular-nums;
 	}
 	.table:focus-visible {
 		outline: none;
@@ -334,17 +335,23 @@
 		overflow-y: auto;
 	}
 	.table:focus-visible .selected {
-		outline: 2px solid var(--text-primary);
+		outline: 2px solid var(--accent);
 		outline-offset: -2px;
 	}
 	.spacer {
 		position: relative;
 	}
 	.row.dragging {
-		opacity: 0.5;
+		background: var(--pressed);
 	}
-	.row.drop-before {
-		box-shadow: inset 0 2px 0 var(--accent);
+	.row.drop-before::before {
+		content: '';
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		height: 2px;
+		background: var(--accent);
 	}
 	.drop-end {
 		position: absolute;
@@ -355,41 +362,33 @@
 	}
 	.row {
 		position: absolute;
-		left: 4px;
-		right: 4px;
-		height: 32px;
-		margin-top: 2px;
-		border-radius: var(--radius-control);
-		font-size: 13px;
+		left: var(--space-3);
+		right: var(--space-3);
+		height: var(--row-h);
+		border-bottom: 1px solid var(--border-subtle);
+		border-radius: var(--radius-md);
+		font: var(--type-body);
+		transition: background var(--motion-fast) var(--ease);
 	}
 	.row:hover {
-		background: var(--fill-subtle-hover);
+		background: var(--hover);
 	}
 	.row.selected {
-		background: var(--fill-subtle-hover);
-	}
-	.row.selected::before {
-		content: '';
-		position: absolute;
-		left: 0;
-		top: 8px;
-		bottom: 8px;
-		width: 3px;
-		border-radius: 2px;
-		background: var(--accent);
+		background: var(--accent-subtle);
 	}
 	.name {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: var(--space-3);
 		min-width: 0;
 	}
+	/* Indent under the package: inset 8, chevron 22 and gap 8, so the icon lines up with the folder icon. */
 	.download .name {
-		padding-left: 46px;
-		color: var(--text-primary);
+		padding-left: calc(var(--space-3) + 22px + var(--space-3));
+		color: var(--text);
 	}
 	.package .name {
-		font-weight: 600;
+		font: var(--type-label);
 	}
 	.label {
 		overflow: hidden;
@@ -398,13 +397,12 @@
 	}
 	.count {
 		flex-shrink: 0;
-		padding: 0 6px;
-		border-radius: 8px;
-		font-size: 11px;
-		font-weight: 400;
-		line-height: 16px;
+		padding: 0 var(--space-2);
+		border-radius: var(--radius-sm);
+		font: var(--type-caption);
+		font-variant-numeric: tabular-nums;
 		color: var(--text-secondary);
-		background: var(--fill-subtle-hover);
+		background: var(--hover);
 	}
 	.chevron {
 		display: inline-flex;
@@ -414,24 +412,31 @@
 		height: 22px;
 		padding: 0;
 		border: 0;
-		border-radius: var(--radius-control);
+		border-radius: var(--radius-md);
 		background: transparent;
-		color: var(--text-secondary);
+		color: var(--text-muted);
+		transition:
+			background var(--motion-fast) var(--ease),
+			color var(--motion-fast) var(--ease);
 	}
 	.chevron:hover {
-		background: var(--fill-subtle-hover);
+		background: var(--hover);
+		color: var(--text);
+	}
+	.chevron:active {
+		background: var(--pressed);
 	}
 	.progress {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: var(--space-3);
 	}
 	.progress :global(.track) {
 		flex: 1;
 	}
 	.pct {
 		width: 36px;
-		font-size: 12px;
+		font: var(--type-small);
 		text-align: right;
 		color: var(--text-secondary);
 		font-variant-numeric: tabular-nums;
@@ -443,12 +448,12 @@
 		color: var(--text-secondary);
 	}
 	.status.active {
-		color: var(--accent-text-on-layer);
+		color: var(--accent);
 	}
 	.status.completed {
 		color: var(--success);
 	}
 	.status.failed {
-		color: var(--critical);
+		color: var(--danger);
 	}
 </style>

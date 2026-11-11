@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Check, X } from '@lucide/svelte';
 	import { downloads } from '#lib/downloads.svelte.js';
 	import { network } from '#lib/network.svelte.js';
 	import {
@@ -108,9 +109,9 @@
 				<dd class="wide">
 					<span class="mono selectable">{CHECKSUM_LABELS[c.algo]} {c.value}</span>
 					{#if c.verified === true}
-						<span class="check ok">✓ Matches</span>
+						<span class="check ok"><Check size={16} strokeWidth={1.5} aria-hidden="true" />Matches</span>
 					{:else if c.verified === false}
-						<span class="check bad">✗ Doesn't match</span>
+						<span class="check bad"><X size={16} strokeWidth={1.5} aria-hidden="true" />Doesn't match</span>
 					{:else}
 						<span class="check">Not checked yet</span>
 					{/if}
@@ -165,19 +166,20 @@
 		height: 180px;
 		flex-shrink: 0;
 		overflow: auto;
-		padding: 12px 20px 16px;
-		border-top: 1px solid var(--stroke-divider);
+		padding: var(--space-4) var(--space-5) var(--space-5);
+		background: var(--surface);
+		border-top: 1px solid var(--border-subtle);
 	}
 	header {
 		display: flex;
 		align-items: center;
-		gap: 16px;
-		margin-bottom: 8px;
+		gap: var(--space-5);
+		margin-bottom: var(--space-3);
 	}
 	.title {
 		display: flex;
 		align-items: baseline;
-		gap: 12px;
+		gap: var(--space-4);
 		min-width: 0;
 		flex: 1;
 	}
@@ -186,41 +188,42 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-		font: 600 16px/22px var(--font-display);
+		font: var(--type-heading);
 	}
 	.actions {
 		display: flex;
-		gap: 8px;
+		gap: var(--space-3);
 		flex-shrink: 0;
 	}
 	.status {
 		flex-shrink: 0;
-		font-size: 12px;
+		font: var(--type-small);
 		color: var(--text-secondary);
 	}
 	.status.completed {
 		color: var(--success);
 	}
 	.status.failed {
-		color: var(--critical);
+		color: var(--danger);
 	}
 	.status.active {
-		color: var(--accent-text-on-layer);
+		color: var(--accent);
 	}
 	.error {
-		margin: 0 0 8px;
-		color: var(--critical);
+		margin: 0 0 var(--space-3);
+		font: var(--type-body);
+		color: var(--danger);
 	}
 	/* Two columns of short facts; long values (URLs, paths) span the row. */
 	dl {
 		display: grid;
 		grid-template-columns: 88px minmax(0, 1fr) 88px minmax(0, 1fr);
-		gap: 4px 16px;
+		gap: var(--space-2) var(--space-5);
 		margin: 0;
-		font-size: 13px;
+		font: var(--type-small);
 	}
 	dt {
-		color: var(--text-secondary);
+		color: var(--text-muted);
 	}
 	dd {
 		margin: 0;
@@ -230,22 +233,22 @@
 	.wide {
 		grid-column: 2 / -1;
 	}
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 12px;
-	}
 	.check {
-		margin-left: 8px;
-		color: var(--text-secondary);
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		margin-left: var(--space-3);
+		color: var(--text-muted);
 	}
 	.check.ok {
 		color: var(--success);
 	}
 	.check.bad {
-		color: var(--critical);
+		color: var(--danger);
 	}
 	.empty {
 		margin: 0;
+		font: var(--type-body);
 		color: var(--text-secondary);
 	}
 </style>

@@ -44,7 +44,16 @@
 	}
 </script>
 
-<Dialog bind:open title={target?.kind === 'package' ? 'Remove package?' : 'Remove download?'} width={440} onsubmit={confirm}>
+<Dialog
+	bind:open
+	title={subject
+		? `Remove '${subject.name}'?`
+		: target?.kind === 'package'
+			? 'Remove package?'
+			: 'Remove download?'}
+	width={440}
+	onsubmit={confirm}
+>
 	<p>
 		<strong>{subject?.name}</strong> will be removed from the list. Unfinished parts are deleted.
 	</p>
@@ -56,19 +65,27 @@
 	{/if}
 
 	{#snippet footer()}
-		<button type="submit" class="btn accent">Remove</button>
-		<button type="button" class="btn" onclick={() => (open = false)}>Cancel</button>
+		<button type="button" class="btn ghost" onclick={() => (open = false)}>Cancel</button>
+		<button type="submit" class="btn danger">Remove</button>
 	{/snippet}
 </Dialog>
 
 <style>
 	p {
-		margin: 0 0 16px;
+		margin: 0 0 var(--space-5);
 		overflow-wrap: anywhere;
+		font: var(--type-body);
+		color: var(--text-secondary);
+	}
+	strong {
+		font: var(--type-label);
+		color: var(--text);
 	}
 	.check {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: var(--space-3);
+		font: var(--type-body);
+		color: var(--text);
 	}
 </style>

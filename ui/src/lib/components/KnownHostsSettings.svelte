@@ -7,7 +7,7 @@
 	});
 </script>
 
-<section class="card" aria-labelledby="set-hosts">
+<section aria-labelledby="set-hosts">
 	<h2 id="set-hosts">Known SFTP hosts</h2>
 	{#if network.knownHosts.length === 0}
 		<small>None yet. The first time a download connects to an SFTP server, its host key is remembered here.</small>
@@ -30,40 +30,35 @@
 <style>
 	section {
 		display: grid;
-		gap: 10px;
-		padding: 16px;
 	}
 	h2 {
-		margin: 0 0 2px;
-		font: 600 14px/20px var(--font-ui);
+		margin: 0 0 var(--space-3);
+		font: var(--type-heading);
+		color: var(--text);
 	}
 	small {
-		font-size: 12px;
-		color: var(--text-secondary);
-	}
-	.muted {
-		color: var(--text-secondary);
-	}
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 12px;
+		font: var(--type-small);
+		color: var(--text-muted);
 	}
 	.host {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
-		gap: 4px 12px;
-		font-size: 13px;
+		gap: var(--space-2) var(--space-4);
+		padding: var(--space-4) 0;
+		border-top: 1px solid var(--border-subtle);
+		font: var(--type-body);
 	}
 	.what {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: baseline;
-		gap: 4px 8px;
+		gap: var(--space-2) var(--space-3);
 		min-width: 0;
 		overflow-wrap: anywhere;
 	}
 	.name {
-		font-weight: 600;
+		font: var(--type-label);
+		color: var(--text);
 	}
 </style>

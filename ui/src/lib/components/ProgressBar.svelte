@@ -26,31 +26,31 @@
 	.track {
 		position: relative;
 		height: 4px;
-		border-radius: 2px;
+		border-radius: var(--radius-full);
 		overflow: hidden;
-		background: var(--stroke-divider);
-		--bar: var(--accent);
+		background: var(--hover);
+		--bar: var(--accent-fill);
 	}
 	.paused {
-		--bar: var(--caution);
+		--bar: var(--warning);
 	}
 	.failed {
-		--bar: var(--critical);
+		--bar: var(--danger);
 	}
 	.done {
 		--bar: var(--success);
 	}
 	.fill {
 		height: 100%;
-		border-radius: 2px;
+		border-radius: var(--radius-full);
 		background: var(--bar);
-		transition: width 150ms linear;
+		transition: width var(--motion-base) var(--ease);
 	}
 	.indeterminate {
 		position: absolute;
 		inset: 0 auto 0 0;
 		width: 30%;
-		border-radius: 2px;
+		border-radius: var(--radius-full);
 		background: var(--bar);
 		animation: slide 1.2s ease-in-out infinite;
 	}

@@ -10,10 +10,10 @@
 </script>
 
 <div class="empty">
-	<div class="glyph"><Icon name={icon} size={32} /></div>
+	<div class="glyph"><Icon name={icon} size={24} /></div>
 	<h2>{title}</h2>
 	<p>{body}</p>
-	{#if phase}<span class="phase">{phase}</span>{/if}
+	{#if phase}<span class="tag phase">{phase}</span>{/if}
 </div>
 
 <style>
@@ -22,30 +22,30 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		gap: 4px;
+		gap: var(--space-2);
+		/* Centred, with the text column capped at 320 (padding included). */
+		max-width: 320px;
 		height: 100%;
-		padding: 32px;
+		margin: 0 auto;
+		padding: var(--space-7) var(--space-5);
 		text-align: center;
 		color: var(--text-secondary);
 	}
 	.glyph {
-		margin-bottom: 8px;
-		color: var(--accent-text-on-layer);
+		display: flex;
+		margin-bottom: var(--space-3);
+		color: var(--text-muted);
 	}
 	h2 {
 		margin: 0;
-		font: 600 20px/28px var(--font-display);
-		color: var(--text-primary);
+		font: var(--type-heading);
+		color: var(--text);
 	}
 	p {
 		margin: 0;
-		max-width: 420px;
+		font: var(--type-body);
 	}
 	.phase {
-		margin-top: 12px;
-		padding: 2px 8px;
-		border-radius: 10px;
-		font-size: 12px;
-		background: var(--fill-subtle-hover);
+		margin-top: var(--space-3);
 	}
 </style>

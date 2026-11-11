@@ -26,6 +26,9 @@
 		void tools.start();
 	});
 
+	// The page has one primary button: the first tool that needs installing or updating.
+	const primaryTool = $derived(tools.tools.find((t) => t.path == null || t.updateAvailable)?.name);
+
 	function busy(tool: ToolInfo) {
 		return tool.task != null;
 	}
@@ -60,7 +63,7 @@
 	</header>
 
 	{#if tools.error}
-		<p class="banner" role="alert">{tools.error}</p>
+		<p class="banner danger" role="alert">{tools.error}</p>
 	{/if}
 
 	<div class="cards">
@@ -71,9 +74,9 @@
 				<div class="head">
 					<div>
 						<h2 id="tool-{tool.name}">{about.title}</h2>
-						<p class="muted">{about.body}</p>
+						<p class="desc">{about.body}</p>
 					</div>
-					<span class="state" class:ok={installed && !tool.updateAvailable} class:warn={tool.updateAvailable}>
+					<span class="tag" class:success={installed && !tool.updateAvailable} class:warning={tool.updateAvailable}>
 						{#if !installed}Not installed{:else if tool.updateAvailable}Update available{:else}Up to date{/if}
 					</span>
 				</div>
@@ -126,11 +129,21 @@
 
 				<div class="actions">
 					{#if !installed}
-						<button class="btn accent" disabled={busy(tool) || !isTauri()} onclick={() => tools.install(tool.name)}>
+						<button
+							class="btn"
+							class:accent={tool.name === primaryTool}
+							disabled={busy(tool) || !isTauri()}
+							onclick={() => tools.install(tool.name)}
+						>
 							<Icon name="downloads" /> Install ({about.size})
 						</button>
 					{:else if tool.updateAvailable}
-						<button class="btn accent" disabled={busy(tool)} onclick={() => tools.install(tool.name)}>
+						<button
+							class="btn"
+							class:accent={tool.name === primaryTool}
+							disabled={busy(tool)}
+							onclick={() => tools.install(tool.name)}
+						>
 							<Icon name="downloads" /> Update to {tool.latestRelease}
 						</button>
 					{/if}
@@ -159,112 +172,90 @@
 
 <style>
 	.page {
-		padding: 16px 20px;
-		max-width: 900px;
+		padding: var(--page-pad);
+		max-width: var(--content-max);
 	}
 	.toolbar {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		margin-bottom: 16px;
+		gap: var(--space-3);
+		margin-bottom: var(--space-5);
 	}
 	h1 {
 		margin: 0;
-		font: 600 20px/28px var(--font-display);
+		font: var(--type-title);
 	}
 	.spacer {
 		flex: 1;
 	}
 	.banner {
-		margin: 0 0 12px;
-		padding: 8px 16px;
-		border-radius: var(--radius-control);
-		background: color-mix(in srgb, var(--critical) 12%, transparent);
+		margin: 0 0 var(--space-4);
 	}
 	.cards {
 		display: grid;
-		gap: 12px;
+		gap: var(--space-4);
 	}
 	.tool {
-		padding: 16px;
+		padding: var(--space-4);
 	}
 	.head {
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 16px;
-		margin-bottom: 12px;
+		gap: var(--space-5);
+		margin-bottom: var(--space-4);
 	}
 	h2 {
-		margin: 0 0 4px;
-		font: 600 16px/22px var(--font-ui);
+		margin: 0 0 var(--space-2);
+		font: var(--type-heading);
 	}
-	.muted {
+	.desc {
 		margin: 0;
+		font: var(--type-body);
 		color: var(--text-secondary);
-	}
-	.state {
-		flex-shrink: 0;
-		padding: 2px 10px;
-		border-radius: 10px;
-		font-size: 12px;
-		color: var(--text-secondary);
-		background: var(--fill-subtle-hover);
-	}
-	.state.ok {
-		color: var(--success);
-		background: color-mix(in srgb, var(--success) 12%, transparent);
-	}
-	.state.warn {
-		color: var(--caution);
-		background: color-mix(in srgb, var(--caution) 14%, transparent);
 	}
 	dl {
 		display: grid;
 		grid-template-columns: 100px 1fr;
-		gap: 6px 16px;
-		margin: 0 0 12px;
-		font-size: 13px;
+		gap: var(--space-2) var(--space-5);
+		margin: 0 0 var(--space-4);
+		font: var(--type-body);
 	}
 	dt {
-		color: var(--text-secondary);
+		color: var(--text-muted);
 	}
 	dd {
 		margin: 0;
 		min-width: 0;
-	}
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 12px;
 	}
 	.path {
 		word-break: break-all;
 	}
 	.task {
 		display: grid;
-		gap: 6px;
-		margin-bottom: 12px;
-		font-size: 13px;
+		gap: var(--space-3);
+		margin-bottom: var(--space-4);
+		font: var(--type-body);
 	}
 	.track {
 		position: relative;
 		height: 4px;
 		overflow: hidden;
-		border-radius: 2px;
-		background: var(--stroke-divider);
+		border-radius: var(--radius-full);
+		background: var(--hover);
 	}
 	.fill {
 		height: 100%;
-		border-radius: 2px;
-		background: var(--accent);
-		transition: width 0.2s;
+		border-radius: var(--radius-full);
+		background: var(--accent-fill);
+		transition: width var(--motion-base) var(--ease);
 	}
 	.indeterminate {
 		position: absolute;
 		inset: 0 auto 0 0;
 		width: 30%;
-		border-radius: 2px;
-		background: var(--accent);
+		border-radius: var(--radius-full);
+		background: var(--accent-fill);
 		animation: slide 1.2s ease-in-out infinite;
 	}
 	@keyframes slide {
@@ -276,17 +267,17 @@
 		}
 	}
 	.error {
-		margin: 0 0 12px;
-		font-size: 13px;
-		color: var(--critical);
+		margin: 0 0 var(--space-4);
+		font: var(--type-body);
+		color: var(--danger);
 	}
 	.actions {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 8px;
+		gap: var(--space-3);
 	}
 	.footnote {
-		margin-top: 16px;
-		font-size: 12px;
+		margin-top: var(--space-5);
+		font: var(--type-small);
 	}
 </style>

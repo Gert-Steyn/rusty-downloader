@@ -80,8 +80,8 @@
 	{#if error}<p class="error-text">{error}</p>{/if}
 
 	{#snippet footer()}
+		<button type="button" class="btn ghost" onclick={() => (open = false)}>Cancel</button>
 		<button type="submit" class="btn accent" disabled={saving}>Save</button>
-		<button type="button" class="btn" onclick={() => (open = false)}>Cancel</button>
 	{/snippet}
 </Dialog>
 
@@ -90,30 +90,32 @@
 		display: grid;
 		grid-template-columns: 90px 1fr;
 		align-items: center;
-		gap: 10px 12px;
-		margin-bottom: 12px;
-		font-size: 13px;
+		gap: var(--space-3) var(--space-4);
+		margin-bottom: var(--space-4);
+		font: var(--type-body);
+	}
+	.form > label:not(.check) {
+		font: var(--type-label);
+		color: var(--text);
 	}
 	.pass {
 		display: grid;
-		gap: 6px;
+		gap: var(--space-2);
 	}
 	.check {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		font-size: 12px;
-	}
-	.mono {
-		font-family: var(--font-mono);
+		gap: var(--space-3);
+		font: var(--type-body);
+		color: var(--text);
 	}
 	small {
 		display: block;
-		font-size: 12px;
-		color: var(--text-secondary);
+		font: var(--type-small);
+		color: var(--text-muted);
 	}
 	.error-text {
-		margin: 8px 0 0;
+		margin: var(--space-3) 0 0;
 		overflow-wrap: anywhere;
 	}
 </style>

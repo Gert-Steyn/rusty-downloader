@@ -35,7 +35,7 @@
 	}
 </script>
 
-<section class="card" aria-labelledby="set-accounts">
+<section aria-labelledby="set-accounts">
 	<h2 id="set-accounts">Accounts</h2>
 	{#if network.accounts.length === 0}
 		<small>No accounts yet. Add one for a site you're signed in to, then import its cookies.</small>
@@ -74,34 +74,30 @@
 <style>
 	section {
 		display: grid;
-		gap: 10px;
-		padding: 16px;
 	}
 	h2 {
-		margin: 0 0 2px;
-		font: 600 14px/20px var(--font-ui);
+		margin: 0 0 var(--space-3);
+		font: var(--type-heading);
+		color: var(--text);
 	}
 	small {
-		font-size: 12px;
-		color: var(--text-secondary);
-	}
-	.muted {
-		color: var(--text-secondary);
-	}
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 12px;
+		font: var(--type-small);
+		color: var(--text-muted);
 	}
 	.row {
 		display: flex;
-		gap: 8px;
+		flex-wrap: wrap;
+		gap: var(--space-3);
+		padding-top: var(--space-4);
 	}
 	.account {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
-		gap: 4px 12px;
-		font-size: 13px;
+		gap: var(--space-2) var(--space-4);
+		padding: var(--space-4) 0;
+		border-top: 1px solid var(--border-subtle);
+		font: var(--type-body);
 	}
 	.account.off .name {
 		color: var(--text-secondary);
@@ -110,25 +106,27 @@
 		display: flex;
 		flex-wrap: wrap;
 		align-items: baseline;
-		gap: 4px 8px;
+		gap: var(--space-2) var(--space-3);
 		min-width: 0;
 	}
 	.name {
-		font-weight: 600;
+		font: var(--type-label);
+		color: var(--text);
 	}
 	.actions {
 		display: flex;
-		gap: 6px;
+		gap: var(--space-3);
 	}
 	.note {
 		grid-column: 1 / -1;
-		font-size: 12px;
+		font: var(--type-small);
+		color: var(--text-muted);
 		overflow-wrap: anywhere;
 	}
 	.note.ok {
 		color: var(--success);
 	}
 	.note.bad {
-		color: var(--critical);
+		color: var(--danger);
 	}
 </style>
