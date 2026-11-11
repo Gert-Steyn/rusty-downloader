@@ -27,6 +27,7 @@ mod single;
 pub mod speed;
 pub mod timewindow;
 pub mod tools;
+pub mod torrent;
 pub mod ytdlp;
 
 pub use error::{Error, Result};

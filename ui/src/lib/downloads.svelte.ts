@@ -11,6 +11,7 @@ import {
 	type DownloadEventBatch,
 	type Package
 } from './api.js';
+import { grabber } from './linkgrabber.svelte.js';
 
 export interface Live {
 	speedBps: number;
@@ -193,6 +194,16 @@ class DownloadsStore {
 				case 'proxyChanged': {
 					const d = this.#byId.get(event.downloadId);
 					if (d) d.proxy = event.proxy;
+					break;
+				}
+				case 'galleryChecked': {
+					const name = this.#byId.get(event.downloadId)?.filename ?? 'gallery';
+					const n = event.newFiles;
+					grabber.say(
+						n === 0
+							? `No new files in ${name}`
+							: `${n} new file${n === 1 ? '' : 's'} in ${name}`
+					);
 					break;
 				}
 				case 'checksumChanged': {

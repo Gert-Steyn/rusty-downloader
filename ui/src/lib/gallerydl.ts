@@ -6,7 +6,9 @@ export const DEFAULT_GALLERY_OPTIONS: GalleryDlOptions = {
 	archive: true,
 	userConfig: false,
 	flags: {},
-	rawArgs: null
+	rawArgs: null,
+	keepFolders: false,
+	folderPattern: null
 };
 
 let flags: Promise<GalleryDlFlags> | null = null;
@@ -45,6 +47,7 @@ export function changedCount(o: GalleryDlOptions | null | undefined): number {
 	if (!o.archive) n++;
 	if (o.userConfig) n++;
 	if (o.rawArgs?.trim()) n++;
+	if (o.keepFolders) n++;
 	return n;
 }
 
@@ -53,6 +56,7 @@ export function sameOptions(a: GalleryDlOptions, b: GalleryDlOptions): boolean {
 		JSON.stringify({
 			...o,
 			rawArgs: o.rawArgs?.trim() || null,
+			folderPattern: o.folderPattern?.trim() || null,
 			flags: Object.fromEntries(
 				Object.entries(o.flags)
 					.filter(([, v]) => v.trim() && v !== 'false')

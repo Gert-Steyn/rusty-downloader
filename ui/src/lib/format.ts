@@ -56,7 +56,8 @@ export function progressText(d: Download): string {
 	return pct == null ? '' : `${pct.toFixed(pct < 10 ? 1 : 0)}%`;
 }
 
-export function iconFor(kind: string): 'video' | 'gallery' | 'file' {
+export function iconFor(kind: string): 'video' | 'gallery' | 'torrent' | 'file' {
+	if (kind === 'torrent') return 'torrent';
 	return kind === 'ytdlp' ? 'video' : kind === 'gallerydl' ? 'gallery' : 'file';
 }
 

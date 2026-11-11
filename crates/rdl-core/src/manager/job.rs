@@ -59,7 +59,7 @@ pub(super) async fn start(inner: &Arc<Inner>, row: DownloadRow, queue_id: i64) -
         let mut result = execute(&inner, &row, &cancel, &limit, &mut last).await;
         // A gallery is many files; a checksum belongs to one.
         if let Ok(Outcome::Completed { path, .. }) = &result
-            && row.kind() != DownloadKind::Gallerydl
+            && !matches!(row.kind(), DownloadKind::Gallerydl | DownloadKind::Torrent)
             && let Err(e) = checksums::check_finished(&inner, row.id, path, &cancel).await
         {
             result = Err(e);
@@ -113,6 +113,7 @@ async fn execute(
         "http" | "ftp" | "sftp" => {}
         "ytdlp" => return super::ytdlp_job::execute(inner, row, cancel).await,
         "gallerydl" => return super::gallerydl_job::execute(inner, row, cancel).await,
+        "torrent" => return super::torrent_job::execute(inner, row, cancel).await,
         other => return Err(Error::Unsupported(format!("{other} downloads"))),
     }
     let pool = &inner.pool;

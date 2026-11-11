@@ -21,6 +21,8 @@ pub struct AppPaths {
     pub tools_dir: PathBuf,
     /// gallery-dl download archives, one per site.
     pub archives_dir: PathBuf,
+    /// The torrent engine's state (session, DHT table).
+    pub torrents_dir: PathBuf,
     pub db_file: PathBuf,
 }
 
@@ -51,6 +53,7 @@ impl AppPaths {
             plugins_dir: data_dir.join("plugins"),
             tools_dir: data_dir.join("tools"),
             archives_dir: data_dir.join("archives"),
+            torrents_dir: data_dir.join("torrents"),
             db_file: data_dir.join(DB_FILE_NAME),
             data_dir,
         }
@@ -63,6 +66,7 @@ impl AppPaths {
             &self.plugins_dir,
             &self.tools_dir,
             &self.archives_dir,
+            &self.torrents_dir,
         ] {
             std::fs::create_dir_all(dir)?;
         }
@@ -116,5 +120,6 @@ mod tests {
         assert!(paths.logs_dir.is_dir());
         assert!(paths.plugins_dir.is_dir());
         assert!(paths.tools_dir.is_dir());
+        assert!(paths.torrents_dir.is_dir());
     }
 }

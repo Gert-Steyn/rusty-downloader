@@ -13,10 +13,12 @@ use std::time::Duration;
 use rdl_core::db;
 use rdl_core::gallerydl::{self, GalleryDlOptions, RunEvent, RunOutcome, RunSpec};
 use rdl_core::manager::{
-    DEFAULT_QUEUE, DownloadKind, FileCount, Manager, ManagerConfig, NewDownload, NewPackage, Status,
+    DEFAULT_QUEUE, DownloadKind, Event, FileCount, Manager, ManagerConfig, NewDownload, NewPackage,
+    Status,
 };
 use rdl_core::request::{Cookie, RequestContext};
 use rdl_core::tools::{Tools, ToolsConfig};
+use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
@@ -27,11 +29,14 @@ if "%~1"=="--help" exit /b 0
 if "%~1"=="" goto run
 if "%~1"=="-j" goto json
 if "%~1"=="-D" set "DIR=%~2"
+rem With -d (keep the site's folders) it writes into one sub-gallery folder.
+if "%~1"=="-d" set "DIR=%~2\Sub"
 if "%~1"=="--cookies" set "COOKIES=%~2"
 set "URL=%~1"
 shift
 goto args
 :run
+if not exist "%DIR%" mkdir "%DIR%"
 if defined COOKIES copy /y "%COOKIES%" "%DIR%\cookies.txt" >NUL
 set FRESH=1
 if exist "%DIR%\001.jpg" set FRESH=0
@@ -208,6 +213,20 @@ impl Fixture {
     }
 
     async fn add(&self, url: &str, files_total: Option<u32>) -> i64 {
+        self.add_gallery(url, files_total, GalleryDlOptions::default())
+            .await
+    }
+
+    async fn add_with(&self, url: &str, options: GalleryDlOptions) -> i64 {
+        self.add_gallery(url, None, options).await
+    }
+
+    async fn add_gallery(
+        &self,
+        url: &str,
+        files_total: Option<u32>,
+        options: GalleryDlOptions,
+    ) -> i64 {
         self.manager
             .add_package(NewPackage {
                 name: "Trip".into(),
@@ -216,7 +235,7 @@ impl Fixture {
                 downloads: vec![NewDownload {
                     kind: DownloadKind::Gallerydl,
                     filename: Some("Mountain trip".into()),
-                    gallerydl: Some(GalleryDlOptions::default()),
+                    gallerydl: Some(options),
                     files_total,
                     ..NewDownload::new(Url::parse(url).unwrap())
                 }],
@@ -274,6 +293,39 @@ async fn manager_downloads_a_gallery_into_its_folder_and_deletes_only_its_files(
         folder.join("mine.txt").is_file(),
         "files the gallery did not write stay"
     );
+    fx.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn removing_a_gallery_with_sub_folders_leaves_no_empty_folders() {
+    let fx = Fixture::new().await;
+    let folder = fx.root.path().join("out").join("Mountain trip");
+    let id = fx
+        .add_with(
+            "https://gallery.test/album",
+            GalleryDlOptions {
+                keep_folders: true,
+                ..GalleryDlOptions::default()
+            },
+        )
+        .await;
+    let done = fx.wait(id, Status::Completed).await;
+    assert_eq!(done.dest_path.as_deref(), Some(folder.as_path()));
+    // The fake wrote into the sub-gallery folder, not the gallery's own.
+    assert!(folder.join("Sub").join("001.jpg").is_file());
+    assert!(!folder.join("001.jpg").exists());
+
+    // A stray file in another sub-folder keeps that folder, and the gallery's.
+    std::fs::create_dir_all(folder.join("Other")).unwrap();
+    std::fs::write(folder.join("Other").join("notes.txt"), "mine").unwrap();
+
+    fx.manager.remove(id, true).await.unwrap();
+    assert!(!folder.join("Sub").exists(), "the emptied sub-folder goes");
+    assert!(folder.join("Other").join("notes.txt").is_file());
+    assert!(folder.is_dir(), "a folder with something in it stays");
+
+    std::fs::remove_file(folder.join("Other").join("notes.txt")).unwrap();
+    std::fs::remove_dir(folder.join("Other")).unwrap();
     fx.manager.shutdown().await;
 }
 
@@ -339,6 +391,89 @@ async fn rerunning_a_completed_gallery_fetches_into_the_same_folder() {
         })
     );
     assert!(folder.join("001.jpg").is_file());
+    fx.manager.shutdown().await;
+}
+
+/// The events for `id` up to and including its completion.
+async fn events_until_completed(events: &mut broadcast::Receiver<Event>, id: i64) -> Vec<Event> {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let mut seen = Vec::new();
+        loop {
+            match events.recv().await {
+                Ok(event) => {
+                    let done = matches!(
+                        event,
+                        Event::StatusChanged { download_id, status: Status::Completed, .. }
+                            if download_id == id
+                    );
+                    seen.push(event);
+                    if done {
+                        return seen;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(e) => panic!("event channel closed: {e}"),
+            }
+        }
+    })
+    .await
+    .expect("completed")
+}
+
+#[tokio::test]
+async fn a_rerun_reports_how_many_new_files_came_down() {
+    let fx = Fixture::new().await;
+    let mut events = fx.manager.subscribe();
+    let folder = fx.root.path().join("out").join("Mountain trip");
+    let id = fx.add("https://gallery.test/album", Some(2)).await;
+
+    // A first run is a plain download: no check result.
+    let first = events_until_completed(&mut events, id).await;
+    assert!(
+        first
+            .iter()
+            .all(|e| !matches!(e, Event::GalleryChecked { .. }))
+    );
+
+    // Nothing new: both files are already there.
+    fx.manager.rerun_gallery(id).await.unwrap();
+    let nothing_new = events_until_completed(&mut events, id).await;
+    let checked = nothing_new
+        .iter()
+        .position(|e| matches!(e, Event::GalleryChecked { .. }))
+        .expect("a check result");
+    assert_eq!(
+        nothing_new[checked],
+        Event::GalleryChecked {
+            download_id: id,
+            new_files: 0
+        }
+    );
+    assert_eq!(
+        nothing_new.len(),
+        checked + 2,
+        "the check comes just before completion"
+    );
+    assert_eq!(fx.manager.get(id).await.unwrap().status, Status::Completed);
+
+    // One file is gone from the folder: the rerun fetches it again, and
+    // only that one counts as new.
+    std::fs::remove_file(folder.join("002.jpg")).unwrap();
+    fx.manager.rerun_gallery(id).await.unwrap();
+    let one_new = events_until_completed(&mut events, id).await;
+    assert!(one_new.contains(&Event::GalleryChecked {
+        download_id: id,
+        new_files: 1
+    }));
+    assert!(folder.join("002.jpg").is_file());
+
+    // The next rerun is counted from zero again.
+    fx.manager.rerun_gallery(id).await.unwrap();
+    let again = events_until_completed(&mut events, id).await;
+    assert!(again.contains(&Event::GalleryChecked {
+        download_id: id,
+        new_files: 0
+    }));
     fx.manager.shutdown().await;
 }
 

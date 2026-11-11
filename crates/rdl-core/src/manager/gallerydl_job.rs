@@ -106,8 +106,17 @@ pub(super) async fn execute(
     let forwarder = tokio::spawn(forward(Arc::clone(inner), row.id, total, before, rx));
     let outcome = gallerydl::download(&spec, &tx, cancel).await;
     drop(tx);
-    let (files, bytes) = forwarder.await.unwrap_or((0, 0));
+    let (files, bytes, new_files) = forwarder.await.unwrap_or((0, 0, 0));
     store::set_files_done(pool, row.id, files, bytes).await?;
+    // A rerun keeps its count across pauses: a resumed run skips the files
+    // this run already fetched, so they're only counted here.
+    let rerun_new = {
+        let mut reruns = inner.reruns();
+        reruns.get_mut(&row.id).map(|count| {
+            *count += new_files;
+            *count
+        })
+    };
 
     match outcome {
         Ok(RunOutcome::Completed { files, bytes }) => {
@@ -118,6 +127,15 @@ pub(super) async fn execute(
             }
             // Now the count is known for certain.
             store::set_files_total(pool, row.id, files).await?;
+            if let Some(new_files) = rerun_new {
+                // The rerun is over: report it before `finalize` reports
+                // the status, so listeners see the result first.
+                inner.reruns().remove(&row.id);
+                inner.emit(Event::GalleryChecked {
+                    download_id: row.id,
+                    new_files,
+                });
+            }
 
             Ok(Outcome::Completed {
                 path: dir,
@@ -142,17 +160,19 @@ fn folder_name(row: &DownloadRow, url: &Url) -> String {
 }
 
 /// Turn file reports into manager events; returns the file and byte counts
-/// to save. A resumed run first re-reports the files it skips, so until it
-/// passes `before` (the last run's counts) those are shown instead: the
-/// count never goes backwards.
+/// to save, and how many of the files were new (not skipped) in this run. A
+/// resumed run first re-reports the files it skips, so until it passes
+/// `before` (the last run's counts) those are shown instead: the count never
+/// goes backwards.
 async fn forward(
     inner: Arc<Inner>,
     id: i64,
     total: Option<u32>,
     before: (u32, u64),
     mut rx: mpsc::UnboundedReceiver<RunEvent>,
-) -> (u32, u64) {
+) -> (u32, u64, u32) {
     let (mut files, mut bytes) = (0u32, 0u64);
+    let mut new_files = 0u32;
     let mut recent: VecDeque<(Instant, u64)> = VecDeque::new();
     let started = Instant::now();
     let mut last_emit: Option<Instant> = None;
@@ -169,6 +189,7 @@ async fn forward(
             files += 1;
             bytes += size;
             if !skipped {
+                new_files += 1;
                 recent.push_back((Instant::now(), size));
             }
             // A file skipped because it's already in the gallery's folder is
@@ -218,7 +239,7 @@ async fn forward(
             }
         }
         if finished {
-            return (shown_files, shown_bytes);
+            return (shown_files, shown_bytes, new_files);
         }
     }
 }

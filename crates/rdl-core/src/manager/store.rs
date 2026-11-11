@@ -42,6 +42,7 @@ pub(crate) struct DownloadRow {
     pub checksum_value: Option<String>,
     pub checksum_ok: Option<i64>,
     pub proxy: Option<String>,
+    pub info_hash: Option<String>,
 }
 
 impl DownloadRow {
@@ -610,6 +611,16 @@ pub(crate) async fn set_planned(
     sqlx::query("UPDATE downloads SET dest_path = ?, size = COALESCE(?, size) WHERE id = ?")
         .bind(dest_path.to_string_lossy().into_owned())
         .bind(size.map(|s| s as i64))
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// The info hash of a torrent download, once its metadata is known.
+pub(crate) async fn set_info_hash(pool: &Pool, id: DownloadId, info_hash: &str) -> Result<()> {
+    sqlx::query("UPDATE downloads SET info_hash = ? WHERE id = ?")
+        .bind(info_hash)
         .bind(id)
         .execute(pool)
         .await?;

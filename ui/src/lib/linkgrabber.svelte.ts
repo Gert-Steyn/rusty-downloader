@@ -144,13 +144,30 @@ class GrabberStore {
 	setGalleryOptions = (ids: number[], options: GalleryDlOptions) =>
 		this.run(() => unwrap(commands.grabberSetGalleryOptions(ids, options)));
 
-	/** Queue the ticked links. Returns the number of packages created. */
+	/**
+	 * Queue the ticked links. Links still being checked stay in the LinkGrabber
+	 * (the core holds them back). Returns the number of packages created.
+	 */
 	async confirm(): Promise<number> {
 		const ids = this.checkedIds;
 		if (!ids.length) return 0;
+		const heldIds = ids.filter((id) => {
+			const link = this.links.find((l) => l.id === id);
+			return link?.availability === 'unknown' || link?.availability === 'checking';
+		});
+		if (heldIds.length === ids.length) {
+			this.say('Those links are still being checked. Start them when the check finishes');
+			return 0;
+		}
 		const packages = await this.run(() => unwrap(commands.grabberConfirm(ids)));
 		if (!packages) return 0;
-		this.say(`${plural(ids.length, 'download')} queued in ${plural(packages.length, 'package')}`);
+		const queued = ids.length - heldIds.length;
+		let text = `${plural(queued, 'download')} queued in ${plural(packages.length, 'package')}`;
+		if (heldIds.length) {
+			const stays = heldIds.length === 1 ? 'is' : 'are';
+			text += `. ${plural(heldIds.length, 'link')} ${stays} still being checked and ${heldIds.length === 1 ? 'stays' : 'stay'} here`;
+		}
+		this.say(text);
 		return packages.length;
 	}
 

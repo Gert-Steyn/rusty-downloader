@@ -39,7 +39,7 @@ pub async fn grabber_add(
 ) -> CommandResult<GrabResult> {
     let urls = extract_links(&text);
     if urls.is_empty() {
-        return Err(CommandError("No http or https links found.".into()));
+        return Err(CommandError("No links found.".into()));
     }
     let outcome = state.grabber.add(urls, source).await?;
     Ok(GrabResult {

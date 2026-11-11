@@ -9,7 +9,7 @@ use std::time::Duration;
 use common::{SIZE, spawn_server};
 use rdl_core::db::{self, Pool};
 use rdl_core::linkgrabber::{Availability, GrabbedLink, LinkGrabber, LinkSource};
-use rdl_core::manager::{Manager, ManagerConfig};
+use rdl_core::manager::{DownloadKind, Manager, ManagerConfig};
 use reqwest::Url;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -222,6 +222,64 @@ async fn confirm_creates_one_package_per_name_and_folder() {
 }
 
 #[tokio::test]
+async fn confirm_leaves_links_that_are_still_being_checked() {
+    let (base, _server) = spawn_server().await;
+    let fx = Fixture::new().await;
+    let links = fx
+        .add(&base, &["named/movie.part1.rar", "named/movie.part2.rar"])
+        .await;
+    fx.settled().await;
+    let held = links
+        .iter()
+        .find(|l| l.url.ends_with("movie.part2.rar"))
+        .unwrap();
+    // Force the state a probe leaves a link in while it is still running.
+    // The probes have all finished, so nothing changes it again.
+    sqlx::query("UPDATE link_grabber SET availability = 'checking' WHERE id = ?")
+        .bind(held.id)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+
+    let manager = Manager::start(fx.pool.clone(), ManagerConfig::default())
+        .await
+        .unwrap();
+    let default_dest: PathBuf = fx.dir.path().join("downloads");
+    let ids: Vec<_> = links.iter().map(|l| l.id).collect();
+    let created = fx
+        .grabber
+        .confirm(&ids, &default_dest, &manager)
+        .await
+        .unwrap();
+
+    assert_eq!(created.len(), 1, "only the checked link is queued");
+    let names: Vec<_> = manager
+        .list()
+        .await
+        .unwrap()
+        .iter()
+        .flat_map(|p| p.downloads.iter())
+        .map(|d| d.filename.clone().unwrap())
+        .collect();
+    assert_eq!(names, ["movie.part1.rar"]);
+    let left = fx.grabber.list().await.unwrap();
+    assert_eq!(left.len(), 1, "the link still being checked stays here");
+    assert_eq!(left[0].id, held.id);
+    assert_eq!(left[0].availability, Availability::Checking);
+
+    // If every requested link is still being checked, nothing is queued.
+    let created = fx
+        .grabber
+        .confirm(&[held.id], &default_dest, &manager)
+        .await
+        .unwrap();
+    assert!(created.is_empty());
+    assert_eq!(manager.list().await.unwrap().len(), 1);
+    assert_eq!(fx.grabber.list().await.unwrap().len(), 1);
+    manager.shutdown().await;
+}
+
+#[tokio::test]
 async fn unfinished_checks_resume_after_restart() {
     let (base, _server) = spawn_server().await;
     let dir = tempfile::tempdir().unwrap();
@@ -322,5 +380,99 @@ async fn a_link_joins_a_category_of_the_same_name_and_its_folder() {
     let same_name: Vec<_> = packages.iter().filter(|p| p.name == "report").collect();
     assert_eq!(same_name.len(), 1);
     assert_eq!(same_name[0].downloads.len(), 2);
+    manager.shutdown().await;
+}
+
+const MAGNET: &str =
+    "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Big+Buck%20Bunny&xl=2048";
+
+#[tokio::test]
+async fn magnet_links_are_online_torrents_named_from_dn() {
+    let fx = Fixture::new().await;
+    let added = fx
+        .grabber
+        .add(vec![Url::parse(MAGNET).unwrap()], LinkSource::Manual)
+        .await
+        .unwrap()
+        .added;
+    assert_eq!(added[0].kind, DownloadKind::Torrent);
+
+    // No network is involved: the link is online as soon as it's checked.
+    let links = fx.settled().await;
+    let link = by_url(&links, "xl=2048");
+    assert_eq!(link.availability, Availability::Online);
+    assert_eq!(link.kind, DownloadKind::Torrent);
+    assert_eq!(link.filename.as_deref(), Some("Big Buck Bunny"));
+    assert_eq!(link.size, Some(2048));
+    assert!(link.error.is_none());
+}
+
+#[tokio::test]
+async fn magnet_links_without_dn_are_named_by_info_hash() {
+    let fx = Fixture::new().await;
+    let bare = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567";
+    fx.grabber
+        .add(vec![Url::parse(bare).unwrap()], LinkSource::Manual)
+        .await
+        .unwrap();
+    let links = fx.settled().await;
+    assert_eq!(links[0].availability, Availability::Online);
+    assert_eq!(
+        links[0].filename.as_deref(),
+        Some("0123456789abcdef0123456789abcdef01234567")
+    );
+    assert_eq!(links[0].size, None);
+}
+
+#[tokio::test]
+async fn torrent_files_are_torrents_without_a_size_of_their_own() {
+    let (base, _server) = spawn_server().await;
+    let fx = Fixture::new().await;
+    fx.add(&base, &["named/ubuntu.torrent", "gone.torrent"])
+        .await;
+    let links = fx.settled().await;
+
+    let file = by_url(&links, "ubuntu.torrent");
+    assert_eq!(file.kind, DownloadKind::Torrent);
+    assert_eq!(file.availability, Availability::Online);
+    assert_eq!(file.filename.as_deref(), Some("ubuntu.torrent"));
+    // The file's length is not the download's size: that waits for the metadata.
+    assert_eq!(file.size, None);
+
+    let gone = by_url(&links, "gone.torrent");
+    assert_eq!(gone.kind, DownloadKind::Torrent);
+    assert_eq!(gone.availability, Availability::Offline);
+}
+
+#[tokio::test]
+async fn confirming_a_magnet_queues_a_torrent_download() {
+    let fx = Fixture::new().await;
+    let added = fx
+        .grabber
+        .add(vec![Url::parse(MAGNET).unwrap()], LinkSource::Manual)
+        .await
+        .unwrap()
+        .added;
+    fx.settled().await;
+
+    // The default manager has no torrent folder, so nothing runs the download.
+    let manager = Manager::start(fx.pool.clone(), ManagerConfig::default())
+        .await
+        .unwrap();
+    let default_dest: PathBuf = fx.dir.path().join("downloads");
+    let created = fx
+        .grabber
+        .confirm(&[added[0].id], &default_dest, &manager)
+        .await
+        .unwrap();
+
+    assert_eq!(created.len(), 1);
+    let packages = manager.list().await.unwrap();
+    let package = packages.iter().find(|p| p.id == created[0]).unwrap();
+    let download = &package.downloads[0];
+    assert_eq!(download.kind, "torrent");
+    assert_eq!(download.source_url, MAGNET);
+    assert_eq!(download.filename.as_deref(), Some("Big Buck Bunny"));
+    assert!(fx.grabber.list().await.unwrap().is_empty());
     manager.shutdown().await;
 }

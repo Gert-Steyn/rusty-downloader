@@ -76,9 +76,13 @@
 			<dt>Speed</dt>
 			<dd>
 				{download.status === 'active' ? formatSpeed(live?.speedBps) : '—'}
-				{#if live?.connections}· {live.connections} connection{live.connections === 1 ? '' : 's'}{/if}
+				{#if live?.connections && download.kind !== 'torrent'}· {live.connections} connection{live.connections === 1 ? '' : 's'}{/if}
 				{#if download.speedLimit}· limited to {formatSpeed(download.speedLimit)}{/if}
 			</dd>
+			{#if download.kind === 'torrent'}
+				<dt>Peers</dt>
+				<dd>{download.status === 'active' ? (live?.connections ?? 0) : '—'}</dd>
+			{/if}
 			<dt>Time left</dt>
 			<dd>
 				{download.status === 'active'

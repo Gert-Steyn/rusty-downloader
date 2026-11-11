@@ -12,10 +12,12 @@ mod gallerydl_job;
 mod job;
 mod queues;
 mod store;
+mod torrent_job;
 mod types;
 mod ytdlp_job;
 
 use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -32,6 +34,7 @@ use crate::network::Network;
 use crate::proxy::ProxyChoice;
 use crate::ratelimit::{RateLimiter, Throttle};
 use crate::tools::Tools;
+use crate::torrent::{TorrentConfig, TorrentEngine};
 use crate::{Error, Result, gallerydl, ytdlp};
 
 pub use queues::{OnComplete, Queue, QueueChanges, QueueSchedule};
@@ -58,6 +61,12 @@ pub struct ManagerConfig {
     /// Start held (see [`Manager::set_network_hold`]), so nothing slips out
     /// before the app has checked the bound adapter.
     pub hold: Option<String>,
+    /// Where the torrent engine keeps its state; `None` makes torrent
+    /// downloads fail as unsupported.
+    pub torrent_dir: Option<PathBuf>,
+    /// Tests only: peers every torrent asks for, with DHT and trackers off
+    /// (see [`TorrentConfig::test_peers`]). Leave empty in the app.
+    pub torrent_test_peers: Vec<SocketAddr>,
 }
 
 impl Default for ManagerConfig {
@@ -71,6 +80,8 @@ impl Default for ManagerConfig {
             archives_dir: None,
             network: None,
             hold: None,
+            torrent_dir: None,
+            torrent_test_peers: Vec::new(),
         }
     }
 }
@@ -104,6 +115,12 @@ struct Inner {
     ended_in: Mutex<HashSet<QueueId>>,
     /// Why nothing may download now (the bound adapter is down); `None` when free.
     hold: Mutex<Option<String>>,
+    /// The torrent engine; `None` without `ManagerConfig::torrent_dir`.
+    torrents: Option<TorrentEngine>,
+    /// Completed galleries queued again by "check for new files", with the
+    /// new files this rerun has fetched so far. In memory only: a rerun that
+    /// was queued before an app restart runs like any other download.
+    reruns: Mutex<HashMap<DownloadId, u32>>,
 }
 
 struct RunningJob {
@@ -168,6 +185,10 @@ impl Inner {
         self.ended_in.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    fn reruns(&self) -> MutexGuard<'_, HashMap<DownloadId, u32>> {
+        self.reruns.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Stop a running download for `reason` unless something else (a pause,
     /// a removal) is already stopping it. Returns whether it was asked.
     fn stop_if_undisturbed(&self, id: DownloadId, reason: StopReason) -> bool {
@@ -209,12 +230,21 @@ impl Manager {
         tokio::task::spawn_blocking(crate::request::sweep_cookie_files);
         let (events, _) = broadcast::channel(1024);
         let hold = config.hold.clone();
+        let network = config
+            .network
+            .clone()
+            .unwrap_or_else(|| Network::direct(config.user_agent.as_deref()));
+        let torrents = config.torrent_dir.clone().map(|state_dir| {
+            let torrent = TorrentConfig {
+                state_dir,
+                test_peers: config.torrent_test_peers.clone(),
+            };
+            TorrentEngine::new(torrent, network.clone())
+        });
         let inner = Arc::new(Inner {
             max_connections: AtomicUsize::new(config.segment.max_connections),
-            network: config
-                .network
-                .clone()
-                .unwrap_or_else(|| Network::direct(config.user_agent.as_deref())),
+            network,
+            torrents,
             pool,
             config,
             events,
@@ -226,6 +256,7 @@ impl Manager {
             global_limit: Arc::new(RateLimiter::new(None)),
             ended_in: Mutex::new(HashSet::new()),
             hold: Mutex::new(hold),
+            reruns: Mutex::new(HashMap::new()),
         });
         tokio::spawn(scheduler(Arc::clone(&inner)));
         Ok(Self { inner })
@@ -239,6 +270,9 @@ impl Manager {
             tracing::info!(?limit, "global speed limit");
         }
         self.inner.global_limit.set_rate(limit);
+        if let Some(torrents) = &self.inner.torrents {
+            torrents.set_download_limit(limit);
+        }
     }
 
     pub fn speed_limit(&self) -> Option<u64> {
@@ -279,6 +313,11 @@ impl Manager {
         if row.kind() == DownloadKind::Gallerydl {
             return Err(Error::InvalidInput(
                 "A gallery is many files, so it can't have one checksum.".into(),
+            ));
+        }
+        if row.kind() == DownloadKind::Torrent {
+            return Err(Error::InvalidInput(
+                "A torrent is many files, so it can't have one checksum.".into(),
             ));
         }
         let parsed = match text.trim() {
@@ -629,9 +668,13 @@ impl Manager {
 
     /// Run a completed gallery again into its own folder, to fetch what's new
     /// there. gallery-dl skips the files already on disk (and in the site's
-    /// archive), so only new ones come down; the count starts again.
+    /// archive), so only new ones come down; the count starts again. When the
+    /// run completes, `Event::GalleryChecked` reports how many new files came
+    /// down. A rerun still pending across an app restart is not remembered and
+    /// completes like any other download.
     pub async fn rerun_gallery(&self, id: DownloadId) -> Result<()> {
         if store::restart_gallery(&self.inner.pool, id).await? {
+            self.inner.reruns().insert(id, 0);
             self.status_changed(id, Status::Queued, None);
             self.inner.wake.notify_one();
         }
@@ -659,19 +702,26 @@ impl Manager {
     /// Remove a download, stopping it first. Its `.part` file is always deleted;
     /// with `delete_files`, a completed file is deleted too. A gallery deletes
     /// the files it wrote whatever its status (a failed one still finished
-    /// some), then its folder if that leaves it empty. An emptied package is
-    /// removed as well.
+    /// some), then its folders: the sub-folders gallery-dl made (with "keep
+    /// the site's folders") and the gallery's own folder, each only if it's
+    /// left empty. An emptied package is removed as well.
     pub async fn remove(&self, id: DownloadId, delete_files: bool) -> Result<()> {
         if let Some(mut finished) = self.inner.request_stop(id, StopReason::Remove) {
             let _ = finished.wait_for(|done| *done).await;
         }
+        self.inner.reruns().remove(&id);
         let pool = &self.inner.pool;
         let row = store::get_download(pool, id)
             .await?
             .ok_or_else(|| Error::NotFound(format!("download {id}")))?;
 
         let completed = row.status() == Status::Completed;
-        if let Some(dest) = row.dest_path.as_deref().map(std::path::Path::new) {
+        if row.kind() == DownloadKind::Torrent {
+            // The engine deletes the torrent's files itself, if asked.
+            if let (Some(torrents), Some(info_hash)) = (&self.inner.torrents, &row.info_hash) {
+                torrents.forget(info_hash, delete_files).await?;
+            }
+        } else if let Some(dest) = row.dest_path.as_deref().map(std::path::Path::new) {
             match row.kind() {
                 DownloadKind::Http | DownloadKind::Ftp | DownloadKind::Sftp => {
                     remove_file_if_exists(&job::part_path(dest)).await?
@@ -693,8 +743,7 @@ impl Manager {
                 for file in store::files_of(pool, id).await? {
                     remove_file_if_exists(&file).await?;
                 }
-                // Only succeeds when nothing else is in there.
-                let _ = tokio::fs::remove_dir(dest).await;
+                remove_empty_folders(dest).await;
             } else if delete_files && completed {
                 remove_file_if_exists(dest).await?;
             }
@@ -742,6 +791,9 @@ impl Manager {
         for mut finished in waits {
             let _ = finished.wait_for(|done| *done).await;
         }
+        if let Some(torrents) = &self.inner.torrents {
+            torrents.stop().await;
+        }
     }
 
     fn status_changed(&self, id: DownloadId, status: Status, error: Option<String>) {
@@ -758,6 +810,36 @@ async fn remove_file_if_exists(path: &std::path::Path) -> Result<()> {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
         _ => Ok(()),
     }
+}
+
+/// Remove the sub-folders under `dest` that are empty, deepest first, then
+/// `dest` itself if it's empty too. A folder with anything left in it stays,
+/// and errors are ignored: this only tidies up after a delete.
+async fn remove_empty_folders(dest: &std::path::Path) {
+    let dest = dest.to_owned();
+    let _ = tokio::task::spawn_blocking(move || {
+        let mut folders = Vec::new();
+        let mut pending = vec![dest.clone()];
+        while let Some(folder) = pending.pop() {
+            let Ok(entries) = std::fs::read_dir(&folder) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                // Symlinks are not followed.
+                if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                    folders.push(entry.path());
+                    pending.push(entry.path());
+                }
+            }
+        }
+        // Deepest first, so each folder is empty by the time it's tried.
+        folders.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
+        folders.push(dest);
+        for folder in folders {
+            let _ = std::fs::remove_dir(&folder);
+        }
+    })
+    .await;
 }
 
 async fn scheduler(inner: Arc<Inner>) {

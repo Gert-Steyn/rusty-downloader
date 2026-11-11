@@ -157,7 +157,9 @@ pub struct RunSpec {
     /// Folder holding ffmpeg.exe, for ugoira conversion; put on `PATH`.
     pub ffmpeg_dir: Option<PathBuf>,
     pub url: Url,
-    /// Exact folder for the files (`-D`): no sub-folders.
+    /// The gallery's folder. Without `keep_folders` every file goes here
+    /// (`-D`); with it, this is the base folder (`-d`) and gallery-dl makes
+    /// its own sub-folders under it.
     pub dir: PathBuf,
     /// Download archive (SQLite) to record and skip fetched files.
     pub archive: Option<PathBuf>,
@@ -181,8 +183,19 @@ impl RunSpec {
         if !self.options.user_config {
             args.push("--config-ignore".into());
         }
-        args.push("-D".into());
-        args.push(self.dir.to_string_lossy().into_owned());
+        if self.options.keep_folders {
+            args.push("-d".into());
+            args.push(self.dir.to_string_lossy().into_owned());
+            if let Some(pattern) = self.options.folder_pattern.as_deref()
+                && let Some(arg) = directory_option(pattern)?
+            {
+                args.push("-o".into());
+                args.push(arg);
+            }
+        } else {
+            args.push("-D".into());
+            args.push(self.dir.to_string_lossy().into_owned());
+        }
         if let (true, Some(archive)) = (self.options.archive, &self.archive) {
             args.push("--download-archive".into());
             args.push(archive.to_string_lossy().into_owned());
@@ -213,6 +226,23 @@ impl RunSpec {
         args.push(self.url.to_string());
         Ok(args)
     }
+}
+
+/// The `directory=[...]` option for a folder pattern: the levels split on
+/// `/`, trimmed, empty ones dropped, as a JSON array (so quotes and
+/// backslashes in the pattern are escaped). `None` when nothing is left.
+fn directory_option(pattern: &str) -> Result<Option<String>> {
+    let levels: Vec<&str> = pattern
+        .split('/')
+        .map(str::trim)
+        .filter(|level| !level.is_empty())
+        .collect();
+    if levels.is_empty() {
+        return Ok(None);
+    }
+    let json = serde_json::to_string(&levels)
+        .map_err(|e| Error::InvalidInput(format!("The folder pattern is not usable: {e}")))?;
+    Ok(Some(format!("directory={json}")))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -325,16 +355,26 @@ fn file_line(text: &str) -> Option<(PathBuf, bool)> {
     path.is_absolute().then(|| (path.to_owned(), skipped))
 }
 
-/// gallery-dl's unfinished files in a gallery folder.
+/// gallery-dl's unfinished files in a gallery folder, including the ones in
+/// its sub-folders (with `keep_folders`, one per sub-gallery).
 pub fn partial_files(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    entries
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "part"))
-        .collect()
+    let mut found = Vec::new();
+    let mut pending = vec![dir.to_owned()];
+    while let Some(folder) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.is_file() && path.extension().is_some_and(|e| e == "part") {
+                found.push(path);
+            }
+        }
+    }
+    found.sort();
+    found
 }
 
 /// The download archive for a site: one per host, so galleries from the same
@@ -437,6 +477,53 @@ mod tests {
     }
 
     #[test]
+    fn keep_folders_passes_a_base_folder_and_the_pattern() {
+        let mut spec = RunSpec {
+            exe: "gallery-dl.exe".into(),
+            ffmpeg_dir: None,
+            url: Url::parse("https://example.com/g/1").unwrap(),
+            dir: r"C:\dl\Pkg\Trip".into(),
+            archive: None,
+            options: GalleryDlOptions {
+                keep_folders: true,
+                ..GalleryDlOptions::default()
+            },
+            available: None,
+            request: RequestContext::default(),
+            cookie_file: None,
+            limit_rate: None,
+            connection: ToolConnection::default(),
+        };
+        let after = |args: &[String], flag: &str| {
+            let i = args.iter().position(|a| a == flag).unwrap();
+            args[i + 1].clone()
+        };
+        let args = spec.args().unwrap();
+        assert!(!args.iter().any(|a| a == "-D"));
+        assert_eq!(after(&args, "-d"), r"C:\dl\Pkg\Trip");
+        assert!(!args.iter().any(|a| a == "-o"));
+
+        spec.options.folder_pattern = Some(r#" {category} / a"b\c / / {id} "#.into());
+        let args = spec.args().unwrap();
+        assert_eq!(after(&args, "-d"), r"C:\dl\Pkg\Trip");
+        assert_eq!(
+            after(&args, "-o"),
+            r#"directory=["{category}","a\"b\\c","{id}"]"#
+        );
+
+        // Blank or only slashes: no directory option, gallery-dl's own layout.
+        spec.options.folder_pattern = Some(" / ".into());
+        assert!(!spec.args().unwrap().iter().any(|a| a == "-o"));
+
+        // The pattern is ignored when the folders are kept flat.
+        spec.options.keep_folders = false;
+        spec.options.folder_pattern = Some("{id}".into());
+        let args = spec.args().unwrap();
+        assert_eq!(after(&args, "-D"), r"C:\dl\Pkg\Trip");
+        assert!(!args.iter().any(|a| a == "-d" || a == "-o"));
+    }
+
+    #[test]
     fn browser_cookies_and_agent_yield_to_chosen_options() {
         let request = RequestContext {
             referer: Some("https://example.com/page".into()),
@@ -486,5 +573,21 @@ mod tests {
         }
         let found = partial_files(dir.path());
         assert_eq!(found, [dir.path().join("002.jpg.part")]);
+    }
+
+    #[test]
+    fn finds_part_files_in_sub_galleries() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("Trip").join("deep");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(dir.path().join("001.jpg.part"), "").unwrap();
+        std::fs::write(sub.join("003.jpg.part"), "").unwrap();
+        std::fs::write(sub.join("003.jpg"), "").unwrap();
+        let found = partial_files(dir.path());
+        assert_eq!(
+            found,
+            [dir.path().join("001.jpg.part"), sub.join("003.jpg.part"),]
+        );
+        assert!(partial_files(&dir.path().join("missing")).is_empty());
     }
 }

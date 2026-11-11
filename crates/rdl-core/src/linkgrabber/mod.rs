@@ -27,7 +27,7 @@ use url::Url;
 use crate::db::Pool;
 use crate::gallerydl::{self, Gallery, GalleryDlOptions};
 use crate::history::{self, PreviousDownload};
-use crate::http::{self, DownloadSpec, filename};
+use crate::http::{self, DownloadSpec, ProbeResult, filename};
 use crate::manager::{DEFAULT_QUEUE, DownloadKind, Manager, NewDownload, NewPackage, PackageId};
 use crate::network::Network;
 use crate::proxy::ProxyChoice;
@@ -547,6 +547,11 @@ impl LinkGrabber {
     /// Queue the given links as downloads, one package per (package name,
     /// folder), and remove them from the LinkGrabber. Links without a folder
     /// go to `default_dest`.
+    ///
+    /// Links that are still being checked (`Unknown` or `Checking`) are not
+    /// queued: their kind is not known yet, so they stay in the LinkGrabber
+    /// for a later confirm. If every requested link is still being checked,
+    /// this returns an empty Vec and leaves the manager alone.
     pub async fn confirm(
         &self,
         ids: &[LinkId],
@@ -559,8 +564,18 @@ impl LinkGrabber {
             .await?
             .into_iter()
             .filter(|l| wanted.contains(&l.id))
+            .filter(|l| {
+                !matches!(
+                    l.availability,
+                    Availability::Unknown | Availability::Checking
+                )
+            })
             .collect();
-        let requests = self.requests(ids).await?;
+        if links.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ready_ids: Vec<LinkId> = links.iter().map(|l| l.id).collect();
+        let requests = self.requests(&ready_ids).await?;
 
         // Group by category: a name (ignoring case) and its folder. Names are
         // matched across the LinkGrabber, so one name is one category.
@@ -724,7 +739,7 @@ fn new_download(link: &GrabbedLink, request: RequestContext) -> Option<NewDownlo
                 ..url_only
             });
         }
-        DownloadKind::Http | DownloadKind::Ftp | DownloadKind::Sftp => {
+        DownloadKind::Http | DownloadKind::Ftp | DownloadKind::Sftp | DownloadKind::Torrent => {
             return Some(NewDownload {
                 filename: link.filename.clone(),
                 ..url_only
@@ -763,6 +778,20 @@ async fn updated(inner: &Inner, id: LinkId) -> Result<()> {
             .ok();
     }
     Ok(())
+}
+
+/// The "probe" of a magnet link: online at once, named from `dn` (or the info
+/// hash), sized from `xl`. Nothing is fetched.
+fn magnet_probe(url: &Url) -> ProbeResult {
+    ProbeResult {
+        final_url: url.clone(),
+        size: links::magnet_size(url),
+        accepts_ranges: false,
+        etag: None,
+        last_modified: None,
+        content_type: None,
+        filename: links::magnet_name(url).unwrap_or_else(|| "torrent".to_owned()),
+    }
 }
 
 async fn probe_link(
@@ -814,6 +843,10 @@ async fn probe_link(
                 Err(e) => Err(e),
             }
         }
+        // Nothing to fetch for a magnet link: its name and size are in the link.
+        // Reading the torrent's real metadata from the peers comes with the
+        // torrent downloads (see `torrent_job`), not here.
+        Ok(parsed) if parsed.scheme() == "magnet" => Ok(magnet_probe(parsed)),
         Ok(parsed) => {
             let (request, login) = inner.network.with_account(parsed, request.clone());
             let spec = DownloadSpec::with_request(parsed.clone(), request).with_login(login);
@@ -824,9 +857,12 @@ async fn probe_link(
         }
         Err(e) => Err(Error::InvalidUrl(e.to_string())),
     };
+    // Torrent links (magnets, `.torrent` files) are never web pages: no yt-dlp
+    // or gallery-dl for them, whatever the probe said.
     if let Ok(parsed) = &parsed
         && !ftp::is_ftp(parsed)
         && !sftp::is_sftp(parsed)
+        && !crate::torrent::is_torrent_link(parsed)
         && media::worth_asking(&result)
     {
         // yt-dlp first, then gallery-dl. A find by yt-dlp's catch-all
@@ -879,6 +915,14 @@ async fn probe_link(
             // renamed meanwhile) in the same statement, so the link is never
             // seen online in the wrong package.
             let set = default_package.and(archive_set_name(&probe.filename));
+            let kind = DownloadKind::for_url(&probe.final_url);
+            // A `.torrent` file's length is the file's own, not the download's
+            // (that is only known once its metadata is read). A magnet's `xl`
+            // is the size it declares.
+            let size = match (kind, probe.final_url.scheme()) {
+                (DownloadKind::Torrent, scheme) if scheme != "magnet" => None,
+                _ => probe.size,
+            };
             sqlx::query(
                 "UPDATE link_grabber SET kind = ?6, info_json = NULL, availability = 'online',
                      error = NULL, filename = COALESCE(filename, ?1), size = ?2,
@@ -887,11 +931,11 @@ async fn probe_link(
                  WHERE id = ?5",
             )
             .bind(&probe.filename)
-            .bind(probe.size.map(|s| s as i64))
+            .bind(size.map(|s| s as i64))
             .bind(set)
             .bind(default_package)
             .bind(id)
-            .bind(DownloadKind::for_url(&probe.final_url).as_str())
+            .bind(kind.as_str())
             .execute(pool)
             .await?;
         }

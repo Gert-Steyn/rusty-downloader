@@ -16,6 +16,7 @@ dirs = "7.0.0"
 fastrand = "2.5.0"
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 keyring-core = "1.0.1"
+librqbit = { version = "=9.1.0", default-features = false, features = ["rust-tls"] }
 md-5 = { version = "0.11.0", default-features = false }
 percent-encoding = "2.3.2"
 regex = "1.13.1"

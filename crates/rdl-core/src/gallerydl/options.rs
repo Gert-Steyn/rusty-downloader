@@ -102,6 +102,13 @@ pub struct GalleryDlOptions {
     pub flags: BTreeMap<String, String>,
     /// Extra arguments, split like a command line (quotes group words).
     pub raw_args: Option<String>,
+    /// gallery-dl creates its own sub-folders (one per sub-gallery) inside
+    /// the gallery's folder, instead of putting every file in one folder.
+    pub keep_folders: bool,
+    /// With `keep_folders`, the folder levels to use instead of gallery-dl's
+    /// default, separated by `/`, each a gallery-dl format string (e.g.
+    /// `{title}` or `{category}/{id}`). Ignored without `keep_folders`.
+    pub folder_pattern: Option<String>,
 }
 
 impl Default for GalleryDlOptions {
@@ -111,6 +118,8 @@ impl Default for GalleryDlOptions {
             user_config: false,
             flags: BTreeMap::new(),
             raw_args: None,
+            keep_folders: false,
+            folder_pattern: None,
         }
     }
 }
@@ -382,6 +391,8 @@ mod tests {
     fn old_settings_without_new_fields_get_defaults() {
         let o: GalleryDlOptions = serde_json::from_str(r#"{"flags":{"range":"1"}}"#).unwrap();
         assert!(o.archive);
+        assert!(!o.keep_folders);
+        assert_eq!(o.folder_pattern, None);
         assert_eq!(o.flags["range"], "1");
     }
 }

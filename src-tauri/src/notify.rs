@@ -49,13 +49,24 @@ pub fn register(app: &AppHandle) {
 
 pub async fn watch(app: AppHandle, mut events: broadcast::Receiver<Event>) {
     let mut announced: HashSet<i64> = HashSet::new();
+    // Galleries checked again for new files; their completion is reported by
+    // `GalleryChecked`, not as a finished package.
+    let mut reruns: HashSet<DownloadId> = HashSet::new();
     let mut failed: Vec<DownloadId> = Vec::new();
     let mut flush_at: Option<Instant> = None;
     loop {
         tokio::select! {
             event = events.recv() => match event {
+                Ok(Event::GalleryChecked { download_id, new_files }) => {
+                    reruns.insert(download_id);
+                    if let Err(e) = new_files_found(&app, download_id, new_files).await {
+                        tracing::debug!(error = %e, "no new files notification");
+                    }
+                }
                 Ok(Event::StatusChanged { download_id, status: Status::Completed, .. }) => {
-                    if let Err(e) = package_done(&app, download_id, &mut announced).await {
+                    if !reruns.remove(&download_id)
+                        && let Err(e) = package_done(&app, download_id, &mut announced).await
+                    {
                         tracing::debug!(error = %e, "no finished notification");
                     }
                 }
@@ -135,6 +146,33 @@ pub fn links_added(app: &AppHandle, count: usize) {
 fn in_view(app: &AppHandle) -> bool {
     app.get_webview_window("main")
         .is_some_and(|w| w.is_focused().unwrap_or(false) && w.is_visible().unwrap_or(false))
+}
+
+/// A gallery checked again came down with `new_files` new files; nothing is
+/// shown when there were none.
+async fn new_files_found(app: &AppHandle, id: DownloadId, new_files: u32) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if new_files == 0 || !state.settings().notify_finished || in_view(app) {
+        return Ok(());
+    }
+    let download = state.downloads.get(id).await.map_err(|e| e.to_string())?;
+    let reveal = download
+        .dest_path
+        .clone()
+        .ok_or_else(|| "no destination".to_owned())?;
+    let plural = if new_files == 1 { "" } else { "s" };
+    show(
+        app,
+        Note {
+            title: format!("New files in {}", name(&download)),
+            body: format!("{new_files} new file{plural}"),
+            buttons: vec![(
+                "Show in folder".into(),
+                format!("reveal:{}", reveal.display()),
+            )],
+        },
+    );
+    Ok(())
 }
 
 async fn package_done(

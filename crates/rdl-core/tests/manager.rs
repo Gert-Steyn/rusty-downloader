@@ -38,6 +38,8 @@ fn config() -> ManagerConfig {
         archives_dir: None,
         network: None,
         hold: None,
+        torrent_dir: None,
+        torrent_test_peers: Vec::new(),
     }
 }
 

@@ -356,7 +356,7 @@ export type DownloadEvents_Serialize = {
 };
 
 /**  Which handler runs a download. Stored as the `downloads.kind` text. */
-export type DownloadKind = "http" | "ftp" | "sftp" | "ytdlp" | "gallerydl";
+export type DownloadKind = "http" | "ftp" | "sftp" | "ytdlp" | "gallerydl" | "torrent";
 
 export type Download_Deserialize = {
 	id: number,
@@ -443,7 +443,12 @@ export type Event_Deserialize = { type: "packageAdded"; packageId: number } | { 
 /**  Name, size and destination are known after the first probe. */
 { type: "resolved"; downloadId: number; filename: string; size?: number | null } | { type: "progress"; downloadId: number; downloaded: number; total?: number | null; speedBps: number; connections: number; 
 /**  For gallery downloads, which count files rather than bytes. */
-files?: FileCount_Deserialize | null };
+files?: FileCount_Deserialize | null } | 
+/**
+ *  A gallery checked again for new files finished; `new_files` came down
+ *  this time. Sent just before the download's `StatusChanged`.
+ */
+{ type: "galleryChecked"; downloadId: number; newFiles: number };
 
 /**
  *  Everything the UI needs to stay in sync without polling. Delivered on a
@@ -471,7 +476,12 @@ export type Event_Serialize = { type: "packageAdded"; packageId: number } | { ty
 /**  Name, size and destination are known after the first probe. */
 { type: "resolved"; downloadId: number; filename: string; size: number | null } | { type: "progress"; downloadId: number; downloaded: number; total: number | null; speedBps: number; connections: number; 
 /**  For gallery downloads, which count files rather than bytes. */
-files: FileCount_Serialize | null };
+files: FileCount_Serialize | null } | 
+/**
+ *  A gallery checked again for new files finished; `new_files` came down
+ *  this time. Sent just before the download's `StatusChanged`.
+ */
+{ type: "galleryChecked"; downloadId: number; newFiles: number };
 
 /**
  *  Files of a gallery download: done (downloaded or already there) out of
@@ -618,6 +628,17 @@ export type GalleryDlOptions_Deserialize = {
 	flags?: { [key in string]: string },
 	/**  Extra arguments, split like a command line (quotes group words). */
 	rawArgs?: string | null,
+	/**
+	 *  gallery-dl creates its own sub-folders (one per sub-gallery) inside
+	 *  the gallery's folder, instead of putting every file in one folder.
+	 */
+	keepFolders?: boolean,
+	/**
+	 *  With `keep_folders`, the folder levels to use instead of gallery-dl's
+	 *  default, separated by `/`, each a gallery-dl format string (e.g.
+	 *  `{title}` or `{category}/{id}`). Ignored without `keep_folders`.
+	 */
+	folderPattern?: string | null,
 };
 
 /**  Per-download gallery-dl settings, stored as `handler_opts_json`. */
@@ -636,6 +657,17 @@ export type GalleryDlOptions_Serialize = {
 	flags: { [key in string]: string },
 	/**  Extra arguments, split like a command line (quotes group words). */
 	rawArgs: string | null,
+	/**
+	 *  gallery-dl creates its own sub-folders (one per sub-gallery) inside
+	 *  the gallery's folder, instead of putting every file in one folder.
+	 */
+	keepFolders: boolean,
+	/**
+	 *  With `keep_folders`, the folder levels to use instead of gallery-dl's
+	 *  default, separated by `/`, each a gallery-dl format string (e.g.
+	 *  `{title}` or `{category}/{id}`). Ignored without `keep_folders`.
+	 */
+	folderPattern: string | null,
 };
 
 /**  What a gallery URL holds, as far as resolving found out. */

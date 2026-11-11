@@ -88,9 +88,24 @@ export function packages(): Package[] {
 				sourceUrl: 'https://imgur.com/a/mountain',
 				destPath: 'C:\\Users\\You\\Downloads\\Mountain trip',
 				downloaded: 31 * MB,
-				gallerydl: { archive: true, userConfig: false, flags: { range: '1-40' }, rawArgs: null },
+				gallerydl: {
+					archive: true,
+					userConfig: false,
+					flags: { range: '1-40' },
+					rawArgs: null,
+					keepFolders: false,
+					folderPattern: null
+				},
 				files: { done: 12, total: 40 },
 				title: 'Mountain trip'
+			}
+		]),
+		pkg(7, 'Sintel', [
+			{
+				...dl(7, 'Sintel', 1024 * MB, 0.37, 'active'),
+				kind: 'torrent',
+				sourceUrl: 'magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel',
+				destPath: 'C:\\Users\\You\\Downloads\\Sintel'
 			}
 		])
 	];
@@ -179,7 +194,32 @@ export function grabbedLinks(): GrabbedLink[] {
 			thumbnails: [],
 			partial: false
 		},
-		gallerydl: { archive: true, userConfig: false, flags: {}, rawArgs: null },
+		gallerydl: {
+			archive: true,
+			userConfig: false,
+			flags: {},
+			rawArgs: null,
+			keepFolders: false,
+			folderPattern: null
+		},
+		previous: null
+	});
+	// A magnet link has no host; its size is the `xl` it declares.
+	const magnet = (hash: string, title: string, pkg: string, size: number): GrabbedLink => ({
+		id: id++,
+		url: `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(title)}&xl=${size}`,
+		host: '',
+		filename: title,
+		size,
+		availability: 'online',
+		error: null,
+		package: pkg,
+		destDir: null,
+		kind: 'torrent',
+		media: null,
+		ytdlp: null,
+		gallery: null,
+		gallerydl: null,
 		previous: null
 	});
 	return [
@@ -192,7 +232,8 @@ export function grabbedLinks(): GrabbedLink[] {
 		video('aqz-KE-bpKQ', 'Big Buck Bunny 60fps 4K', 'Big Buck Bunny 60fps 4K', 640 * MB, [2160, 1440, 1080, 720, 480, 360], 634),
 		video('eRsGyueVLvQ', 'Sintel', 'Open Movies', null, [], 888),
 		video('R6MlUcmOul8', 'Tears of Steel', 'Open Movies', null, [], 734),
-		gallery('a/mountain', 'Mountain trip', 40, 'imgur', 'album')
+		gallery('a/mountain', 'Mountain trip', 40, 'imgur', 'album'),
+		magnet('08ada5a7a6183aae1e09d831df6748d566095a10', 'Sintel', 'Open Movies', 1.2 * 1024 * MB)
 	];
 }
 
@@ -295,7 +336,9 @@ export function galleryFlags(): GalleryDlFlags {
 export function live(): Record<number, Live> {
 	return {
 		1: { speedBps: 18.4 * MB, connections: 8 },
-		3: { speedBps: 6.1 * MB, connections: 4 }
+		3: { speedBps: 6.1 * MB, connections: 4 },
+		// The Sintel torrent: its download id is the eleventh (after the gallery).
+		11: { speedBps: 2.7 * MB, connections: 14 }
 	};
 }
 

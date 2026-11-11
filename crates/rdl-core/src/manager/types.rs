@@ -65,6 +65,7 @@ pub enum DownloadKind {
     Sftp,
     Ytdlp,
     Gallerydl,
+    Torrent,
 }
 
 impl DownloadKind {
@@ -75,16 +76,20 @@ impl DownloadKind {
             DownloadKind::Sftp => "sftp",
             DownloadKind::Ytdlp => "ytdlp",
             DownloadKind::Gallerydl => "gallerydl",
+            DownloadKind::Torrent => "torrent",
         }
     }
 
-    /// The handler for a plain link: FTP for `ftp://` and `ftps://`, SFTP
-    /// for `sftp://`, else HTTP.
+    /// The handler for a link: FTP for `ftp://` and `ftps://`, SFTP for
+    /// `sftp://`, the torrent engine for `magnet:` and `.torrent` links, else
+    /// HTTP.
     pub fn for_url(url: &Url) -> Self {
         if crate::ftp::is_ftp(url) {
             DownloadKind::Ftp
         } else if crate::sftp::is_sftp(url) {
             DownloadKind::Sftp
+        } else if crate::torrent::is_torrent_link(url) {
+            DownloadKind::Torrent
         } else {
             DownloadKind::Http
         }
@@ -104,6 +109,7 @@ impl DownloadKind {
             "sftp" => DownloadKind::Sftp,
             "ytdlp" => DownloadKind::Ytdlp,
             "gallerydl" => DownloadKind::Gallerydl,
+            "torrent" => DownloadKind::Torrent,
             _ => DownloadKind::Http,
         }
     }
@@ -282,6 +288,12 @@ pub enum Event {
         /// For gallery downloads, which count files rather than bytes.
         files: Option<FileCount>,
     },
+    /// A gallery checked again for new files finished; `new_files` came down
+    /// this time. Sent just before the download's `StatusChanged`.
+    GalleryChecked {
+        download_id: DownloadId,
+        new_files: u32,
+    },
 }
 
 #[cfg(test)]
@@ -309,6 +321,7 @@ mod tests {
             DownloadKind::Http,
             DownloadKind::Ytdlp,
             DownloadKind::Gallerydl,
+            DownloadKind::Torrent,
         ] {
             assert_eq!(DownloadKind::parse(k.as_str()), k);
         }

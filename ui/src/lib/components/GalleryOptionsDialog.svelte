@@ -65,7 +65,11 @@
 
 	function save() {
 		open = false;
-		onsave({ ...$state.snapshot(draft), rawArgs: draft.rawArgs?.trim() || null });
+		onsave({
+			...$state.snapshot(draft),
+			rawArgs: draft.rawArgs?.trim() || null,
+			folderPattern: draft.folderPattern?.trim() || null
+		});
 	}
 </script>
 
@@ -88,6 +92,30 @@
 				<small>Off by default, so downloads behave the same on every machine.</small>
 			</span>
 		</label>
+		<label class="check">
+			<input type="checkbox" bind:checked={draft.keepFolders} />
+			<span>
+				Keep the site's folders
+				<small>gallery-dl makes a folder per sub-gallery inside this gallery's folder.</small>
+			</span>
+		</label>
+		{#if draft.keepFolders}
+			<label class="field keep">
+				<span>Folder pattern</span>
+				<input
+					class="textbox mono"
+					spellcheck="false"
+					placeholder={'{category}/{id}'}
+					value={draft.folderPattern ?? ''}
+					oninput={(e) => (draft.folderPattern = e.currentTarget.value)}
+				/>
+				<small class="hint">Optional. Folder levels separated by /, in gallery-dl's format. Empty uses gallery-dl's own layout.</small>
+			</label>
+		{:else}
+			<p class="hint keep">
+				All files go in one folder. Two sub-galleries with the same file names (001.jpg) keep only the first unless a filename pattern makes them unique.
+			</p>
+		{/if}
 
 		{#if loadError}
 			<p class="note error" role="alert">Could not load gallery-dl's options: {loadError}</p>
@@ -259,6 +287,9 @@
 		margin-top: var(--space-4);
 		border-top: 1px solid var(--border-subtle);
 		padding-top: var(--space-4);
+	}
+	.keep {
+		margin: var(--space-3) 0 var(--space-4) var(--space-6);
 	}
 	.reset {
 		margin-right: auto;

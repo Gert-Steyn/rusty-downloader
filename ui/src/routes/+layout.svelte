@@ -60,6 +60,9 @@
 	const isActive = (item: NavItem) =>
 		item.href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(item.href);
 
+	/** Text that may hold links: web links, or a magnet link. */
+	const LINK_HINT = /https?:\/\/|magnet:\?/i;
+
 	/** Links go to the LinkGrabber first, wherever they come from. */
 	async function grab(text: string, source: LinkSource) {
 		if ((await grabber.add(text, source)) && page.url.pathname !== '/linkgrabber') goto('/linkgrabber');
@@ -74,7 +77,7 @@
 	function onpaste(e: ClipboardEvent) {
 		if (busyElsewhere(e.target)) return;
 		const text = e.clipboardData?.getData('text') ?? '';
-		if (!/https?:\/\//i.test(text)) return;
+		if (!LINK_HINT.test(text)) return;
 		e.preventDefault();
 		grab(text, 'manual');
 	}
@@ -102,7 +105,7 @@
 		e.preventDefault();
 		dragDepth = 0;
 		const text = await textFromDrop(e.dataTransfer);
-		if (/https?:\/\//i.test(text)) grab(text, 'drop');
+		if (LINK_HINT.test(text)) grab(text, 'drop');
 		else grabber.say('No links found in what was dropped');
 	}
 </script>

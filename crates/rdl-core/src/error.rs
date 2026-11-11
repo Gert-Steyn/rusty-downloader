@@ -104,6 +104,9 @@ pub enum Error {
     #[error("SFTP: {0}")]
     Sftp(String),
 
+    #[error("torrent: {0}")]
+    Torrent(String),
+
     #[error("Credential Manager: {0}")]
     Secrets(String),
 

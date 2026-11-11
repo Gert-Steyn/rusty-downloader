@@ -74,6 +74,7 @@ impl AppState {
             ManagerConfig {
                 tools: Some(tools.clone()),
                 archives_dir: Some(paths.archives_dir.clone()),
+                torrent_dir: Some(paths.torrents_dir.clone()),
                 network: Some(network.clone()),
                 hold: wanted.hold.clone(),
                 segment: SegmentConfig {
