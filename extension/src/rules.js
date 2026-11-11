@@ -22,7 +22,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
 	/** Sites whose downloads the browser keeps. */
 	neverSites: [],
 	/** Send the browser's cookies for the links' sites. */
-	sendCookies: true
+	sendCookies: true,
+	/** Clicks on magnet links go to the app instead of the browser's torrent handler. */
+	magnetLinks: true
 });
 
 /** Settings as stored, with defaults for anything missing or malformed. */
@@ -30,6 +32,7 @@ export function normalizeSettings(stored = {}) {
 	const s = { ...DEFAULT_SETTINGS };
 	if (typeof stored.intercept === 'boolean') s.intercept = stored.intercept;
 	if (typeof stored.sendCookies === 'boolean') s.sendCookies = stored.sendCookies;
+	if (typeof stored.magnetLinks === 'boolean') s.magnetLinks = stored.magnetLinks;
 	const mb = Number(stored.minSizeMB);
 	if (Number.isFinite(mb) && mb >= 0) s.minSizeMB = mb;
 	for (const key of ['extensions', 'alwaysSites', 'neverSites']) {
@@ -78,6 +81,15 @@ export function isWebUrl(url) {
 	}
 }
 
+export function isMagnetUrl(url) {
+	return /^magnet:/i.test(String(url ?? '').trim());
+}
+
+/** Links the app takes in an `add`: web links and magnet links. Others are never sent. */
+export function isSendableUrl(url) {
+	return isWebUrl(url) || isMagnetUrl(url);
+}
+
 /** The file type of a download: from its file name, else its URL's path. */
 export function extensionOf(filename, url) {
 	const name = baseName(filename) || (() => {
@@ -107,7 +119,11 @@ export function shouldIntercept(item, settings) {
 	const host = hostOf(item.finalUrl || item.url);
 	if (settings.neverSites.some((s) => hostMatches(host, s))) return { take: false, why: 'site kept in browser' };
 	if (settings.alwaysSites.some((s) => hostMatches(host, s))) return { take: true, why: 'site always sent' };
+	// Torrent files are always taken over, whatever their size.
 	const ext = extensionOf(item.filename, item.finalUrl || item.url);
+	if (ext === 'torrent' || String(item.mime || '').toLowerCase() === 'application/x-bittorrent') {
+		return { take: true, why: '.torrent file' };
+	}
 	if (ext && settings.extensions.includes(ext)) return { take: true, why: `.${ext} file` };
 	const size = item.totalBytes > 0 ? item.totalBytes : item.fileSize > 0 ? item.fileSize : 0;
 	if (settings.minSizeMB > 0 && size >= settings.minSizeMB * 1024 * 1024) {
@@ -128,19 +144,19 @@ export function stillMissingBytes(item) {
 	return !(total > 0) || item.bytesReceived < total;
 }
 
-const LINK = /\bhttps?:\/\/[^\s"'<>]+/gi;
+const LINK = /\b(?:https?:\/\/|magnet:\?)[^\s"'<>]+/gi;
 
-/** http(s) links in plain text, without trailing punctuation from prose. */
+/** http(s) and magnet links in plain text, without trailing punctuation from prose. */
 export function linksInText(text) {
 	return [...String(text).matchAll(LINK)].map((m) => m[0].replace(/[),.;:!?\]}]+$/, ''));
 }
 
-/** Web links only, de-duplicated, in order, without `#fragment`-only differences. */
+/** Sendable links only, de-duplicated, in order, without `#fragment`-only differences. */
 export function uniqueWebLinks(urls) {
 	const seen = new Set();
 	const out = [];
 	for (const raw of urls) {
-		if (!isWebUrl(raw)) continue;
+		if (!isSendableUrl(raw)) continue;
 		const url = new URL(raw);
 		url.hash = '';
 		const key = url.href;

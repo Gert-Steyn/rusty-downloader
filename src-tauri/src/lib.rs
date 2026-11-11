@@ -1,9 +1,11 @@
+mod associations;
 mod bridge;
 mod clipboard;
 mod commands;
 mod events;
 mod grabber_commands;
 mod keep_awake;
+mod launch;
 mod native_host;
 mod network_commands;
 mod network_watch;
@@ -78,6 +80,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             settings_commands::get_settings,
             settings_commands::system_downloads_dir,
             settings_commands::set_settings,
+            associations::torrent_association_status,
+            associations::open_default_apps,
+            launch::take_pending_page,
             settings_commands::history_list,
             settings_commands::history_remove,
             settings_commands::history_clear,
@@ -122,6 +127,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::ToolEvents,
             clipboard::ClipboardOffer,
             speed::SpeedLimitStatus,
+            launch::OpenPage,
             on_complete::OnCompleteCountdown,
             network_watch::NetworkStatusChanged
         ])
@@ -170,6 +176,8 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             tracing::info!(?args, "second instance launched; focusing main window");
             tray::show_main(app);
+            // Magnet links and .torrent files on its command line go to the LinkGrabber.
+            tauri::async_runtime::spawn(launch::open(app.clone(), launch::parse_args(args)));
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
@@ -209,6 +217,9 @@ pub fn run() {
             tray::create(handle)?;
             notify::register(handle);
             native_host::register(handle);
+            if handle.state::<AppState>().settings().handle_torrents {
+                associations::register_here();
+            }
             tauri::async_runtime::spawn(tray::track(handle.clone(), tray_events));
             tauri::async_runtime::spawn(notify::watch(handle.clone(), notify_events));
             // The window starts hidden (tauri.conf.json) so a start into the
@@ -231,6 +242,11 @@ pub fn run() {
             ));
             tauri::async_runtime::spawn(clipboard::watch(handle.clone()));
             bridge::start(handle);
+            // Magnet links and .torrent files this launch was given.
+            tauri::async_runtime::spawn(launch::open(
+                handle.clone(),
+                launch::parse_args(std::env::args()),
+            ));
             tauri::async_runtime::spawn(keep_awake::watch(handle.clone()));
             tauri::async_runtime::spawn(network_watch::watch(handle.clone()));
             tauri::async_runtime::spawn(speed::follow_schedule(handle.clone()));

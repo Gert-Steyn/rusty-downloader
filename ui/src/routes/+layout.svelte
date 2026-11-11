@@ -10,7 +10,8 @@
 	import Icon from '#lib/components/Icon.svelte';
 	import Toast from '#lib/components/Toast.svelte';
 	import { mainNav, footerNav, type NavItem } from '#lib/nav.js';
-	import { commands, isTauri, unwrap, type LinkSource } from '#lib/api.js';
+	import { onMount } from 'svelte';
+	import { commands, events, isTauri, unwrap, type LinkSource } from '#lib/api.js';
 	import { downloads } from '#lib/downloads.svelte.js';
 	import { isLinkDrag, isTorrentFile, textFromDrop } from '#lib/drop.js';
 	import { formatSpeed } from '#lib/format.js';
@@ -62,6 +63,24 @@
 
 	/** Text that may hold links: web links, or a magnet link. */
 	const LINK_HINT = /https?:\/\/|magnet:\?/i;
+
+	/**
+	 * The app was launched (or launched again) with magnet links or .torrent
+	 * files: the LinkGrabber is where they are. A launch that came before this
+	 * window existed is picked up on mount; the event covers the rest. Both
+	 * clear the pending page, so it's used once.
+	 */
+	function showLaunchPage(path: string | null) {
+		if (path && page.url.pathname !== path) goto(path);
+	}
+
+	onMount(() => {
+		if (!isTauri()) return;
+		void commands.takePendingPage().then(showLaunchPage);
+		void events.openPage.listen((e) => {
+			void commands.takePendingPage().then(() => showLaunchPage(e.payload.path));
+		});
+	});
 
 	/** Links go to the LinkGrabber first, wherever they come from. */
 	async function grab(text: string, source: LinkSource) {

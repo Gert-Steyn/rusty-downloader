@@ -48,7 +48,12 @@ pub async fn set_settings(
         };
         changed.map_err(|e| CommandError(format!("Could not change Start with Windows: {e}")))?;
     }
-    Ok(state.update_settings(settings).await?)
+    let handled_before = state.settings().handle_torrents;
+    let saved = state.update_settings(settings).await?;
+    if saved.handle_torrents != handled_before {
+        crate::associations::apply(saved.handle_torrents);
+    }
+    Ok(saved)
 }
 
 /// Newest first, at most `limit`; `search` matches name, link, folder or package.

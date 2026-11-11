@@ -7,6 +7,7 @@ import {
 	chunk,
 	cookieProbes,
 	describeError,
+	isMagnetUrl,
 	linksInText,
 	mergeCookies,
 	normalizeSettings,
@@ -53,6 +54,37 @@ async function settings() {
 
 chrome.contextMenus.onClicked.addListener((info, tab) => onMenu(info, tab));
 
+// Magnet links clicked on pages (the content script magnet.js). The reply
+// says whether the app took the link; if not, the content script lets the
+// browser open it.
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+	if (message?.type !== 'magnet') return false;
+	if (!isMagnetUrl(message.url)) {
+		sendResponse({ ok: false });
+		return false;
+	}
+	onMagnet(message.url, sender.tab).then(sendResponse);
+	return true; // answer after the app has replied
+});
+
+/** Send one magnet link to the LinkGrabber; `{ ok }` says whether the app took it. */
+async function onMagnet(url, tab) {
+	try {
+		const reply = await send([url], { target: 'grabber', referer: refererOf(tab), tab });
+		if (reply.added === 0 && reply.duplicates > 0) {
+			notify('Already in the LinkGrabber', plural(reply.duplicates, 'link') + ' were there already.');
+		}
+		if (reply.added === 0 && reply.duplicates === 0 && reply.rejected.length > 0) {
+			notify('Couldn’t send to Rusty Downloader', 'The app didn’t accept this magnet link.');
+			return { ok: false };
+		}
+		return { ok: true };
+	} catch (e) {
+		notify('Couldn’t send to Rusty Downloader', describeError(e));
+		return { ok: false, error: describeError(e) };
+	}
+}
+
 // For tests over DevTools, which can't click a context menu: run a menu
 // item as if clicked. Only code running inside the extension can reach it.
 globalThis.rustyDownloader = { onMenu };
@@ -65,8 +97,7 @@ async function onMenu(info, tab) {
 			notify('No links found', 'There were no http or https links to send.');
 			return { added: 0, links };
 		}
-		const referer = tab?.url && /^https?:/.test(tab.url) ? tab.url : info.pageUrl;
-		const reply = await send(links, { target: 'grabber', referer, tab });
+		const reply = await send(links, { target: 'grabber', referer: refererOf(tab, info.pageUrl), tab });
 		if (reply.added === 0 && reply.duplicates > 0) {
 			notify('Already in the LinkGrabber', plural(reply.duplicates, 'link') + ' were there already.');
 		}
@@ -111,8 +142,15 @@ function selectedLinks() {
 		}
 	}
 	const text = selection.toString();
-	for (const m of text.matchAll(/\bhttps?:\/\/[^\s"'<>]+/gi)) links.push(m[0].replace(/[),.;:!?\]}]+$/, ''));
+	for (const m of text.matchAll(/\b(?:https?:\/\/|magnet:\?)[^\s"'<>]+/gi)) {
+		links.push(m[0].replace(/[),.;:!?\]}]+$/, ''));
+	}
 	return links;
+}
+
+/** The page a send is about, as the app's referer: the tab's web page, else the menu's page. */
+function refererOf(tab, fallback) {
+	return tab?.url && /^https?:/.test(tab.url) ? tab.url : fallback;
 }
 
 /** Run `func` in the tab's page; `fallback` where the browser doesn't allow that. */
@@ -194,14 +232,20 @@ chrome.downloads.onCreated.addListener(async (item) => {
 		return; // already finished, or not pausable: leave it to the browser
 	}
 	const [now] = await chrome.downloads.search({ id: item.id });
+	const name = baseName(item.filename) || undefined;
+	// Torrents go to the LinkGrabber, where their files can be chosen.
+	const torrent = why === '.torrent file';
 	if (!stillMissingBytes(now)) {
 		if (now?.state === 'in_progress') await chrome.downloads.resume(item.id).catch(() => {});
+		// A .torrent is a few KB, so the browser usually has all of it before
+		// the pause lands. The app still gets the link and fetches it again;
+		// the browser's copy stays where it was saved.
+		if (torrent) await sendFinishedTorrent(item, name);
 		return;
 	}
-	const name = baseName(item.filename) || undefined;
 	try {
 		await send([item.url], {
-			target: 'queue',
+			target: torrent ? 'grabber' : 'queue',
 			referer: item.referrer,
 			filename: name,
 			storeId: item.cookieStoreId // Firefox containers
@@ -221,6 +265,23 @@ chrome.downloads.onCreated.addListener(async (item) => {
 		notify('The browser kept this download', describeError(e));
 	}
 });
+
+/** Hand a .torrent the browser already finished to the app's LinkGrabber. */
+async function sendFinishedTorrent(item, name) {
+	try {
+		const totals = await send([item.url], {
+			target: 'grabber',
+			referer: item.referrer,
+			storeId: item.cookieStoreId // Firefox containers
+		});
+		if (totals.added || totals.duplicates) {
+			notify('Sent to Rusty Downloader', `${name || item.url} is in the LinkGrabber. The browser kept its copy too.`);
+		}
+	} catch (e) {
+		if (e instanceof AppError && e.code === 'notInstalled') return;
+		notify('The browser kept this torrent', describeError(e));
+	}
+}
 
 function notify(title, message) {
 	chrome.notifications.create({

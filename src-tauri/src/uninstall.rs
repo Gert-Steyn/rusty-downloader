@@ -2,7 +2,8 @@
 //! uninstaller (`windows/hooks.nsh`) once the app is closed and before its
 //! files go. It undoes what the app registered for the current user: the
 //! browser host (when it points at this install), the notification
-//! registration and Windows' "startup approved" mark. With `--delete-data`
+//! registration, the magnet link and `.torrent` registrations and Windows'
+//! "startup approved" mark. With `--delete-data`
 //! it also deletes the stored passwords and the data folder; downloaded
 //! files are never touched. Tauri's uninstaller itself removes the autostart
 //! value, the shortcuts and the web view's data.
@@ -15,7 +16,7 @@ use rdl_core::paths::AppPaths;
 use rdl_core::secrets::CredentialManager;
 use rdl_core::{db, network};
 
-use crate::native_host;
+use crate::{associations, native_host};
 
 const ARG: &str = "--uninstall";
 const DELETE_DATA_ARG: &str = "--delete-data";
@@ -47,6 +48,7 @@ pub fn run_if_asked() -> bool {
 fn clean_up(paths: &AppPaths, delete_data: bool) {
     let user = windows_registry::CURRENT_USER;
     native_host::unregister(&paths.data_dir);
+    associations::unregister_here();
     let _ = user.remove_tree(format!(r"Software\Classes\AppUserModelId\{APP_ID}"));
     if let Ok(key) = user.options().write().open(STARTUP_APPROVED) {
         let _ = key.remove_value(PRODUCT_NAME);

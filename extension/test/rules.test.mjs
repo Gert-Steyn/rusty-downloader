@@ -8,6 +8,8 @@ import {
 	cookieProbes,
 	extensionOf,
 	hostMatches,
+	isMagnetUrl,
+	isSendableUrl,
 	linksInText,
 	mergeCookies,
 	normalizeSettings,
@@ -117,6 +119,57 @@ test('cookies are read once per site and merged', () => {
 		),
 		['sid@.a.test/', 'p@a.test/x', 'sid@b.test/']
 	);
+});
+
+const MAGNET = 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=tool';
+
+test('magnet links are sendable; other schemes are not', () => {
+	assert.equal(isMagnetUrl(MAGNET), true);
+	assert.equal(isMagnetUrl('MAGNET:?xt=urn:btih:abc'), true, 'scheme is case-insensitive');
+	assert.equal(isMagnetUrl('https://x.test/magnet:?x'), false);
+	assert.equal(isSendableUrl(MAGNET), true);
+	assert.equal(isSendableUrl('https://x.test/a'), true);
+	for (const url of ['ftp://x.test/a.zip', 'file:///etc/passwd', 'javascript:alert(1)', 'mailto:a@b.test', 'blob:https://x.test/1', 'data:text/plain,hi', '', undefined]) {
+		assert.equal(isSendableUrl(url), false, String(url));
+		assert.equal(isMagnetUrl(url), false, String(url));
+	}
+	assert.deepEqual(
+		uniqueWebLinks([MAGNET, 'ftp://x.test/a', 'https://a.test/1', 'javascript:void(0)', MAGNET]),
+		[MAGNET, 'https://a.test/1']
+	);
+	assert.deepEqual(linksInText(`get ${MAGNET}. or https://a.test/x`), [MAGNET, 'https://a.test/x']);
+});
+
+test('magnet links do not break request context (no host)', () => {
+	// Cookies are read per site; a magnet link has no site, so it adds no probe.
+	assert.deepEqual(cookieProbes([MAGNET, 'https://a.test/x/1', MAGNET]), ['https://a.test/x/1']);
+	assert.deepEqual(cookieProbes([MAGNET]), []);
+	assert.equal(extensionOf('', MAGNET), '', 'no file type from a magnet');
+});
+
+test('torrent downloads are always taken over, however small', () => {
+	const s = settings({ minSizeMB: 20, neverSites: ['bank.example'] });
+	assert.equal(shouldIntercept(item({ url: 'https://x.test/tool.torrent', totalBytes: 2000 }), s).take, true, 'by URL');
+	assert.equal(
+		shouldIntercept(item({ url: 'https://x.test/get?id=2', filename: 'C:\\Users\\me\\Downloads\\A.TORRENT', totalBytes: 900 }), s).take,
+		true,
+		'by file name'
+	);
+	assert.equal(
+		shouldIntercept(item({ url: 'https://x.test/get?id=3', mime: 'application/x-bittorrent', totalBytes: 900 }), s).take,
+		true,
+		'by mime type'
+	);
+	assert.equal(shouldIntercept(item({ url: 'https://x.test/tool.torrent' }), settings({ intercept: false })).take, false, 'switched off');
+	assert.equal(shouldIntercept(item({ url: 'https://x.test/tool.torrent', incognito: true }), s).take, false, 'private window');
+	assert.equal(shouldIntercept(item({ url: 'https://dl.bank.example/tool.torrent' }), s).take, false, 'never-site wins');
+});
+
+test('magnet links are on by default and the setting is cleaned', () => {
+	assert.equal(DEFAULT_SETTINGS.magnetLinks, true);
+	assert.equal(normalizeSettings({}).magnetLinks, true);
+	assert.equal(normalizeSettings({ magnetLinks: false }).magnetLinks, false);
+	assert.equal(normalizeSettings({ magnetLinks: 'no' }).magnetLinks, true, 'malformed value: default');
 });
 
 test('extension ids are 32 letters a to p', () => {

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { open as pickFolder } from '@tauri-apps/plugin-dialog';
 	import { commands, isTauri, unwrap, type AppInfo, type Settings, type SpeedRule } from '#lib/api.js';
+	import type { AssociationStatus, Handler } from '#lib/bindings.js';
 	import AccountsSettings from '#lib/components/AccountsSettings.svelte';
 	import KnownHostsSettings from '#lib/components/KnownHostsSettings.svelte';
 	import NetworkSettings from '#lib/components/NetworkSettings.svelte';
@@ -23,9 +24,12 @@
 	let info = $state<AppInfo | null>(null);
 	let infoError = $state<string | null>(null);
 	let flash = $state(false);
+	/** Who opens magnet links and .torrent files now, as Windows has it. */
+	let associations = $state<AssociationStatus | null>(null);
 
 	$effect(() => {
 		void settings.load();
+		void refreshAssociations();
 		if (!isTauri()) {
 			infoError = 'Running in a plain browser, so backend details are unavailable.';
 			return;
@@ -114,6 +118,30 @@
 		const bytes = value ? Math.round(value * MB) : value === undefined ? undefined : null;
 		if (bytes !== undefined && bytes !== s?.uploadLimit) await settings.update({ uploadLimit: bytes });
 		input.value = settings.value?.uploadLimit ? mbps(settings.value.uploadLimit) : '';
+	}
+
+	async function refreshAssociations() {
+		if (isTauri()) associations = await commands.torrentAssociationStatus();
+	}
+
+	/** Saving registers or removes the entries in Windows, so the status is read after it. */
+	async function setHandleTorrents(on: boolean) {
+		await settings.update({ handleTorrents: on });
+		await refreshAssociations();
+	}
+
+	async function chooseDefaultApps() {
+		try {
+			await unwrap(commands.openDefaultApps());
+		} catch (e) {
+			settings.error = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	function handlerLine(what: string, handler: Handler): string {
+		if (handler === 'ours') return `${what} open in Rusty Downloader`;
+		if (handler === 'other') return `${what} open in another app`;
+		return `No app opens ${what.toLowerCase()}`;
 	}
 
 	async function setSwitch(on: boolean) {
@@ -350,6 +378,27 @@
 					<small>Applies to all torrents together.</small>
 				</div>
 			</div>
+			<label class="check">
+				<input
+					type="checkbox"
+					checked={s.handleTorrents}
+					disabled={!isTauri()}
+					onchange={(e) => setHandleTorrents(e.currentTarget.checked)}
+				/>
+				<span>
+					Open magnet links and <code>.torrent</code> files with Rusty Downloader
+					<small>Windows lists the app under Default apps. Turning this off removes that registration.</small>
+				</span>
+			</label>
+			{#if associations}
+				<div class="indent">
+					<p class="muted">{handlerLine('Magnet links', associations.magnet)}</p>
+					<p class="muted">{handlerLine('.torrent files', associations.torrent)}</p>
+					{#if associations.magnet === 'other' || associations.torrent === 'other'}
+						<button type="button" class="btn small" onclick={chooseDefaultApps}>Choose default apps…</button>
+					{/if}
+				</div>
+			{/if}
 		</section>
 
 		<NetworkSettings />

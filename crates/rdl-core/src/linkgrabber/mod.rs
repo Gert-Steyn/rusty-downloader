@@ -93,6 +93,8 @@ pub enum LinkSource {
     Playlist,
     /// Sent by the browser extension.
     Browser,
+    /// Opened with the app from Windows (a magnet link or `.torrent` file on the command line).
+    Shell,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

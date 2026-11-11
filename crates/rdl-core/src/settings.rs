@@ -71,6 +71,9 @@ pub struct Settings {
     pub seed_minutes: Option<u32>,
     /// Upload limit for torrents, bytes per second; `None` is unlimited.
     pub upload_limit: Option<u64>,
+    /// Magnet links and `.torrent` files open in the app: the app registers
+    /// for them with Windows while this is on (see `associations.rs`).
+    pub handle_torrents: bool,
 }
 
 impl Default for Settings {
@@ -97,6 +100,7 @@ impl Default for Settings {
             seed_ratio: Some(1.0),
             seed_minutes: None,
             upload_limit: None,
+            handle_torrents: true,
         }
     }
 }
@@ -270,6 +274,10 @@ mod tests {
         assert_eq!(s.max_active, 2);
         assert!(s.close_to_tray);
         assert!(s.keep_awake, "saves from before 3a keep the computer awake");
+        assert!(
+            s.handle_torrents,
+            "saves from before 5d open torrents in the app"
+        );
     }
 
     #[test]

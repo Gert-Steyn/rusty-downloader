@@ -446,7 +446,8 @@ export function settings(): Settings {
 		killSwitch: true,
 		seedRatio: 1,
 		seedMinutes: null,
-		uploadLimit: null
+		uploadLimit: null,
+		handleTorrents: true
 	};
 }
 

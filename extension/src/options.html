@@ -19,7 +19,7 @@
 		</section>
 		<section>
 			<h2>File types</h2>
-			<p class="muted">Downloads of these types go to Rusty Downloader, whatever their size.</p>
+			<p class="muted">Downloads of these types go to Rusty Downloader, whatever their size. Torrent files always do.</p>
 			<textarea id="extensions" rows="3"></textarea>
 		</section>
 		<section>
@@ -37,6 +37,13 @@
 			<h2>Never take over downloads from</h2>
 			<textarea id="neverSites" rows="3" placeholder="example.com"></textarea>
 			<p class="muted">Subdomains count too. Downloads in private windows always stay in the browser.</p>
+		</section>
+		<section>
+			<label><input type="checkbox" id="magnetLinks" /> Send magnet links to Rusty Downloader</label>
+			<p class="muted">
+				Clicking a magnet link on a page adds it to the LinkGrabber instead of opening the browser’s torrent handler.
+				If the app can’t take it, the browser opens it as usual.
+			</p>
 		</section>
 		<section>
 			<label><input type="checkbox" id="sendCookies" /> Send this browser’s cookies for the links’ sites</label>

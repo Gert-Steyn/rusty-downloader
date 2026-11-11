@@ -82,6 +82,12 @@ export const commands = {
 	systemDownloadsDir: () => typedError<string, CommandError>(__TAURI_INVOKE("system_downloads_dir")),
 	/**  Save and apply settings; returns them as stored (trimmed, checked). */
 	setSettings: (settings: Settings_Deserialize) => typedError<Settings_Serialize, CommandError>(__TAURI_INVOKE("set_settings", { settings })),
+	/**  Who handles magnet links and `.torrent` files now, for Settings. */
+	torrentAssociationStatus: () => __TAURI_INVOKE<AssociationStatus>("torrent_association_status"),
+	/**  Open Windows' Default apps page, where the user can pick this app. */
+	openDefaultApps: () => typedError<null, CommandError>(__TAURI_INVOKE("open_default_apps")),
+	/**  The page to open, if a launch asked for one and the window hasn't taken it yet. */
+	takePendingPage: () => __TAURI_INVOKE<string | null>("take_pending_page"),
 	/**  Newest first, at most `limit`; `search` matches name, link, folder or package. */
 	historyList: (search: string | null, limit: number) => typedError<HistoryEntry_Serialize[], CommandError>(__TAURI_INVOKE("history_list", { search, limit })),
 	/**  Forget entries; the files themselves are left alone. */
@@ -175,6 +181,7 @@ export const events = {
 	grabberEvents: makeEvent<GrabberEvents_Serialize, GrabberEvents_Deserialize>("grabber-events"),
 	networkStatusChanged: makeEvent<NetworkStatusChanged, NetworkStatusChanged>("network-status-changed"),
 	onCompleteCountdown: makeEvent<OnCompleteCountdown_Serialize, OnCompleteCountdown_Deserialize>("on-complete-countdown"),
+	openPage: makeEvent<OpenPage, OpenPage>("open-page"),
 	speedLimitStatus: makeEvent<SpeedLimitStatus_Serialize, SpeedLimitStatus_Deserialize>("speed-limit-status"),
 	toolEvents: makeEvent<ToolEvents_Serialize, ToolEvents_Deserialize>("tool-events"),
 };
@@ -308,6 +315,11 @@ export type AppInfo = {
 	dbFile: string,
 	logsDir: string,
 	schemaVersion: number,
+};
+
+export type AssociationStatus = {
+	magnet: Handler,
+	torrent: Handler,
 };
 
 export type Availability = "unknown" | "checking" | "online" | 
@@ -871,6 +883,15 @@ export type GrabberEvents_Serialize = {
 	resync: boolean,
 };
 
+/**  Who handles a link or file type, as far as the registry says. */
+export type Handler = 
+/**  This copy of the app. */
+"ours" | 
+/**  Another app. */
+"other" | 
+/**  Nothing is registered. */
+"none";
+
 export type HistoryEntry = HistoryEntry_Serialize | HistoryEntry_Deserialize;
 
 export type HistoryEntry_Deserialize = {
@@ -925,7 +946,9 @@ export type LinkSource = "manual" | "clipboard" | "drop" |
 /**  Expanded from a playlist link already in the LinkGrabber. */
 "playlist" | 
 /**  Sent by the browser extension. */
-"browser";
+"browser" | 
+/**  Opened with the app from Windows (a magnet link or `.torrent` file on the command line). */
+"shell";
 
 /**  What the LinkGrabber shows about a video. */
 export type MediaSummary = MediaSummary_Serialize | MediaSummary_Deserialize;
@@ -989,6 +1012,11 @@ export type OnCompleteCountdown_Deserialize = {
 /**  A countdown started (`pending` set) or ended (`None`: done or cancelled). */
 export type OnCompleteCountdown_Serialize = {
 	pending: PendingAction | null,
+};
+
+/**  Tells the UI which page to show after a launch. */
+export type OpenPage = {
+	path: string,
 };
 
 export type Package = Package_Serialize | Package_Deserialize;
@@ -1267,6 +1295,11 @@ export type Settings_Deserialize = {
 	seedMinutes?: number | null,
 	/**  Upload limit for torrents, bytes per second; `None` is unlimited. */
 	uploadLimit?: number | null,
+	/**
+	 *  Magnet links and `.torrent` files open in the app: the app registers
+	 *  for them with Windows while this is on (see `associations.rs`).
+	 */
+	handleTorrents?: boolean,
 };
 
 /**  The user's preferences. Missing fields (older saves) get their defaults. */
@@ -1324,6 +1357,11 @@ export type Settings_Serialize = {
 	seedMinutes: number | null,
 	/**  Upload limit for torrents, bytes per second; `None` is unlimited. */
 	uploadLimit: number | null,
+	/**
+	 *  Magnet links and `.torrent` files open in the app: the app registers
+	 *  for them with Windows while this is on (see `associations.rs`).
+	 */
+	handleTorrents: boolean,
 };
 
 /**  What limits the speed now changed. */

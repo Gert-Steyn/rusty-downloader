@@ -5,7 +5,9 @@
 //! in the background), or for a download the browser was about to save,
 //! straight into the queue. Either way the referer, user agent and cookies
 //! travel with the links. Everything in a message is checked again here:
-//! links must be http(s), and the request context is cleaned by `rdl-core`.
+//! links must be http(s) or `magnet:`, and the request context is cleaned by
+//! `rdl-core`. Magnet links always go to the LinkGrabber, even when the
+//! browser asked for the queue: their file lists are read there first.
 
 use std::sync::Arc;
 
@@ -15,8 +17,8 @@ use rdl_core::linkgrabber::{LinkSource, default_package_name};
 use rdl_core::manager::{DEFAULT_QUEUE, NewDownload, NewPackage, Package, Status};
 use rdl_core::request::{Cookie, RequestContext};
 use tauri::{AppHandle, Manager};
+use url::Url;
 
-use crate::commands::parse_links;
 use crate::state::AppState;
 
 /// Serve the pipe until the app exits. If the name is taken (by another
@@ -77,71 +79,105 @@ impl AppHandler {
 
     async fn add(&self, add: AddRequest) -> Result<Reply, String> {
         let state = self.app.state::<AppState>();
-        let (urls, rejected) = parse_links(&add.links);
-        if urls.is_empty() {
-            return Err("None of the links are http or https links.".into());
+        let split = split_links(&add.links);
+        if split.web.is_empty() && split.magnets.is_empty() {
+            return Err("None of the links are http, https or magnet links.".into());
         }
         let request = request_context(&add);
-        let count = urls.len();
         tracing::info!(
-            links = count,
+            links = split.web.len() + split.magnets.len(),
+            magnets = split.magnets.len(),
             target = ?add.target,
             cookies = request.cookies.len(),
             "links from the browser"
         );
-        match add.target {
-            Target::Grabber => {
-                let outcome = state
-                    .grabber
-                    .add_with_request(urls, LinkSource::Browser, request)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                crate::notify::links_added(&self.app, outcome.added.len());
-                Ok(Reply::Added {
-                    target: Target::Grabber,
-                    added: outcome.added.len() as u32,
-                    duplicates: outcome.duplicates as u32,
-                    rejected,
+        // Magnets always go to the LinkGrabber; a queue target gets only the web links.
+        let (to_grabber, to_queue) = match add.target {
+            Target::Grabber => (
+                split.web.into_iter().chain(split.magnets).collect(),
+                Vec::new(),
+            ),
+            Target::Queue => (split.magnets, split.web),
+        };
+
+        let mut added = 0;
+        let mut duplicates = 0;
+        if !to_grabber.is_empty() {
+            let outcome = state
+                .grabber
+                .add_with_request(to_grabber, LinkSource::Browser, request.clone())
+                .await
+                .map_err(|e| e.to_string())?;
+            crate::notify::links_added(&self.app, outcome.added.len());
+            added += outcome.added.len() as u32;
+            duplicates += outcome.duplicates as u32;
+        }
+
+        // The reply says Queue only when something went there.
+        let target = if to_queue.is_empty() {
+            Target::Grabber
+        } else {
+            let count = to_queue.len();
+            let dest_dir = state.download_dir(&self.app)?;
+            let name = add
+                .package
+                .as_deref()
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| default_package_name(&to_queue));
+            // The browser's file name only makes sense for a single link.
+            let filename = add.filename.clone().filter(|_| count == 1);
+            let downloads = to_queue
+                .into_iter()
+                .map(|url| NewDownload {
+                    filename: filename.clone(),
+                    request: request.clone(),
+                    ..NewDownload::new(url)
                 })
-            }
-            Target::Queue => {
-                let dest_dir = state.download_dir(&self.app)?;
-                let name = add
-                    .package
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|n| !n.is_empty())
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| default_package_name(&urls));
-                // The browser's file name only makes sense for a single link.
-                let filename = add.filename.clone().filter(|_| count == 1);
-                let downloads = urls
-                    .into_iter()
-                    .map(|url| NewDownload {
-                        filename: filename.clone(),
-                        request: request.clone(),
-                        ..NewDownload::new(url)
-                    })
-                    .collect();
-                state
-                    .downloads
-                    .add_package(NewPackage {
-                        name,
-                        dest_dir,
-                        queue_id: DEFAULT_QUEUE,
-                        downloads,
-                    })
-                    .await
-                    .map_err(|e| e.to_string())?;
-                Ok(Reply::Added {
-                    target: Target::Queue,
-                    added: count as u32,
-                    duplicates: 0,
-                    rejected,
+                .collect();
+            state
+                .downloads
+                .add_package(NewPackage {
+                    name,
+                    dest_dir,
+                    queue_id: DEFAULT_QUEUE,
+                    downloads,
                 })
-            }
+                .await
+                .map_err(|e| e.to_string())?;
+            added += count as u32;
+            Target::Queue
+        };
+        Ok(Reply::Added {
+            target,
+            added,
+            duplicates,
+            rejected: split.rejected,
+        })
+    }
+}
+
+/// The links of an `add`, sorted by scheme.
+#[derive(Debug, Default, PartialEq)]
+struct Split {
+    web: Vec<Url>,
+    magnets: Vec<Url>,
+    rejected: Vec<String>,
+}
+
+/// Trims each link and sorts it: http(s), `magnet:`, or rejected. Blank
+/// entries are dropped.
+fn split_links(inputs: &[String]) -> Split {
+    let mut split = Split::default();
+    for input in inputs.iter().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        match Url::parse(input) {
+            Ok(url) if url.scheme() == "magnet" => split.magnets.push(url),
+            Ok(url) if matches!(url.scheme(), "http" | "https") => split.web.push(url),
+            _ => split.rejected.push(input.to_owned()),
         }
     }
+    split
 }
 
 /// What the browser sent along with the links, cleaned.
@@ -186,6 +222,29 @@ mod tests {
     use rdl_bridge::BrowserCookie;
 
     use super::*;
+
+    #[test]
+    fn links_are_web_or_magnet_and_the_rest_is_rejected() {
+        let magnet = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567";
+        let split = split_links(&[
+            " https://example.com/a.zip ".to_owned(),
+            "".to_owned(),
+            magnet.to_owned(),
+            "ftp://example.com/b".to_owned(),
+            "not a url".to_owned(),
+            "http://example.com/c".to_owned(),
+            "mailto:me@example.com".to_owned(),
+        ]);
+        assert_eq!(
+            split.web.iter().map(Url::as_str).collect::<Vec<_>>(),
+            ["https://example.com/a.zip", "http://example.com/c"]
+        );
+        assert_eq!(split.magnets, [Url::parse(magnet).unwrap()]);
+        assert_eq!(
+            split.rejected,
+            ["ftp://example.com/b", "not a url", "mailto:me@example.com"]
+        );
+    }
 
     #[test]
     fn browser_cookies_become_request_cookies() {

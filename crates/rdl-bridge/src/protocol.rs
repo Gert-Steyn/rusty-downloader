@@ -57,7 +57,7 @@ pub enum Target {
     #[default]
     Grabber,
     /// Straight into the download queue (a download the browser was about
-    /// to save itself).
+    /// to save itself). Magnet links still go to the LinkGrabber.
     Queue,
 }
 
@@ -146,7 +146,7 @@ pub enum Reply {
         added: u32,
         /// Already in the LinkGrabber.
         duplicates: u32,
-        /// Not http(s) links.
+        /// Not http, https or magnet links.
         rejected: Vec<String>,
     },
     Error {

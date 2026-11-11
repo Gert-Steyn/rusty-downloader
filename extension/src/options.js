@@ -8,6 +8,7 @@ async function load() {
 	const s = normalizeSettings(await chrome.storage.sync.get(null));
 	$('intercept').checked = s.intercept;
 	$('sendCookies').checked = s.sendCookies;
+	$('magnetLinks').checked = s.magnetLinks;
 	$('minSizeMB').value = s.minSizeMB;
 	for (const key of LISTS) $(key).value = s[key].join('\n');
 	// Firefox asks for site access separately from installing.
@@ -18,6 +19,7 @@ async function save() {
 	const stored = {
 		intercept: $('intercept').checked,
 		sendCookies: $('sendCookies').checked,
+		magnetLinks: $('magnetLinks').checked,
 		minSizeMB: Number($('minSizeMB').value) || 0
 	};
 	for (const key of LISTS) stored[key] = parseList($(key).value, key === 'extensions');
@@ -26,7 +28,7 @@ async function save() {
 	setTimeout(() => ($('saved').textContent = ''), 1500);
 }
 
-for (const id of ['intercept', 'sendCookies', 'minSizeMB', ...LISTS]) {
+for (const id of ['intercept', 'sendCookies', 'magnetLinks', 'minSizeMB', ...LISTS]) {
 	$(id).addEventListener('change', save);
 }
 $('grant').addEventListener('click', async () => {
